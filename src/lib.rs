@@ -1,4 +1,5 @@
 pub mod asauchi;
+pub mod astrology;
 pub mod bankai;
 pub mod chart;
 pub mod descent;
@@ -22,6 +23,10 @@ pub mod cli;
 
 pub mod prelude {
     pub use crate::asauchi::{compute_aspect, is_adjacent, is_conjunction, validate_graha_index};
+    pub use crate::astrology::{
+        AtomClassification, ChangeSorter, Element, Graha, Guna, House, Modality, Nakshatra,
+        PlanetaryRuler, Rashi, Sign, SignAspect, VedicClassification, VedicElement,
+    };
     pub use crate::bankai::{aggregate_confidence_scores, compute_confidence_score};
     pub use crate::chart::{compute_planetary_aspect, determine_planet_house};
     pub use crate::descent::{lowercase_string, tokenize_descent};

@@ -174,6 +174,71 @@ impl Domain {
         }
     }
 
+    /// Lowercased name — no allocation.
+    pub fn name_lower(self) -> &'static str {
+        match self {
+            Domain::Surya => "surya",
+            Domain::Chandra => "chandra",
+            Domain::Mangala => "mangala",
+            Domain::Budha => "budha",
+            Domain::Brihaspati => "brihaspati",
+            Domain::Shukra => "shukra",
+            Domain::Shani => "shani",
+            Domain::Rahu => "rahu",
+            Domain::Ketu => "ketu",
+        }
+    }
+
+    /// Western/English name for this graha.
+    pub fn english_name(self) -> &'static str {
+        match self {
+            Domain::Surya => "sun",
+            Domain::Chandra => "moon",
+            Domain::Mangala => "mars",
+            Domain::Budha => "mercury",
+            Domain::Brihaspati => "jupiter",
+            Domain::Shukra => "venus",
+            Domain::Shani => "saturn",
+            Domain::Rahu => "rahu",
+            Domain::Ketu => "ketu",
+        }
+    }
+
+    /// Sanskrit name.
+    pub fn sanskrit(self) -> &'static str {
+        match self {
+            Domain::Surya => "सूर्य",
+            Domain::Chandra => "चन्द्र",
+            Domain::Mangala => "मङ्गल",
+            Domain::Budha => "बुध",
+            Domain::Brihaspati => "बृहस्पति",
+            Domain::Shukra => "शुक्र",
+            Domain::Shani => "शनि",
+            Domain::Rahu => "राहु",
+            Domain::Ketu => "केतु",
+        }
+    }
+
+    /// Element affinity (Vedic tattva name as string).
+    pub fn element_affinity(self) -> &'static str {
+        match self {
+            Domain::Surya => "Fire",
+            Domain::Chandra => "Water",
+            Domain::Mangala => "Fire",
+            Domain::Budha => "Earth",
+            Domain::Brihaspati => "Ether",
+            Domain::Shukra => "Water",
+            Domain::Shani => "Air",
+            Domain::Rahu => "Air",
+            Domain::Ketu => "Ether",
+        }
+    }
+
+    /// All 9 domains in wheel order.
+    pub fn all() -> [Self; 9] {
+        ALL_DOMAINS
+    }
+
     /// Parse a domain from a string (name, symbol, or alias).
     pub fn parse(s: &str) -> Option<Self> {
         let lower = s.to_ascii_lowercase();
