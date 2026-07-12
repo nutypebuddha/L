@@ -12,6 +12,7 @@ pub mod primitive;
 pub mod shikai;
 pub mod tanto;
 pub mod validation;
+pub mod wheel;
 pub mod zanpakuto;
 
 #[cfg(feature = "mcp")]
@@ -37,6 +38,9 @@ pub mod prelude {
     pub use crate::shikai::{extract_numerical_values, parse_query_intent};
     pub use crate::tanto::{
         compute_formula, create_env, evaluate_expr, evaluate_nl, evaluate_pipeline, solve_problem,
+    };
+    pub use crate::wheel::{
+        CompositionAspect, Domain, UnderstandingAxis, WheelError, WheelGraph, ALL_DOMAINS,
     };
     pub use crate::zanpakuto::{extract_keywords, normalize_query_text};
 }
