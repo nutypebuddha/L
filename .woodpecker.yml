@@ -1,0 +1,34 @@
+# Laverna — Woodpecker CI (Codeberg)
+
+pipeline:
+  check:
+    image: rustlang/rust:latest
+    commands:
+      - rustup component add rustfmt clippy
+      - cargo fmt -- --check
+      - cargo clippy -- -D warnings
+      - cargo clippy --features llm -- -D warnings
+      - cargo deny check
+      - cargo test
+      - cargo test --features llm --lib
+
+  audit:
+    image: rustlang/rust:latest
+    commands:
+      - cargo install cargo-audit
+      - cargo audit
+
+  cross:
+    image: rustlang/rust:latest
+    commands:
+      - rustup target add x86_64-unknown-linux-musl
+      - cargo build --release --target x86_64-unknown-linux-musl --no-default-features
+      - file target/x86_64-unknown-linux-musl/release/laverna
+      - "! readelf -d target/x86_64-unknown-linux-musl/release/laverna 2>/dev/null | grep -q NEEDED"
+
+  portable:
+    image: rustlang/rust:latest
+    commands:
+      - cargo build --release --no-default-features --features portable
+      - ./target/release/laverna ping
+      - ./target/release/laverna info

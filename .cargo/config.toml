@@ -1,0 +1,13 @@
+# Laverna cargo configuration
+# CARGO_BUILD_JOBS is NOT hardcoded — set per-invocation or via env.
+
+[build]
+rustflags = []
+
+[target.aarch64-unknown-linux-gnu]
+linker = "gcc"
+rustflags = ["-C", "codegen-units=16"]
+
+[target.x86_64-unknown-linux-gnu]
+linker = "x86_64-linux-gnu-gcc"
+rustflags = []

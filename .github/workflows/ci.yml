@@ -1,0 +1,113 @@
+# Laverna — CI Quality Gate
+# Runs on every push/PR: fmt, clippy, deny, test
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  check:
+    name: Check (fmt, clippy, deny, test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo-deny DB
+        uses: actions/cache@v4
+        continue-on-error: true
+        with:
+          path: ~/.cargo/advisory-dbs
+          key: cargo-deny-${{ hashFiles('deny.toml') }}
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Check clippy (default features)
+        run: cargo clippy -- -D warnings
+
+      - name: Check clippy (with llm)
+        run: cargo clippy --features llm -- -D warnings
+
+      - name: Check licenses, bans, advisories
+        run: cargo deny check
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Run tests (with llm)
+        run: cargo test --features llm --lib
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: Audit dependencies
+        run: cargo audit
+
+  cross-check:
+    name: Cross-Compile Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+      - uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            target/${{ matrix.target }}/release/.fingerprint
+            target/${{ matrix.target }}/release/build
+            target/${{ matrix.target }}/release/deps
+          key: cross-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build (slim: no default features)
+        run: cargo build --release --target ${{ matrix.target }} --no-default-features
+      - name: Verify static link
+        run: |
+          bin=target/${{ matrix.target }}/release/laverna
+          file "$bin"
+          if readelf -d "$bin" | grep -q NEEDED; then
+            echo "::error::$bin is dynamically linked"; exit 1
+          fi
+
+  portable-check:
+    name: Portable Feature Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Build with portable feature
+        run: cargo build --release --no-default-features --features portable
+      - name: Test portable binary
+        run: |
+          bin=target/release/laverna
+          "$bin" ping
+          "$bin" info
