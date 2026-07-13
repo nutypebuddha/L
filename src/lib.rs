@@ -34,7 +34,10 @@ pub mod prelude {
         verify_expression, verify_proposal, LlmProposal, ProposalKind,
     };
     pub use crate::bankai::{aggregate_confidence_scores, compute_confidence_score};
-    pub use crate::chart::{compute_planetary_aspect, determine_planet_house, ChartSnapshot};
+    pub use crate::chart::{
+        derive_personality, AspectModifier, AstroAspect, ChartSnapshot, PersonalityProfile, Pillar,
+        SynastryAspect, WatchArchetype,
+    };
     pub use crate::descent::{
         lowercase_string, tokenize_descent, DescentEngine, DescentLayer, SettledToken,
         SettlingMatrix,
@@ -47,12 +50,16 @@ pub mod prelude {
         compute_entity_hash, validate_entity_id, DynamicEntity, Entity, EntityRegistry,
         EventRegistry, ShikaiFormRegistry,
     };
-    pub use crate::ephemeris::{compute_vsop87_approximation, julian_day_to_date, GrahaPosition};
+    pub use crate::ephemeris::{
+        julian_day, julian_day_to_date, lahiri_ayanamsa, tropical_longitude, GrahaPosition,
+    };
     pub use crate::formula::{
         extract_formula_domain, validate_formula_id, Formula, FormulaRegistry, FormulaType,
     };
     pub use crate::gyro::{compute_next_position, map_graha_to_position};
     pub use crate::primitive::arithmetic::{add_unsigned_8, full_adder, half_adder};
+    pub use crate::primitive::dag::NandDag;
+    pub use crate::primitive::expr::{NandExprError, NandExpression};
     pub use crate::primitive::nand::{and_gate, nand_gate, not_gate, or_gate, xor_gate};
     pub use crate::shikai::{extract_numerical_values, parse_query_intent};
     pub use crate::tanto::{
