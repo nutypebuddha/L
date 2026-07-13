@@ -17,7 +17,11 @@ pub struct DescentHint {
 pub struct SandwichCopilot;
 
 impl SandwichCopilot {
-    pub fn descend_token(&self, _token: &str, _context: Option<&str>) -> Result<DescentHint, String> {
+    pub fn descend_token(
+        &self,
+        _token: &str,
+        _context: Option<&str>,
+    ) -> Result<DescentHint, String> {
         Ok(DescentHint::default())
     }
 }

@@ -59,7 +59,7 @@ pub mod prelude {
     pub use crate::formula::{
         extract_formula_domain, validate_formula_id, Formula, FormulaRegistry, FormulaType,
     };
-    pub use crate::gyro::{compute_next_position, map_graha_to_position};
+    pub use crate::gyro::{GyroDynamics, GyroRouter, GyroState, RouteResult};
     pub use crate::primitive::arithmetic::{add_unsigned_8, full_adder, half_adder};
     pub use crate::primitive::dag::NandDag;
     pub use crate::primitive::expr::{NandExprError, NandExpression};
