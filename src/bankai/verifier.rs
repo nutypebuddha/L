@@ -262,9 +262,9 @@ fn verify_arithmetic(input: &str, context: &str, report: &mut DiagnosticReport) 
             .chars()
             .all(|c| c.is_alphanumeric() || c.is_whitespace() || c == '_')
         {
-            // If it looks like a math expression but Tanto can't parse it, warn.
+            // If it looks like a math expression but Tanto can't parse it, fail.
             report.push(
-                Diagnostic::warning(
+                Diagnostic::error(
                     DiagnosticGate::Math,
                     "Expression could not be evaluated by Tanto parser",
                 )

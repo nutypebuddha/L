@@ -433,14 +433,17 @@ impl EntityRegistry {
     /// per-seed search blob, so no per-seed allocation happens per call.
     pub fn search_seeds_ref(&self, keyword: &str) -> Vec<&SeedEntity> {
         let kw = keyword.to_lowercase();
-        self.seeds
+        let mut results: Vec<&SeedEntity> = self
+            .seeds
             .values()
             .filter(|s| {
                 self.seed_search_cache
                     .get(&s.id)
                     .is_some_and(|blob| blob.contains(&kw))
             })
-            .collect()
+            .collect();
+        results.sort_by(|a, b| a.id.cmp(&b.id));
+        results
     }
 
     /// List all seed IDs (sorted).

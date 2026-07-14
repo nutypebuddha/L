@@ -157,6 +157,14 @@ enum Commands {
 }
 
 fn main() {
+    // T42: Rust sets SIGPIPE to SIG_IGN by default, causing SIGABRT on broken
+    // pipes (e.g. `laverna entities | head -1`). Reset to SIG_DFL so the
+    // kernel kills the process silently, like any POSIX CLI tool.
+    #[cfg(unix)]
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
+
     let cli = Cli::parse();
 
     match cli.command {

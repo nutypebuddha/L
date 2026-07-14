@@ -24,6 +24,14 @@ fn check_equation_correctness(token: &str) -> (bool, f64) {
             _ => return (false, 0.1),
         }
     }
+    // T44: Standalone expression with operators — verify Tanto can parse it.
+    if eval_tanto(token).is_none()
+        && token
+            .bytes()
+            .any(|c| matches!(c, b'+' | b'-' | b'*' | b'/' | b'^'))
+    {
+        return (false, 0.1);
+    }
     (true, 0.7)
 }
 
@@ -51,6 +59,13 @@ fn check_operator_validity(token: &str) -> (bool, f64) {
     }
     if eval_tanto(token).is_some() {
         return (true, 0.95);
+    }
+    // T44: Tanto could not parse it — if it contains operators, it's malformed.
+    let has_operators = token
+        .bytes()
+        .any(|c| matches!(c, b'+' | b'-' | b'*' | b'/' | b'^'));
+    if has_operators {
+        return (false, 0.15);
     }
     let first = token.as_bytes()[0];
     let valid_start = matches!(
