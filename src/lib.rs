@@ -37,6 +37,7 @@ pub mod optimize;
 pub mod inference;
 
 pub mod cli;
+pub mod companion;
 
 pub mod prelude {
     pub use crate::asauchi::{compute_aspect, is_adjacent, is_conjunction, validate_graha_index};
