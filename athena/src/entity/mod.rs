@@ -530,7 +530,11 @@ impl EntityRegistry {
     }
 
     /// Load seed entities from a TOML string (for embedded corpus).
-    pub fn load_seeds_from_str(&mut self, toml_str: &str, source: Option<&str>) -> Result<(), String> {
+    pub fn load_seeds_from_str(
+        &mut self,
+        toml_str: &str,
+        source: Option<&str>,
+    ) -> Result<(), String> {
         #[derive(Deserialize)]
         struct EntityFile {
             entity: Option<Vec<SeedEntity>>,

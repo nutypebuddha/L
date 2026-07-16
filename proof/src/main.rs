@@ -18,6 +18,7 @@ use std::collections::HashMap;
 
 // Athena type aliases (prefixed to avoid shadowing laverna::prelude types)
 use athena::asauchi::Asauchi as AthenaAsauchi;
+use athena::astrology::Aspect as AthenaAspect;
 use athena::bankai::Bankai as AthenaBankai;
 use athena::descent::DescentEngine as AthenaDescentEngine;
 use athena::entity::EntityRegistry as AthenaEntityRegistry;
@@ -28,7 +29,6 @@ use athena::wheel::Domain as AthenaDomain;
 use athena::wheel::WheelGraph as AthenaWheelGraph;
 use athena::zanpakuto::nlp::NlpEngine as AthenaNlpEngine;
 use athena::zanpakuto::{AccessTier as AthenaAccessTier, Zanpakuto as AthenaZanpakuto};
-use athena::astrology::Aspect as AthenaAspect;
 
 /// Beyond this many whitespace-delimited tokens a query is refused as
 /// `TooComplex`: the deterministic kernel settles a bounded token window (the
@@ -1036,13 +1036,21 @@ fn main() {
             } => {
                 cmd_gate_validate(&text, &context, domain.as_deref(), format);
             }
-            GateAction::Fix { text, context, format } => {
+            GateAction::Fix {
+                text,
+                context,
+                format,
+            } => {
                 cmd_gate_fix(&text, &context, format);
             }
             GateAction::Compress { text, level } => {
                 cmd_gate_compress(&text, level.as_deref());
             }
-            GateAction::Score { text, context, format } => {
+            GateAction::Score {
+                text,
+                context,
+                format,
+            } => {
                 cmd_gate_score(&text, context.as_deref(), format);
             }
             GateAction::Mcp => {
@@ -1108,19 +1116,35 @@ fn main() {
             AthenaAction::Shikai { query, format } => {
                 cmd_athena_shikai(&query, format);
             }
-            AthenaAction::Solve { query, identity, format } => {
+            AthenaAction::Solve {
+                query,
+                identity,
+                format,
+            } => {
                 cmd_athena_solve(&query, &identity, format);
             }
-            AthenaAction::Eval { formula, args, format } => {
+            AthenaAction::Eval {
+                formula,
+                args,
+                format,
+            } => {
                 cmd_athena_eval(&formula, &args, format);
             }
-            AthenaAction::Chain { formulas, args, format } => {
+            AthenaAction::Chain {
+                formulas,
+                args,
+                format,
+            } => {
                 cmd_athena_chain(&formulas, &args, format);
             }
             AthenaAction::Compose { formulas, format } => {
                 cmd_athena_compose(&formulas, format);
             }
-            AthenaAction::Traverse { domain, depth, format } => {
+            AthenaAction::Traverse {
+                domain,
+                depth,
+                format,
+            } => {
                 cmd_athena_traverse(&domain, depth, format);
             }
             AthenaAction::Wheel { domain, format } => {
@@ -1150,16 +1174,14 @@ fn main() {
                 format,
             } => {
                 cmd_athena_entity_reason(
-                    &entity,
-                    &want,
-                    max_depth,
-                    execute,
-                    neutral,
-                    &args,
-                    format,
+                    &entity, &want, max_depth, execute, neutral, &args, format,
                 );
             }
-            AthenaAction::Pipeline { query, identity, format } => {
+            AthenaAction::Pipeline {
+                query,
+                identity,
+                format,
+            } => {
                 cmd_athena_pipeline(&query, &identity, format);
             }
             #[cfg(feature = "mcp")]
@@ -5029,11 +5051,13 @@ fn cmd_gate_fix(text: &str, context: &str, format: OutputFormat) {
     if format == OutputFormat::Json {
         let fix_objs: Vec<serde_json::Value> = fixes
             .iter()
-            .map(|f| serde_json::json!({
-                "original": f.original,
-                "fixed": f.fixed,
-                "reason": f.reason,
-            }))
+            .map(|f| {
+                serde_json::json!({
+                    "original": f.original,
+                    "fixed": f.fixed,
+                    "reason": f.reason,
+                })
+            })
             .collect();
         let value = serde_json::json!({
             "original": text,
@@ -5080,12 +5104,14 @@ fn cmd_gate_score(text: &str, context: Option<&str>, format: OutputFormat) {
         let issue_objs: Vec<serde_json::Value> = report
             .issues
             .iter()
-            .map(|issue| serde_json::json!({
-                "category": format!("{:?}", issue.category),
-                "description": issue.description,
-                "severity": format!("{:?}", issue.severity),
-                "confidence": issue.confidence,
-            }))
+            .map(|issue| {
+                serde_json::json!({
+                    "category": format!("{:?}", issue.category),
+                    "description": issue.description,
+                    "severity": format!("{:?}", issue.severity),
+                    "confidence": issue.confidence,
+                })
+            })
             .collect();
         let value = serde_json::json!({
             "overall_score": report.overall_score,
@@ -5533,10 +5559,7 @@ fn cmd_athena_shikai(query: &str, format: OutputFormat) {
                 println!(
                     "  Intent:    {:?} (score: {:.2})",
                     nlp_ctx.likely_intent,
-                    nlp_ctx
-                        .intent_scores
-                        .first()
-                        .map_or(0.0, |(_, s)| *s)
+                    nlp_ctx.intent_scores.first().map_or(0.0, |(_, s)| *s)
                 );
                 if let Some(d) = nlp_ctx.likely_domain {
                     println!("  Domain:    {} ({})", d.symbol(), d.full_name());
@@ -5586,13 +5609,7 @@ fn cmd_athena_solve(query: &str, identity: &str, format: OutputFormat) {
     bankai.gyro.gyro_state_mut().apply_matrix(&matrix);
     bankai.gyro.gyro_state_mut().update(0.1);
 
-    match shikai.process_with_context(
-        query,
-        id,
-        Some(&nlp_ctx),
-        Some(&matrix),
-        Some(&gyro_state),
-    ) {
+    match shikai.process_with_context(query, id, Some(&nlp_ctx), Some(&matrix), Some(&gyro_state)) {
         Ok(shikai_query) => {
             let solve = bankai.solve(&shikai_query, id);
             if format == OutputFormat::Json {
@@ -5856,7 +5873,10 @@ fn cmd_athena_wheel(domain: Option<&str>, format: OutputFormat) {
         for node in wheel.all_nodes() {
             println!(
                 "  {} {:12} {:30} ↕ {}",
-                node.symbol, node.name, node.description, node.opposite.full_name()
+                node.symbol,
+                node.name,
+                node.description,
+                node.opposite.full_name()
             );
         }
     }
@@ -5987,11 +6007,7 @@ fn cmd_athena_reason(
                 );
             } else {
                 println!("=== Reason: {} → {} ===", have, want);
-                println!(
-                    "Found path ({} step(s)): {}",
-                    path.len(),
-                    path.join(" → ")
-                );
+                println!("Found path ({} step(s)): {}", path.len(), path.join(" → "));
                 println!("\nFormula chain:");
                 for (i, fid) in path.iter().enumerate() {
                     if let Some(f) = formula_reg.get(fid) {
@@ -6026,9 +6042,7 @@ fn cmd_athena_reason(
                         Err(e) => eprintln!("Chain execution failed: {e}"),
                     }
                 } else {
-                    println!(
-                        "\nTip: re-run with --execute and --args key=value to run the chain."
-                    );
+                    println!("\nTip: re-run with --execute and --args key=value to run the chain.");
                 }
             }
         }
@@ -6114,8 +6128,11 @@ fn cmd_athena_entity_reason(
                         })
                     })
                     .collect();
-                let mut args_map: HashMap<String, f64> =
-                    seed.properties.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                let mut args_map: HashMap<String, f64> = seed
+                    .properties
+                    .iter()
+                    .map(|(k, v)| (k.clone(), *v))
+                    .collect();
                 for arg in args {
                     if let Ok(kv) = parse_key_val(arg) {
                         args_map.insert(kv.key, kv.value);
@@ -6147,11 +6164,7 @@ fn cmd_athena_entity_reason(
                     have_vars.len(),
                     have_vars.join(", ")
                 );
-                println!(
-                    "Found path ({} step(s)): {}",
-                    path.len(),
-                    path.join(" → ")
-                );
+                println!("Found path ({} step(s)): {}", path.len(), path.join(" → "));
                 println!("\nFormula chain:");
                 for (i, fid) in path.iter().enumerate() {
                     if let Some(f) = formula_reg.get(fid) {
@@ -6174,8 +6187,11 @@ fn cmd_athena_entity_reason(
                 }
                 if execute {
                     println!("\nExecuting chain with entity properties...");
-                    let mut args_map: HashMap<String, f64> =
-                        seed.properties.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                    let mut args_map: HashMap<String, f64> = seed
+                        .properties
+                        .iter()
+                        .map(|(k, v)| (k.clone(), *v))
+                        .collect();
                     for arg in args {
                         if let Ok(kv) = parse_key_val(arg) {
                             args_map.insert(kv.key, kv.value);
@@ -6462,9 +6478,7 @@ fn cmd_athena_entity_aspect(from: &str, to: &str, format: OutputFormat) {
             }
         }
         None => {
-            eprintln!(
-                "Cannot compute aspect: one or both entities not found ('{from}', '{to}')"
-            );
+            eprintln!("Cannot compute aspect: one or both entities not found ('{from}', '{to}')");
             std::process::exit(1);
         }
     }
@@ -6492,7 +6506,10 @@ fn cmd_athena_entity_search(keyword: &str, format: OutputFormat) {
         let runtime: Vec<_> = runtime_results
             .iter()
             .map(|e| {
-                let sign_str = e.dominant_sign().map(|s| format!("{:?}", s)).unwrap_or_default();
+                let sign_str = e
+                    .dominant_sign()
+                    .map(|s| format!("{:?}", s))
+                    .unwrap_or_default();
                 serde_json::json!({
                     "id": e.id, "sign": sign_str, "text": e.text, "source": "runtime"
                 })
@@ -6524,17 +6541,14 @@ fn cmd_athena_entity_search(keyword: &str, format: OutputFormat) {
                 .and_then(|c| c.dominant_sign())
                 .map(|sign| format!("{:?}", sign))
                 .unwrap_or_default();
-            println!(
-                "  {:30} | {:12} | {} [seed]",
-                s.id, sign_str, s.description,
-            );
+            println!("  {:30} | {:12} | {} [seed]", s.id, sign_str, s.description,);
         }
         for e in &runtime_results {
-            let sign_str = e.dominant_sign().map(|s| format!("{:?}", s)).unwrap_or_default();
-            println!(
-                "  {:30} | {:12} | {} [runtime]",
-                e.id, sign_str, e.text,
-            );
+            let sign_str = e
+                .dominant_sign()
+                .map(|s| format!("{:?}", s))
+                .unwrap_or_default();
+            println!("  {:30} | {:12} | {} [runtime]", e.id, sign_str, e.text,);
         }
     }
 }
@@ -6897,12 +6911,7 @@ fn cmd_athena_ephemeris(date: &str, time: &str, format: OutputFormat) {
         std::process::exit(1);
     }
     let hour = tparts[0] + tparts.get(1).copied().unwrap_or(0.0) / 60.0;
-    let jd = athena::ephemeris::julian_day(
-        parts[0] as i16,
-        parts[1] as u8,
-        parts[2] as u8,
-        hour,
-    );
+    let jd = athena::ephemeris::julian_day(parts[0] as i16, parts[1] as u8, parts[2] as u8, hour);
     let ayanamsa = athena::ephemeris::lahiri_ayanamsa(jd);
     let positions = athena::ephemeris::all_graha_positions(jd);
 
@@ -7112,9 +7121,7 @@ fn cmd_athena_budget() {
     println!("{:?}", stats);
     let spends = budget.spends();
     if spends.is_empty() {
-        println!(
-            "\nNo token spends recorded yet. LLM calls are tracked here automatically."
-        );
+        println!("\nNo token spends recorded yet. LLM calls are tracked here automatically.");
     } else {
         println!("\nRecent token spends:");
         for s in spends.iter().rev().take(10) {
@@ -7138,10 +7145,7 @@ fn cmd_athena_budget() {
         let mut domains: Vec<_> = by_domain.into_iter().collect();
         domains.sort_by_key(|d| std::cmp::Reverse(d.1 .1));
         for (domain, (count, tokens)) in &domains {
-            println!(
-                "  {:12} | {:3} spends | {:6} tokens",
-                domain, count, tokens
-            );
+            println!("  {:12} | {:3} spends | {:6} tokens", domain, count, tokens);
         }
     }
 }

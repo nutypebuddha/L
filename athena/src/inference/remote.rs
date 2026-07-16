@@ -79,9 +79,8 @@ impl RemoteBackend {
             stream: false,
         };
 
-        let body_json = serde_json::to_string(&body).map_err(|e| {
-            InferenceError::InferenceFailed(format!("serialization error: {}", e))
-        })?;
+        let body_json = serde_json::to_string(&body)
+            .map_err(|e| InferenceError::InferenceFailed(format!("serialization error: {}", e)))?;
 
         let mut req = self
             .client
