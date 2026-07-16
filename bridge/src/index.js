@@ -24,7 +24,7 @@ const PORT = process.env.PORT || 3000;
 const startTime = Date.now();
 const URL_FILE = path.resolve(__dirname, '..', 'current-url.txt');
 const URL_FILE_ALT = path.resolve(__dirname, '..', 'current-url-alt.txt');
-const CID_BINARY = process.env.CID_BINARY || path.resolve(__dirname, '../../cid/target/release/cid');
+const CID_BINARY = process.env.CID_BINARY || path.resolve(__dirname, '../../target/release/lai-gate');
 
 // --- helpers ---
 
@@ -61,9 +61,9 @@ function getUptime() {
 function getCidVersion() {
   try {
     const out = execSync(`"${CID_BINARY}" tanto eval "1+1"`, { encoding: 'utf-8', timeout: 5000 });
-    return 'v0.2.0 (Tanto OK)';
+    return 'v0.3.0 (Tanto OK)';
   } catch {
-    return 'v0.2.0 (binary found)';
+    return 'v0.3.0 (binary NOT found)';
   }
 }
 const CID_VERSION = getCidVersion(); // cache at startup

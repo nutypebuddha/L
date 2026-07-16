@@ -42,4 +42,44 @@ Public, committed, no euphemism. Documented bugs with scope and status.
 **Repro:** `laverna websearch "GDP India"` (behind egress proxy)
 **Detail:** HTTP client rejects proxy-intercepted TLS certificates. This is an environment-specific issue, not a code bug. The subcommand works correctly on standard networks. No fix planned — this is expected behavior for sandboxed builds.
 
+---
+
+### [T54] bridge `getCidVersion()` returns success string on failure
+
+**Status:** fixed-pending-release
+**Affects:** `bridge` `/status` endpoint CID version field
+**Does not affect:** `/validate`, `/fact`, `/health`, any actual validation logic
+**Repro:** Run bridge without `CID_BINARY` set (stale path guarantees failure); `curl localhost:3000/status | jq .cid` returns `"v0.2.0 (binary found)"`
+**Detail:** The `catch` block in `getCidVersion()` (line 66) returned the success-shaped string `'v0.2.0 (binary found)'`. Now returns `'v0.3.0 (binary NOT found)'`. Success branch updated to `'v0.3.0 (Tanto OK)'`.
+
+---
+
+### [T55] bridge `CID_BINARY` path stale post-monorepo refactor
+
+**Status:** fixed-pending-release
+**Affects:** bridge shell-outs to CID engine (all validation via bridge)
+**Does not affect:** gate CLI directly, proof, any Rust code
+**Repro:** `node bridge/src/index.js` without `CID_BINARY` env; all `/validate` calls fail silently
+**Detail:** Default path was `../../cid/target/release/cid` — `cid/` directory no longer exists (renamed to `gate/`, binary is `lai-gate`). Fixed to `../../target/release/lai-gate`. Every shell-out from bridge was failing silently, which is what triggered T54's false-positive catch.
+
+---
+
+### [T56] gate CLI: `--help`/`-h`/`help` silently blocks on stdin
+
+**Status:** fixed-pending-release
+**Affects:** `lai-gate --help`, `lai-gate -h`, `lai-gate help`
+**Does not affect:** REPL mode (pipe input), `validate`/`fix`/`compress`/`score`/`mcp`/`proxy` direct CLI args
+**Repro:** `lai-gate --help` (hangs with no output, waiting for stdin)
+**Detail:** Unrecognized CLI args (including `--help`) fell through to an unconditional `stdin.read_to_string()` with zero output. Fixed by adding `"--help" | "-h" | "help"` match arm that prints help and returns. The underlying REPL logic and all other CLI commands were unaffected.
+
+---
+
+### [T57] gate README claims 13 MCP tools; actual count is 22
+
+**Status:** fixed-pending-release
+**Affects:** `gate/README.md` documentation only
+**Does not affect:** runtime behavior, MCP server, tool registration
+**Repro:** `grep "13 tools" gate/README.md`
+**Detail:** README claimed 13 MCP tools. Actual `list_tools()` returns 22 (8 original + 3 dynamic KB + 11 Tanto merged). Updated both references in README.
+
 

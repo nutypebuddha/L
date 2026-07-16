@@ -51,7 +51,7 @@ CID acts as a validation gate between LLM output and the real world. Think of LL
 - **Semantic Cache**: Avoid redundant LLM calls with meaning-based caching
 - **Prompt Compression**: 30-50% token reduction before LLM calls
 - **Response Scoring**: Quality evaluation without re-querying
-- **MCP Server**: 13 tools for AI agent integration
+- **MCP Server**: 22 tools for AI agent integration
 
 ### Performance
 
@@ -171,7 +171,7 @@ src/
 │   └── compressor.rs    # Prompt compression
 ├── mcp/
 │   ├── server.rs        # MCP server
-│   └── tools.rs         # 13 MCP tools
+│   └── tools.rs         # 22 MCP tools
 ├── tanto/               # Tanto compute engine
 │   ├── math.rs          # Math operations
 │   ├── convert.rs       # Unit conversion

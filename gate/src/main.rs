@@ -268,6 +268,12 @@ fn main() {
                 }
                 return;
             }
+            "--help" | "-h" | "help" => {
+                // Standalone help (not REPL) — print and exit.
+                let device = CIDDevice::new();
+                print!("{}", device.show_help());
+                return;
+            }
             _ => {}
         }
     }
