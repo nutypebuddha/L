@@ -7,9 +7,9 @@ Public, committed, no euphemism. Documented bugs with scope and status.
 ### [T52] `strategize` exponential blowup on large budgets
 
 **Status:** fixed-pending-release
-**Affects:** `laverna strategize --budget <N>` for N > ~20
+**Affects:** `lai strategize --budget <N>` for N > ~20
 **Does not affect:** `strategize --budget ≤15`, `optimize`, `build`, all other subcommands
-**Repro:** `laverna strategize --query "build a resilient distributed system" --budget 30`
+**Repro:** `lai strategize --query "build a resilient distributed system" --budget 30`
 **Detail:** Budget >20 caused exponential node expansion in the brute-force allocator (NODE_CAP=5M hit within seconds). Fixed by adding LP-relaxation upper bound for branch-and-bound pruning. Budget=30 now completes in ~0.6s. Test: `branch_and_bound_handles_large_budget`.
 
 ---
@@ -17,9 +17,9 @@ Public, committed, no euphemism. Documented bugs with scope and status.
 ### [T53] `schema domain` template missing scoring table
 
 **Status:** fixed-pending-release
-**Affects:** `laverna schema domain` output (template)
+**Affects:** `lai schema domain` output (template)
 **Does not affect:** `schema optimize`, any hand-written domain profiles, `build`, `strategize`
-**Repro:** `laverna schema domain > /tmp/domain.toml && laverna build --domain /tmp/domain.toml --datetime "2026-07-16" --tz "America/Chicago" --latitude 45.4 --longitude -92.9`
+**Repro:** `lai schema domain > /tmp/domain.toml && lai build --domain /tmp/domain.toml --datetime "2026-07-16" --tz "America/Chicago" --latitude 45.4 --longitude -92.9`
 **Detail:** Template defined `score_cool` in graha_map but never declared a `[scoring.score_cool]` table, the `cool` item, or `score_cool` in `objective.maximize`. Running the template as-is failed immediately. Also fixed stale flags in header comment (`--lat`/`--lon`/`--datetime` → `--latitude`/`--longitude`/`--datetime --tz`).
 
 ---
@@ -37,9 +37,9 @@ Public, committed, no euphemism. Documented bugs with scope and status.
 ### [ENV] `websearch` subcommand blocked in sandbox environments
 
 **Status:** known, unscheduled
-**Affects:** `laverna websearch` when run behind TLS-inspecting proxies
-**Does not affect:** `laverna websearch` in normal network environments, all other subcommands
-**Repro:** `laverna websearch "GDP India"` (behind egress proxy)
+**Affects:** `lai websearch` when run behind TLS-inspecting proxies
+**Does not affect:** `lai websearch` in normal network environments, all other subcommands
+**Repro:** `lai websearch "GDP India"` (behind egress proxy)
 **Detail:** HTTP client rejects proxy-intercepted TLS certificates. This is an environment-specific issue, not a code bug. The subcommand works correctly on standard networks. No fix planned — this is expected behavior for sandboxed builds.
 
 ---
