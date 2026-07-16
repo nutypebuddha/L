@@ -1,8 +1,12 @@
-# Laverna — Agent Instructions
+# Ł.AI · Proof — Agent Instructions (*Laverna* code name)
 
 Vedic reasoning engine reboot. 4-layer architecture:
 **Asauchi** → **Zanpakuto** → **Shikai** → **Bankai**.
 NAND gate primitives at the bottom. Determinism-first.
+
+Part of the **Ł.AI** umbrella (see `docs/brand.md`): *Laverna* = **Ł.AI · Proof**
+(deterministic proof function). Sister Ł.AI functions: **Ł.AI · Gate** (CID,
+per-token validation) and **Ł.AI · Bridge** (CID-Bridge, chatbot fan-out).
 
 ## Environment
 - aarch64 Linux, proot-distro Debian container on Android/Termux

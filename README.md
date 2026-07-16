@@ -1,14 +1,20 @@
-# Laverna
+# Ł.AI · Proof — *Laverna*
 
-**Deterministic Vedic reasoning engine** — a 9-graha (Navagraha) wheel, a
+**Deterministic verification engine** — a 9-graha (Navagraha) wheel, a
 NAND-to-bankai compute cascade, and verifiable proof objects. Rust, edition 2021.
 
-Laverna never guesses and fails loud: every result either carries a derivation
-back to primitive NAND gates or is explicitly marked unproven (e.g. LLM-estimated
-steps, confidence-penalized). No hallucination, no silent fallback.
+*Laverna* is the code name for **Ł.AI · Proof**: the deterministic-proof pure
+function in the Ł.AI substrate (see [`docs/brand.md`](docs/brand.md)). The other
+Ł.AI functions are **Ł.AI · Gate** (CID, per-token validation) and
+**Ł.AI · Bridge** (CID-Bridge, chatbot fan-out).
 
-> **Thesis.** Laverna's differentiator is the **NAND-to-bankai proof cascade** plus
-> the **fail-loud, no-hallucination contract** plus **deterministic optimization** —
+Ł.AI · Proof never guesses and fails loud: every result either carries a
+derivation back to primitive NAND gates or is explicitly marked unproven
+(e.g. LLM-estimated steps, confidence-penalized). No hallucination, no silent
+fallback.
+
+> **Thesis.** The differentiator is the **NAND-to-bankai proof cascade** plus the
+> **fail-loud, no-hallucination contract** plus **deterministic optimization** —
 > not the Vedic chart. The astrology layer is a *classifier profile*, not the product.
 
 ## Architecture
@@ -85,12 +91,21 @@ seed corpus; a same-id entry **overrides** the seed. `info` reports
 `laverna solve --proof-out proof.json` emits a machine-checkable proof object;
 `laverna verify proof.json` re-derives and checks it. The same surface is exposed
 over MCP (protocol `2025-11-25`) with 9 tools, including `route` and `build`.
+This is the **Ł.AI · Proof** MCP surface; **Ł.AI · Gate** (CID) exposes 13 tools
+and **Ł.AI · Bridge** fans both out to chatbots.
 
 ## Determinism
 
 Outputs that touch unordered collections (HashMap / petgraph results) are sorted
 by a stable key before printing or aggregating. The same inputs always yield the
 same outputs and the same proof object.
+
+## Brand
+
+Part of the **Ł.AI** umbrella (offline, WASM-native, fail-loud verification
+substrate). *Laverna* is the code name for **Ł.AI · Proof**. See
+[`docs/brand.md`](docs/brand.md). Commercial mark: **Ł.AI** (DBA "Wintermore
+Housekeeping"); "Laverna" is not filed as a trademark.
 
 ## License
 
