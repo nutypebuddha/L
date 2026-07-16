@@ -61,7 +61,10 @@ LLAMA_DIR="$BIN_DIR/llama"
 MODELS_DIR="$BIN_DIR/models"
 mkdir -p "$LLAMA_DIR" "$MODELS_DIR"
 if [ -d "$REPO_ROOT/bin/llama" ]; then
-    cp -a "$REPO_ROOT/bin/llama/." "$LLAMA_DIR/"
+    # -L dereferences the .so symlinks so the copy works on the Android
+    # /sdcard FUSE mount (which rejects symlink creation) and the runtime
+    # loader still finds libfoo.so.0 by its real file.
+    cp -rL "$REPO_ROOT/bin/llama/." "$LLAMA_DIR/"
 fi
 # Models are user-supplied (not committed); keep the dir present.
 [ -f "$REPO_ROOT/bin/models/.gitkeep" ] && cp "$REPO_ROOT/bin/models/.gitkeep" "$MODELS_DIR/"
