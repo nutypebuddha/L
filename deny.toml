@@ -1,0 +1,67 @@
+# Laverna — cargo-deny configuration
+# Mirrors Athena's policy: permissive licenses only, Linux-only targets
+
+[graph]
+targets = [
+    "aarch64-unknown-linux-gnu",
+    "aarch64-unknown-linux-musl",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+]
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+[advisories]
+ignore = [
+    # quick-xml 0.26.0 via pprof → inferno (dev-only benchmark dependency)
+    # Not used in production code; pprof/inferno haven't updated to >=0.41.0 yet
+    { id = "RUSTSEC-2026-0194", reason = "dev-only: quick-xml via pprof/inferno benchmarks" },
+    { id = "RUSTSEC-2026-0195", reason = "dev-only: quick-xml via pprof/inferno benchmarks" },
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "0BSD",
+    "CC0-1.0",
+    "Zlib",
+    "LicenseRef-ring",
+]
+confidence-threshold = 0.8
+exceptions = []
+
+[licenses.private]
+ignore = false
+registries = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+allow-workspace = false
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []
