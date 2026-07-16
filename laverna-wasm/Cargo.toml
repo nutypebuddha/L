@@ -2,8 +2,11 @@
 name = "laverna-wasm"
 version = "0.1.0"
 edition = "2021"
-description = "WebAssembly bindings for Ł.AI · Proof (Laverna) — deterministic solve/verify"
+description = "WebAssembly bindings for L.ai · Proof (Laverna) — deterministic solve/verify"
 license = "Apache-2.0"
+publish = false
+repository = "https://github.com/nutypebuddha/lai"
+homepage = "https://github.com/nutypebuddha/lai"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

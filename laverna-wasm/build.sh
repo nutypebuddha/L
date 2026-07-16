@@ -1,10 +1,10 @@
 #!/bin/bash
-# Ł.AI · Proof (Laverna) WASM build script.
+# L.ai · Proof (Laverna) WASM build script.
 # Mirrors cid-wasm: builds the cdylib for wasm32-unknown-unknown and emits www/.
 
 set -e
 
-echo "🔧 Building Ł.AI · Proof (laverna-wasm)..."
+echo "🔧 Building L.ai · Proof (laverna-wasm)..."
 
 . "$HOME/.cargo/env" 2>/dev/null || true
 
