@@ -273,6 +273,11 @@ enum CorpusAction {
     Export {
         /// Output directory (created if missing)
         dir: String,
+        /// Output format. `toml` (default) writes formulas.toml/entities.toml/
+        /// version.toml. `cid-facts` additionally emits cid_facts.json — a
+        /// fact-source file consumable by Ł.AI · Gate (CID) as a fact gate.
+        #[arg(long, value_name = "FMT", default_value = "toml")]
+        format: String,
     },
     /// Validate the corpus (embedded, or from <dir> if given) — checks Tanto
     /// parsability, graha references, non-empty descriptions, duplicate ids.
@@ -550,7 +555,7 @@ fn main() {
         Commands::Websearch { query } => cmd_websearch(&query),
         Commands::Verify { path, format } => cmd_verify(&path, format),
         Commands::Corpus { action } => match action {
-            CorpusAction::Export { dir } => cmd_corpus_export(&dir),
+            CorpusAction::Export { dir, format } => cmd_corpus_export(&dir, &format),
             CorpusAction::Validate { dir } => cmd_corpus_validate(dir.as_deref()),
             CorpusAction::Diff { a, b } => cmd_corpus_diff(&a, &b),
             CorpusAction::Graph { dir } => cmd_corpus_graph(dir.as_deref()),
@@ -1114,7 +1119,12 @@ fn corpus_overlay_toml_contents() -> Vec<String> {
 }
 
 /// `laverna corpus export <dir>` — write the embedded corpus to TOML files.
-fn cmd_corpus_export(dir: &str) {
+///
+/// With `--format cid-facts`, additionally emits `cid_facts.json`: a formula
+/// registry Laverna's corpus exposes as a re-verifiable fact source for
+/// Ł.AI · Gate (CID). Each entry carries a SHA-256 of the formula text so CID
+/// can cite a deterministic, re-derivable fact (not a static lookup).
+fn cmd_corpus_export(dir: &str, format: &str) {
     let path = std::path::Path::new(dir);
     if let Err(e) = std::fs::create_dir_all(path) {
         eprintln!("error: cannot create directory '{dir}': {e}");
@@ -1142,6 +1152,62 @@ fn cmd_corpus_export(dir: &str) {
     println!("exported formulas → {}", formulas_path.display());
     println!("exported entities → {}", entities_path.display());
     println!("exported version → {}", version_path.display());
+
+    if format == "cid-facts" {
+        let facts_path = path.join("cid_facts.json");
+        match export_cid_facts() {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&facts_path, json) {
+                    eprintln!("error: cannot write {}: {e}", facts_path.display());
+                    std::process::exit(2);
+                }
+                println!("exported cid_facts.json → {}", facts_path.display());
+            }
+            Err(e) => {
+                eprintln!("error: failed to build cid_facts.json: {e}");
+                std::process::exit(2);
+            }
+        }
+    }
+}
+
+/// Pure function: render the embedded formula corpus as a CID-consumable
+/// fact-source JSON. Each formula becomes one entry with a content hash.
+fn export_cid_facts() -> Result<String, String> {
+    let registry = load_formula_registry();
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    for formula in registry.all() {
+        let text = format!(
+            "{}|{}|{}|{}",
+            formula.id, formula.output, formula.expression, formula.description
+        );
+        let hash = laverna::digest::sha256_hex(text.as_bytes());
+        entries.push(serde_json::json!({
+            "id": formula.id,
+            "domain": format!("{:?}", formula.domain),
+            "formula_type": format!("{:?}", formula.formula_type),
+            "inputs": formula.inputs,
+            "output": formula.output,
+            "expression": formula.expression,
+            "description": formula.description,
+            "zodiac": formula.zodiac,
+            "hash": hash,
+        }));
+    }
+    entries.sort_by(|a, b| {
+        a.get("id")
+            .and_then(|v| v.as_str())
+            .cmp(&b.get("id").and_then(|v| v.as_str()))
+    });
+    let doc = serde_json::json!({
+        "source": "laverna",
+        "mark": "Ł.AI · Proof",
+        "schema": "cid-facts/v1",
+        "corpus_version": CORPUS_VERSION,
+        "count": entries.len(),
+        "facts": entries,
+    });
+    serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())
 }
 
 /// `laverna corpus hash` — print the embedded corpus semver + content hash,
