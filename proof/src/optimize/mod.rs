@@ -362,6 +362,93 @@ fn prereqs_satisfied(schema: &Schema, levels: &BTreeMap<String, u32>) -> bool {
 
 // ── Solver ───────────────────────────────────────────────────────────────────
 
+/// Mutable state threaded through the DFS enumerator.
+struct SolverState<'a> {
+    schema: &'a Schema,
+    perks: &'a [&'a Item],
+    candidates: Vec<Allocation>,
+    node_count: usize,
+    /// Top-k best weighted objectives found so far (for branch-and-bound pruning).
+    top_k_objs: Vec<f64>,
+    top_k: usize,
+}
+
+impl<'a> SolverState<'a> {
+    fn new(schema: &'a Schema, perks: &'a [&'a Item], top_k: usize) -> Self {
+        Self {
+            schema,
+            perks,
+            candidates: Vec::new(),
+            node_count: 0,
+            top_k_objs: Vec::with_capacity(top_k),
+            top_k,
+        }
+    }
+}
+
+/// LP-relaxation upper bound on the weighted objective achievable from a partial
+/// assignment.  Assumes all remaining budget is allocated to the single remaining
+/// item with the best marginal value per unit cost.  Valid for branch-and-bound
+/// pruning — if this bound ≤ the current k-th best, the subtree cannot improve
+/// the result.
+fn objective_upper_bound(
+    schema: &Schema,
+    levels: &BTreeMap<String, u32>,
+    remaining_attrs: &[&Item],
+) -> f64 {
+    // Current objective from the partial assignment.
+    let stats = compute_stats(schema, levels);
+    let scores = compute_scores(schema, &stats);
+    let current = objective_value(schema, &scores);
+
+    if remaining_attrs.is_empty() {
+        return current;
+    }
+
+    // Remaining budget per resource.
+    let cost = cost_of(schema, levels);
+    let mut min_remaining = f64::INFINITY;
+    for (res, avail) in &schema.budget {
+        let used = cost.get(res).copied().unwrap_or(0.0);
+        let room = avail - used;
+        if room < min_remaining {
+            min_remaining = room;
+        }
+    }
+    if min_remaining <= 0.0 {
+        return current;
+    }
+
+    // Best marginal value per unit cost among remaining items.
+    let mut best_marginal_per_unit = 0.0f64;
+    for item in remaining_attrs {
+        let current_level = *levels.get(&item.id).unwrap_or(&0);
+        let cap = item.level_cap();
+        if current_level >= cap {
+            continue;
+        }
+        // Cost per level for the bottleneck resource.
+        let cost_per_level = item.cost.values().copied().fold(f64::INFINITY, f64::min);
+        if cost_per_level <= 0.0 {
+            continue;
+        }
+        // Weighted effect per level.
+        let mut weighted_effect = 0.0f64;
+        for (score_name, weight) in &schema.objective.weights {
+            let eff = item.effects.get(score_name).copied().unwrap_or(0.0);
+            if eff > 0.0 {
+                weighted_effect += weight * eff;
+            }
+        }
+        let marginal = weighted_effect / cost_per_level;
+        if marginal > best_marginal_per_unit {
+            best_marginal_per_unit = marginal;
+        }
+    }
+
+    current + min_remaining * best_marginal_per_unit
+}
+
 /// State-space guard: maximum number of nodes the brute-force enumerator may
 /// visit before aborting. Prevents runaway computation on oversized inputs.
 /// 5M nodes ≈ a few seconds on modern hardware; well beyond any reasonable
@@ -376,32 +463,24 @@ pub fn solve(schema: &Schema, top_k: usize) -> Result<Vec<Allocation>, String> {
     let attrs: Vec<&Item> = schema.items.iter().filter(|i| i.is_attribute()).collect();
     let perks: Vec<&Item> = schema.items.iter().filter(|i| !i.is_attribute()).collect();
 
-    let mut candidates: Vec<Allocation> = Vec::new();
-    let mut node_count = 0usize;
+    let mut state = SolverState::new(schema, &perks, top_k);
     let mut levels: BTreeMap<String, u32> = BTreeMap::new();
-    enumerate_attributes(
-        schema,
-        &attrs,
-        0,
-        &mut levels,
-        &perks,
-        &mut candidates,
-        &mut node_count,
-    );
+    enumerate_attributes(&mut state, &attrs, 0, &mut levels);
 
-    if node_count > NODE_CAP {
+    if state.node_count > NODE_CAP {
         return Err(format!(
-            "state-space guard exceeded: visited {node_count} nodes (cap {NODE_CAP}). \
+            "state-space guard exceeded: visited {} nodes (cap {NODE_CAP}). \
              The schema has too many items/levels for brute-force enumeration. \
-             Reduce max_level, remove items, or split into smaller sub-problems."
+             Reduce max_level, remove items, or split into smaller sub-problems.",
+            state.node_count
         ));
     }
 
-    if candidates.is_empty() {
+    if state.candidates.is_empty() {
         return Err("no feasible allocation within budget and prerequisites".to_string());
     }
 
-    let frontier = pareto_frontier(schema, &candidates);
+    let frontier = pareto_frontier(schema, &state.candidates);
     let mut ranked: Vec<Allocation> = frontier;
     ranked.sort_by(|a, b| {
         b.objective
@@ -434,71 +513,79 @@ pub fn solve(schema: &Schema, top_k: usize) -> Result<Vec<Allocation>, String> {
 }
 
 fn enumerate_attributes(
-    schema: &Schema,
+    state: &mut SolverState<'_>,
     attrs: &[&Item],
     idx: usize,
     levels: &mut BTreeMap<String, u32>,
-    perks: &[&Item],
-    candidates: &mut Vec<Allocation>,
-    node_count: &mut usize,
 ) {
     if idx == attrs.len() {
-        enumerate_perks(schema, perks, 0, levels, candidates, node_count);
+        enumerate_perks(state, 0, levels);
         return;
     }
+
+    // Branch-and-bound: prune if the LP upper bound can't beat the k-th best.
+    if state.top_k_objs.len() >= state.top_k {
+        let min_obj = state
+            .top_k_objs
+            .iter()
+            .cloned()
+            .fold(f64::INFINITY, f64::min);
+        let ub = objective_upper_bound(state.schema, levels, &attrs[idx..]);
+        if ub <= min_obj + 1e-9 {
+            return;
+        }
+    }
+
     let item = attrs[idx];
-    let cap = level_ceiling(schema, levels, item);
+    let cap = level_ceiling(state.schema, levels, item);
     for l in 0..=cap {
-        *node_count += 1;
-        if *node_count > NODE_CAP {
+        state.node_count += 1;
+        if state.node_count > NODE_CAP {
             return;
         }
         levels.insert(item.id.clone(), l);
-        if within_budget(schema, levels) {
-            enumerate_attributes(
-                schema,
-                attrs,
-                idx + 1,
-                levels,
-                perks,
-                candidates,
-                node_count,
-            );
+        if within_budget(state.schema, levels) {
+            enumerate_attributes(state, attrs, idx + 1, levels);
         }
     }
     levels.insert(item.id.clone(), 0);
 }
 
-fn enumerate_perks(
-    schema: &Schema,
-    perks: &[&Item],
-    idx: usize,
-    levels: &mut BTreeMap<String, u32>,
-    candidates: &mut Vec<Allocation>,
-    node_count: &mut usize,
-) {
-    if idx == perks.len() {
-        if within_budget(schema, levels) && prereqs_satisfied(schema, levels) {
-            let stats = compute_stats(schema, levels);
-            let scores = compute_scores(schema, &stats);
-            let objective = objective_value(schema, &scores);
-            candidates.push(Allocation {
+fn enumerate_perks(state: &mut SolverState<'_>, idx: usize, levels: &mut BTreeMap<String, u32>) {
+    if idx == state.perks.len() {
+        if within_budget(state.schema, levels) && prereqs_satisfied(state.schema, levels) {
+            let stats = compute_stats(state.schema, levels);
+            let scores = compute_scores(state.schema, &stats);
+            let objective = objective_value(state.schema, &scores);
+            state.candidates.push(Allocation {
                 levels: levels.clone(),
                 stats,
                 scores,
                 objective,
             });
+            // Update the k-th best tracking for branch-and-bound.
+            if state.top_k_objs.len() < state.top_k {
+                state.top_k_objs.push(objective);
+            } else if let Some(min_obj) = state
+                .top_k_objs
+                .iter_mut()
+                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            {
+                if objective > *min_obj {
+                    *min_obj = objective;
+                }
+            }
         }
         return;
     }
-    let item = perks[idx];
+    let item = state.perks[idx];
     levels.insert(item.id.clone(), 0);
-    enumerate_perks(schema, perks, idx + 1, levels, candidates, node_count);
-    *node_count += 1;
-    if *node_count <= NODE_CAP {
+    enumerate_perks(state, idx + 1, levels);
+    state.node_count += 1;
+    if state.node_count <= NODE_CAP {
         levels.insert(item.id.clone(), 1);
-        if within_budget(schema, levels) {
-            enumerate_perks(schema, perks, idx + 1, levels, candidates, node_count);
+        if within_budget(state.schema, levels) {
+            enumerate_perks(state, idx + 1, levels);
         }
         levels.insert(item.id.clone(), 0);
     }
@@ -842,5 +929,60 @@ terms = { cyberware_stat_mod_pct = 0.2, tech_dmg_pct = 0.1 }
                 .unwrap_or(0),
             0
         );
+    }
+
+    #[test]
+    fn branch_and_bound_handles_large_budget() {
+        use std::time::Instant;
+        // 7 pillars, budget=30 — previously would take minutes or hit NODE_CAP.
+        let pillars = ["spear", "olive", "forge", "owl", "council", "loom", "stone"];
+        let mut items = Vec::new();
+        let mut scoring = HashMap::new();
+        let mut maximize = Vec::new();
+        for p in pillars {
+            let score = format!("score_{p}");
+            items.push(Item {
+                id: p.into(),
+                kind: ItemKind::Attribute,
+                requires: None,
+                cost: HashMap::from([("unit".into(), 1.0)]),
+                max_level: Some(30),
+                effects: HashMap::from([(score.clone(), 1.0)]),
+            });
+            scoring.insert(
+                score.clone(),
+                ScoreTerm {
+                    terms: HashMap::from([(score.clone(), 1.0)]),
+                },
+            );
+            maximize.push(score);
+        }
+        let mut weights = HashMap::new();
+        for (i, p) in pillars.iter().enumerate() {
+            weights.insert(format!("score_{p}"), (7 - i) as f64);
+        }
+        let schema = Schema {
+            meta: Meta {
+                domain: "bench".into(),
+                schema_version: 0,
+                shape: None,
+            },
+            budget: HashMap::from([("unit".into(), 30.0)]),
+            items,
+            objective: Objective { maximize, weights },
+            scoring,
+        };
+        let start = Instant::now();
+        let sols = solve(&schema, 3).unwrap();
+        let elapsed = start.elapsed();
+        assert_eq!(sols.len(), 3);
+        // Must complete in under 2 seconds (was 30+ minutes without B&B).
+        assert!(
+            elapsed.as_secs() < 2,
+            "budget=30 took {:?} — branch-and-bound too slow",
+            elapsed
+        );
+        // Top solution should allocate all budget to highest-weighted pillar (spear=7.0).
+        assert_eq!(sols[0].levels.get("spear").copied().unwrap_or(0), 30);
     }
 }

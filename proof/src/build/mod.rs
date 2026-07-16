@@ -342,7 +342,7 @@ pub fn profile_to_schema(
 
 /// Canonical domain profile template. Printed by `laverna schema domain`.
 pub const DOMAIN_PROFILE_TEMPLATE: &str = r#"# Laverna `build` domain profile — copy, edit, run:
-#   laverna build --domain this.toml --datetime "YYYY-MM-DD HH:MM" --lat 45.4 --lon -92.9
+#   laverna build --domain this.toml --datetime "YYYY-MM-DD HH:MM" --tz "America/Chicago" --latitude 45.4 --longitude -92.9
 #
 # Chains chart → graha weight mapping → optimize into one command.
 # The solver gets `objective.weights` computed from graha_map × chart
@@ -425,9 +425,16 @@ cost = { attribute_points = 1 }
 max_level = 7
 effects = { tech_points = 1.0 }
 
+[[items]]
+id = "cool"
+type = "attribute"
+cost = { attribute_points = 1 }
+max_level = 7
+effects = { cool_points = 1.0 }
+
 # Objective: maximize — weights are computed at runtime from graha_map.
 [objective]
-maximize = ["score_body", "score_reflexes", "score_intelligence", "score_technical"]
+maximize = ["score_body", "score_reflexes", "score_intelligence", "score_technical", "score_cool"]
 
 # Scoring: each score is a linear combination of stats produced by item effects.
 [scoring.score_body]
@@ -441,6 +448,9 @@ terms = { intel_points = 1.0 }
 
 [scoring.score_technical]
 terms = { tech_points = 1.0 }
+
+[scoring.score_cool]
+terms = { cool_points = 1.0 }
 "#;
 
 #[cfg(test)]
