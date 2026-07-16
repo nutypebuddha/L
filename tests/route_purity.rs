@@ -119,14 +119,21 @@ fn stopwords_do_not_pollute_routing() {
 
 #[test]
 fn out_of_corpus_query_fails_loud() {
-    // No token maps to a corpus graha → fail loud: no asserted strategy, warning set.
+    // No token maps to a corpus graha → fail loud: refused with a typed reason,
+    // no invented primary strategy.
     let report = route_json("xyzzy qwerty plugh");
     assert!(
         report["primary"].is_null(),
         "out-of-corpus query must not invent a primary strategy"
     );
-    assert!(
-        report["warning"].is_string(),
-        "out-of-corpus query must carry a fail-loud warning"
+    assert_eq!(
+        report["refused"].as_bool(),
+        Some(true),
+        "out-of-corpus query must be refused"
+    );
+    assert_eq!(
+        report["kind"].as_str(),
+        Some("OutOfScope"),
+        "out-of-corpus query must carry a typed OutOfScope refusal"
     );
 }
