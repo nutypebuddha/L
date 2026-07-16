@@ -1,15 +1,15 @@
-# Ł.AI — WASM surface
+# L.ai — WASM surface
 
-Every Ł.AI function ships a WebAssembly module so it runs **offline, in-browser,
+Every L.ai function ships a WebAssembly module so it runs **offline, in-browser,
 fail-loud** — the local-first thesis behind the NLnet applications.
 
 ## Modules
 
 | Function | Crate | WASM crate | Size |
 |----------|-------|------------|------|
-| Ł.AI · Proof (Laverna) | `laverna` | `laverna-wasm` | ~590 KB |
-| Ł.AI · Gate (CID) | `cid` | `cid-wasm` | ~615 KB |
-| Ł.AI · Bridge (CID-Bridge) | `cid-bridge` (Node) | client-side fan-out to the two WASM modules | — |
+| L.ai · Proof (Laverna) | `laverna` | `laverna-wasm` | ~590 KB |
+| L.ai · Gate (CID) | `cid` | `cid-wasm` | ~615 KB |
+| L.ai · Bridge (CID-Bridge) | `cid-bridge` (Node) | client-side fan-out to the two WASM modules | — |
 
 ## Shared loader pattern
 
@@ -26,6 +26,6 @@ demonstrates the contract independently.
 ## Offline-first
 
 Because the verification logic is pure Rust compiled to WASM, a webpage can
-validate LLM output (Ł.AI · Gate) and re-derive proofs (Ł.AI · Proof) entirely
+validate LLM output (L.ai · Gate) and re-derive proofs (L.ai · Proof) entirely
 client-side — no network round-trip, no server trust. This is the substrate the
 ELFA application targets.

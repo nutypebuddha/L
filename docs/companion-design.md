@@ -1,4 +1,4 @@
-# Laverna Companion — v0.1 design (Stage 2, IP report)
+# L.ai Companion — v0.1 design (Stage 2, IP report)
 
 > Buildable scope for a solo dev: voice in/out, one persona, MCP tool calls,
 > hybrid LLM, simple avatar, assistant integration. Per the IP report, the
@@ -82,7 +82,7 @@ MCP server path as the Stage 1 proxy, plus the persistent memory store.
 Grok's Mika *invents* fake travel memories. Companion apps that fabricate
 face rising EU/US regulation (Italy Garante €5M Replika fine; Character.AI
 wrongful-death settlement Jan 2026; HBS paper on emotional-manipulation
-dark patterns). Laverna's "never lies / privacy-first / offline-first"
+dark patterns). L.ai's "never lies / privacy-first / offline-first"
 positioning is both a differentiator *and* a regulatory safe harbor. The
 moat is not the persona — it's the deterministic, content-addressed,
 SHA-256-verified substrate every claim is checked against.

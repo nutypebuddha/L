@@ -1,6 +1,6 @@
-# Laverna MCP server — registry listing assets
+# L.ai MCP server — registry listing assets
 
-Laverna ships an MCP (Model Context Protocol) server over stdio:
+L.ai ships an MCP (Model Context Protocol) server over stdio:
 `laverna mcp`. It is the reference **trusted math/logic verifier** for an LLM
 orchestration loop — deterministic, offline, and it emits machine-checkable
 proof objects plus typed refusals.
@@ -42,10 +42,10 @@ Every tool is `readOnlyHint: true, openWorldHint: false`.
 Paste into the mcp.so "Add a server" form, or submit the JSON below.
 
 **Fields**
-- **Display name:** Laverna
+- **Display name:** L.ai
 - **Command:** `laverna`
 - **Arguments:** `mcp`
-- **Description:** Offline-first deterministic verification sidecar for LLMs. Runs the full reasoning pipeline (`solve`), validates math/logic (`validate`), generates deterministic sidereal charts (`chart`/`build`), and reverse-routes queries (`route`) — all against an embedded, content-addressed corpus. Emits machine-checkable proof objects and typed refusals so an LLM loop can verify instead of trust.
+- **Description:** Offline-first deterministic verification sidecar for LLMs. Runs the full reasoning pipeline (`solve`), validates math/logic (`validate`), generates deterministic sidereal charts (`chart`/`build`), and reverse-routes queries (`route`) — all against an embedded, content-addressed corpus. Emits machine-checkable proof objects and typed refusals so an LLM loop can verify instead of trust. (L.ai)
 - **Tags:** `verification`, `math`, `reasoning`, `deterministic`, `offline`, `astrology`, `optimization`
 - **Homepage:** (repo URL)
 - **License:** Apache-2.0
@@ -55,7 +55,7 @@ Paste into the mcp.so "Add a server" form, or submit the JSON below.
 ```json
 {
   "mcpServers": {
-    "laverna": {
+    "lai": {
       "command": "laverna",
       "args": ["mcp"]
     }
@@ -70,7 +70,7 @@ Paste into the mcp.so "Add a server" form, or submit the JSON below.
 Smithery reads a `smithery.yaml` at the repo root. Draft below.
 
 ```yaml
-# smithery.yaml — Laverna MCP server listing
+# smithery.yaml — L.ai MCP server listing
 startCommand:
   type: stdio
   configSchema:
@@ -80,8 +80,8 @@ startCommand:
   commandFunction: |-
     (config) => ({ command: "laverna", args: ["mcp"] })
 
-name: laverna
-displayName: Laverna
+name: lai
+displayName: L.ai
 description: >-
   Offline-first, deterministic, Rust verification sidecar for LLMs. Runs the
   full reasoning pipeline (solve), validates math/logic (validate), generates
@@ -98,12 +98,12 @@ metadata:
     - offline
     - optimization
   license: Apache-2.0
-  repository: (repo URL)
+  repository: https://github.com/nutypebuddha/lai
 ```
 
 **Notes for submission**
 - Smithery's `commandFunction` must return the stdio launch; the config block is
-  empty because Laverna needs no API keys or env (offline by design).
+  empty because L.ai needs no API keys or env (offline by design).
 - If Smithery requires a Docker/`runtime` field, use `rust:1-slim` and the
   release binary; the static `x86_64` musl build also runs directly on any host
   glibc/musl.
@@ -112,10 +112,24 @@ metadata:
 
 ## C. Short blurb (for README / registry cards)
 
-**Laverna** — the external critic your LLM needs. Deterministic, offline Rust
+**L.ai** — the external critic your LLM needs. Deterministic, offline Rust
 MCP server that proves or refuses every claim: `solve` (7-layer reasoning +
 exact math), `validate` (structured diagnostics), `chart`/`build` (sidereal
 charts, no guessed timezones), `route` (domain explanation). Proof objects are
 content-addressed (corpus hash + SHA-256); refusals are typed
 (`OutOfScope`/`Underspecified`/`TooComplex`/`NoTranslation`/`MissingTimezone`).
 Trust nothing you can't reproduce.
+
+---
+
+## D. How to submit (manual)
+
+The `smithery.yaml` at the repo root is already L.ai-branded. To publish:
+
+- **Smithery:** `npx @smithery/cli publish` (reads `smithery.yaml`); or push the
+  repo and connect it in the Smithery dashboard.
+- **mcp.so:** paste the Section A fields (Display name `L.ai`, command `laverna`,
+  args `mcp`) into the "Add a server" form, or use the `mcpServer` JSON block as
+  the user's client config.
+
+No auto-submit runs in CI — these are operator steps.

@@ -1,7 +1,7 @@
-# Ł.AI — Shared Verdict Contract
+# L.ai — Shared Verdict Contract
 
 The unification rule (per `docs/brand.md`): every named artifact collapses to a
-**pure function**. When Ł.AI functions compose, they exchange a single canonical
+**pure function**. When L.ai functions compose, they exchange a single canonical
 **verdict** shape. This document is the contract; it lives verbatim in all three
 repositories (Laverna, CID, CID-Bridge).
 
@@ -51,7 +51,7 @@ RefusalKind ::=
 ```
 
 - `hash` is content-addressed (SHA-256) over the deterministic output, so any
-  downstream consumer (Ł.AI · Bridge) can re-verify without trusting the producer.
+   downstream consumer (L.ai · Bridge) can re-verify without trusting the producer.
 - `refusal` is `null` on success, else one of `RefusalKind`.
 - Outputs over unordered collections are sorted by a stable key before hashing
   (determinism rule from AGENTS.md / cid docs).
@@ -59,7 +59,7 @@ RefusalKind ::=
 ## Fact-source bridge (Proof → Gate)
 
 Laverna's corpus is *formulas* (relationships), not scalar facts. It is exposed
-to Ł.AI · Gate (CID) via `laverna corpus export --format cid-facts`, which emits
+to L.ai · Gate (CID) via `laverna corpus export --format cid-facts`, which emits
 `cid_facts.json` (`schema: cid-facts/v1`): one entry per formula, each carrying a
 SHA-256 of the formula text. CID can then cite a **re-verifiable** fact rather
 than a static lookup — the "fail-loud, never-guess" contract extended across both.

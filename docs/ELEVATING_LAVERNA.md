@@ -1,5 +1,9 @@
 # Elevating Laverna — A Comprehensive Strategic & Technical Roadmap
 
+> **Note:** "Laverna" is the internal code name. The public mark is **L.ai**
+> (see `docs/brand.md`); *Laverna* = **L.ai · Proof**. This document is the
+> historical strategic roadmap and retains the code name throughout.
+
 > **Subject:** `laverna-x86_64` v0.1.0 — "Deterministic Vedic reasoning engine — 9-graha wheel, NAND-to-bankai compute" (Rust, edition 2021)
 > **Repo:** https://github.com/nutypebuddha/Laverna (MIT, created 2026-07-12, 5 open issues, 0 stars at research time)
 > **Date of this document:** 2026-07-14
