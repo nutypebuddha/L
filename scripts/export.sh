@@ -56,6 +56,17 @@ echo "==> exporting to hub"
 mkdir -p "$BIN_DIR"
 cp "target/$TARGET/release/laverna" "$DEST"
 
+echo "==> bundling local LLM (laverna bin ships with llama.cpp + model drop-in)"
+LLAMA_DIR="$BIN_DIR/llama"
+MODELS_DIR="$BIN_DIR/models"
+mkdir -p "$LLAMA_DIR" "$MODELS_DIR"
+if [ -d "$REPO_ROOT/bin/llama" ]; then
+    cp -a "$REPO_ROOT/bin/llama/." "$LLAMA_DIR/"
+fi
+# Models are user-supplied (not committed); keep the dir present.
+[ -f "$REPO_ROOT/bin/models/.gitkeep" ] && cp "$REPO_ROOT/bin/models/.gitkeep" "$MODELS_DIR/"
+echo "    llama engine -> $LLAMA_DIR/llama (set LAVERNA_LLAMA_MODEL to a .gguf in $MODELS_DIR)"
+
 echo "==> verifying static x86_64 linkage (via qemu, since host is aarch64)"
 # NOTE: $DEST lives on /sdcard, a noexec FUSE mount, so qemu cannot mmap-exec
 # it there. Copy to a writable fs for the runtime smoke test; the `od` check

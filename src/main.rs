@@ -3955,6 +3955,21 @@ fn companion_tool(
         let copilot = laverna::inference::Copilot;
         match copilot.answer(query, &context) {
             Ok(answer) => return Ok(ToolOutput::text_only(answer)),
+            Err(laverna::inference::CopilotError::BinaryMissing) => {
+                return Ok(ToolOutput::text_only(
+                    "The local assistant model isn't installed. Drop a .gguf file into \
+                     bin/models/ (or set LAVERNA_LLAMA_BIN / LAVERNA_LLAMA_MODEL) and I'll \
+                     answer in plain language."
+                        .to_string(),
+                ))
+            }
+            Err(laverna::inference::CopilotError::ModelMissing) => {
+                return Ok(ToolOutput::text_only(
+                    "No model file found. Add a .gguf to bin/models/ so I can answer \
+                     naturally; until then I'll give you the verified result directly."
+                        .to_string(),
+                ))
+            }
             Err(_) => { /* fall through to templated answer */ }
         }
     }

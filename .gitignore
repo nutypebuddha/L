@@ -26,3 +26,6 @@ pprof-
 # laverna-wasm build artifacts
 laverna-wasm/target/
 laverna-wasm/www/
+
+# bundled LLM model weights (drop your .gguf here; not committed)
+bin/models/*.gguf
