@@ -1,15 +1,19 @@
 [package]
 name = "laverna"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
-description = "L.ai · Proof — deterministic reasoning engine (9-graha wheel, NAND-to-verify proof cascade, verifiable proof objects)"
+description = "L.ai — deterministic reasoning engine + per-token validation (NAND-to-verify, CID gates, Tanto compute)"
 authors = ["nutypebuddha <nutypebuddha@proton.me>"]
 license = "Apache-2.0"
 publish = true
 repository = "https://github.com/nutypebuddha/lai"
 homepage = "https://github.com/nutypebuddha/lai"
-keywords = ["reasoning", "proof", "deterministic", "formula", "mcp", "lai"]
+keywords = ["reasoning", "proof", "validation", "deterministic", "lai"]
 categories = ["science", "mathematics", "compilers", "cryptography"]
+
+[[bin]]
+name = "lai"
+path = "src/main.rs"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -44,8 +48,11 @@ xalen-ayanamsa = "0.6"
 xalen-time = "0.6"
 xalen-coords = "0.6"
 
+# Gate (CID) — per-token validation + Tanto compute engine
+cid = { package = "lai-gate", path = "../gate" }
+
 # Web search / World Bank stats (optional)
-ureq = { version = "2", default-features = false, features = ["json", "tls"], optional = true }
+ureq = { version = "3", default-features = false, features = ["json"], optional = true }
 
 # MILP solver (optional, T46)
 good_lp = { version = "1", default-features = false, features = ["microlp"], optional = true }

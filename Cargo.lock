@@ -1324,7 +1324,7 @@ dependencies = [
 
 [[package]]
 name = "laverna"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "astro",
  "chrono",
@@ -1332,6 +1332,7 @@ dependencies = [
  "clap",
  "criterion",
  "good_lp",
+ "lai-gate",
  "libc",
  "petgraph 0.8.3",
  "pprof",
@@ -1341,7 +1342,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "toml",
- "ureq 2.12.1",
+ "ureq 3.3.0",
  "vsop87",
  "xalen-ayanamsa",
  "xalen-coords",

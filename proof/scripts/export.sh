@@ -14,7 +14,7 @@
 #
 # Hub layout (Android scoped storage forbids new top-level dirs, so we nest
 # under Download/):
-#   /sdcard/Download/Laverna/bin/laverna-x86_64   <- fixed name, overwritten
+#   /sdcard/Download/Laverna/bin/lai-x86_64   <- fixed name, overwritten
 #
 # Env:
 #   CARGO_BUILD_JOBS   parallel jobs (not hardcoded; set per-invocation)
@@ -30,7 +30,7 @@ HUB="${HUB:-/sdcard/Download/Laverna}"
 BIN_DIR="$HUB/bin"
 TARGET="x86_64-unknown-linux-musl"
 FEATURES="mcp websearch budget llm milp graph"
-DEST="$BIN_DIR/laverna-x86_64"
+DEST="$BIN_DIR/lai-x86_64"
 
 MUSL_SYSROOT="/opt/x86_64-linux-musl-cross/x86_64-linux-musl"
 HOST_X86_64_GCC="$(command -v x86_64-linux-gnu-gcc || true)"
@@ -56,9 +56,9 @@ cargo build --release --target "$TARGET" --features "$FEATURES"
 
 echo "==> exporting to hub"
 mkdir -p "$BIN_DIR"
-cp "$WORKSPACE_ROOT/target/$TARGET/release/laverna" "$DEST"
+cp "$WORKSPACE_ROOT/target/$TARGET/release/lai" "$DEST"
 
-echo "==> bundling local LLM (laverna bin ships with llama.cpp + model drop-in)"
+echo "==> bundling local LLM (lai bin ships with llama.cpp + model drop-in)"
 LLAMA_DIR="$BIN_DIR/llama"
 MODELS_DIR="$BIN_DIR/models"
 mkdir -p "$LLAMA_DIR" "$MODELS_DIR"
@@ -76,7 +76,7 @@ echo "==> verifying static x86_64 linkage (via qemu, since host is aarch64)"
 # NOTE: $DEST lives on /sdcard, a noexec FUSE mount, so qemu cannot mmap-exec
 # it there. Copy to a writable fs for the runtime smoke test; the `od` check
 # below is the authoritative staticness proof regardless.
-VERIFY_COPY="$(mktemp -t laverna-verify.XXXXXX)"
+VERIFY_COPY="$(mktemp -t lai-verify.XXXXXX)"
 cp "$DEST" "$VERIFY_COPY"
 chmod +x "$VERIFY_COPY"
 if [ -x /usr/bin/qemu-x86_64-static ]; then

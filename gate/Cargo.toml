@@ -19,10 +19,6 @@ exclude = [
     ".gitignore",
 ]
 
-[[bin]]
-name = "lai-gate"
-path = "src/main.rs"
-
 [lib]
 name = "cid"
 path = "src/lib.rs"
