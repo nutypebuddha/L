@@ -9,6 +9,7 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -91,7 +92,7 @@ jobs:
         run: node --check src/cid.js && node -e "require('./src/adapters/grok.js')" || true
 
   release-assets:
-    name: Release assets (static x86_64 + llama bundle)
+    name: Release assets (x86_64-musl + llama bundle)
     needs: [check, wasm-build, bridge]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -106,9 +107,10 @@ jobs:
         run: |
           cargo build --release --target x86_64-unknown-linux-musl \
             --features "mcp websearch budget llm milp graph"
-      - name: Verify static linkage
+      - name: Verify binary exists and is statically linked
         run: |
-          bin=target/x86_64-unknown-linux-musl/release/laverna
+          bin=target/x86_64-unknown-linux-musl/release/lai
+          [ ! -f "$bin" ] && { echo "::error::Binary not found at $bin — did the bin name change?"; exit 1; }
           file "$bin"
           if readelf -d "$bin" | grep -q NEEDED; then
             echo "::error::$bin is dynamically linked"; exit 1
@@ -116,13 +118,57 @@ jobs:
       - name: Bundle llama engine
         run: |
           mkdir -p dist/bin/llama dist/bin/models
-          cp target/x86_64-unknown-linux-musl/release/laverna dist/bin/laverna-x86_64
+          cp target/x86_64-unknown-linux-musl/release/lai dist/bin/lai-x86_64
           cp -rL bin/llama/. dist/bin/llama/
           [ -f bin/models/.gitkeep ] && cp bin/models/.gitkeep dist/bin/models/
-          tar -C dist -czf laverna-x86_64-bundle.tar.gz bin
+          tar -C dist -czf lai-x86_64-bundle.tar.gz bin
+      - name: Generate SHA256 checksums
+        run: |
+          cd dist/bin
+          sha256sum lai-x86_64 > lai-x86_64.sha256
+          cd ../..
+          sha256sum lai-x86_64-bundle.tar.gz > lai-x86_64-bundle.tar.gz.sha256
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/bin/laverna-x86_64
-            laverna-x86_64-bundle.tar.gz
+            dist/bin/lai-x86_64
+            dist/bin/lai-x86_64.sha256
+            lai-x86_64-bundle.tar.gz
+            lai-x86_64-bundle.tar.gz.sha256
+
+  release-assets-aarch64:
+    name: Release assets (aarch64-musl)
+    needs: [check, wasm-build, bridge]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cross
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - name: Build static aarch64-musl release
+        run: |
+          cross build --release --target aarch64-unknown-linux-musl \
+            --features "mcp websearch budget llm milp graph" \
+            -p laverna
+      - name: Verify binary exists
+        run: |
+          bin=target/aarch64-unknown-linux-musl/release/lai
+          [ ! -f "$bin" ] && { echo "::error::Binary not found at $bin — did the bin name change?"; exit 1; }
+          file "$bin"
+      - name: Prepare release assets
+        run: |
+          mkdir -p dist/bin
+          cp target/aarch64-unknown-linux-musl/release/lai dist/bin/lai-aarch64
+      - name: Generate SHA256 checksum
+        run: |
+          cd dist/bin
+          sha256sum lai-aarch64 > lai-aarch64.sha256
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/bin/lai-aarch64
+            dist/bin/lai-aarch64.sha256
