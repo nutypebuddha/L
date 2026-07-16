@@ -7417,7 +7417,7 @@ fn cmd_athena_llm(
 
 #[cfg(feature = "budget")]
 fn cmd_athena_budget() {
-    let budget = athena::budget::TokenBudget::new("", 0, 0);
+    let budget = athena::budget::TokenBudget::default();
     let stats = budget.stats();
     println!("{:?}", stats);
     let spends = budget.spends();
@@ -7453,7 +7453,7 @@ fn cmd_athena_budget() {
 
 #[cfg(feature = "budget")]
 fn cmd_athena_budget_reset() {
-    let mut budget = athena::budget::TokenBudget::new("", 0, 0);
+    let mut budget = athena::budget::TokenBudget::default();
     budget.reset();
     println!("Token budget reset. All counters cleared.");
 }

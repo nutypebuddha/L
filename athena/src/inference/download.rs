@@ -93,11 +93,13 @@ fn download_model(config: &InferenceConfig) -> Result<PathBuf, InferenceError> {
         .call()
         .map_err(|e| InferenceError::BackendUnavailable(format!("model download failed: {}", e)))?;
     let total: u64 = resp
-        .header("Content-Length")
+        .headers()
+        .get("Content-Length")
+        .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_MODEL_SIZE);
 
-    let mut reader = resp.into_reader();
+    let mut reader = resp.into_body().into_reader();
     let mut file = std::fs::File::create(&part)
         .map_err(|e| InferenceError::ConfigError(format!("create {}: {}", part.display(), e)))?;
 

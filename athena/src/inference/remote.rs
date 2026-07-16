@@ -97,9 +97,14 @@ impl RemoteBackend {
             .map_err(|e| {
                 InferenceError::BackendUnavailable(format!("HTTP request to {} failed: {}", url, e))
             })?
-            .json()
+            .into_body()
+            .read_to_string()
             .map_err(|e| {
-                InferenceError::InferenceFailed(format!("response parsing failed: {}", e))
+                InferenceError::InferenceFailed(format!("response read failed: {}", e))
+            })
+            .and_then(|body| {
+                serde_json::from_str(&body)
+                    .map_err(|e| InferenceError::InferenceFailed(format!("response parsing failed: {}", e)))
             })?;
 
         let text = response
@@ -133,7 +138,8 @@ impl RemoteBackend {
         let health_url = format!("{}/health", base);
         match self.client.get(&health_url).call() {
             Ok(resp) => {
-                if let Ok(health) = resp.json::<HealthResponse>() {
+                if let Ok(body) = resp.into_body().read_to_string() {
+                    if let Ok(health) = serde_json::from_str::<HealthResponse>(&body) {
                     return Ok(HealthStatus {
                         healthy: true,
                         model_loaded: health.model_path,
@@ -144,6 +150,7 @@ impl RemoteBackend {
                             health.slots_idle.unwrap_or(0)
                         ),
                     });
+                }
                 }
                 Ok(HealthStatus {
                     healthy: true,
