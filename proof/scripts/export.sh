@@ -22,6 +22,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Workspace root is one level above proof/ (virtual workspace).
+WORKSPACE_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 cd "$REPO_ROOT"
 
 HUB="${HUB:-/sdcard/Download/Laverna}"
@@ -54,7 +56,7 @@ cargo build --release --target "$TARGET" --features "$FEATURES"
 
 echo "==> exporting to hub"
 mkdir -p "$BIN_DIR"
-cp "target/$TARGET/release/laverna" "$DEST"
+cp "$WORKSPACE_ROOT/target/$TARGET/release/laverna" "$DEST"
 
 echo "==> bundling local LLM (laverna bin ships with llama.cpp + model drop-in)"
 LLAMA_DIR="$BIN_DIR/llama"
