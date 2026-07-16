@@ -51,6 +51,9 @@ xalen-coords = "0.6"
 # Gate (CID) — per-token validation + Tanto compute engine
 cid = { package = "lai-gate", path = "../gate" }
 
+# Athena — relational intelligence engine (formulas, wheel, entity system)
+athena = { path = "../athena", default-features = false }
+
 # Web search / World Bank stats (optional)
 ureq = { version = "3", default-features = false, features = ["json"], optional = true }
 
@@ -63,16 +66,23 @@ petgraph = { version = "0.8", optional = true }
 # Benchmark harness (optional)
 criterion = { version = "0.5", features = ["html_reports"], optional = true }
 
+# Athena optional deps (MCP server, LLM inference)
+rmcp = { version = "1.4", features = ["server", "transport-io"], optional = true }
+tokio = { version = "1", features = ["io-util", "rt", "rt-multi-thread", "macros"], optional = true }
+llama-gguf = { version = "0.10", features = ["cpu"], optional = true }
+dirs = { version = "5", optional = true }
+sha2 = { version = "0.10", optional = true }
+
 [dev-dependencies]
 tempfile = "3"
 pprof = { version = "0.14", features = ["criterion", "flamegraph"] }
 
 [features]
 default = []  # minimal: no heavy deps, fast builds
-mcp = ["websearch"]
+mcp = ["websearch", "dep:rmcp", "dep:tokio", "athena/mcp"]
 websearch = ["dep:ureq"]
-budget = []
+budget = ["athena/budget"]
 bench = ["dep:criterion"]
-llm = []  # marker only — stub inference module, no heavy deps
+llm = ["athena/llm", "dep:llama-gguf", "dep:tokio", "dep:dirs", "dep:sha2"]
 milp = ["dep:good_lp"]
 graph = ["dep:petgraph"]

@@ -6,6 +6,8 @@ fn main() {
 
     println!("cargo:rerun-if-changed=formulas/");
     println!("cargo:rerun-if-changed=entities/");
+    println!("cargo:rerun-if-changed=../athena/formulas/");
+    println!("cargo:rerun-if-changed=../athena/entities/");
 
     let embedded = out_dir.join("embedded.rs");
     let mut src = String::new();
@@ -85,6 +87,57 @@ fn main() {
     src.push_str(&format!(
         "pub const EVENTS_TOML: &str = {:?};\n",
         events_toml
+    ));
+
+    // ─── Athena corpus (embedded from ../athena/) ──────────────────────────
+    let athena_root = manifest.parent().unwrap().join("athena");
+
+    // Athena formulas: atomic + bridging + nonmath
+    let athena_formula_dirs = ["formulas/atomic", "formulas/bridging", "formulas/nonmath"];
+    let mut athena_formulas = String::new();
+    for dir in &athena_formula_dirs {
+        let dir_path = athena_root.join(dir);
+        if let Ok(entries) = std::fs::read_dir(&dir_path) {
+            let mut paths: Vec<PathBuf> = entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+                .collect();
+            paths.sort();
+            for path in paths {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    athena_formulas.push_str(&content);
+                    athena_formulas.push('\n');
+                }
+            }
+        }
+    }
+
+    // Athena entities
+    let athena_entities_dir = athena_root.join("entities");
+    let mut athena_entities = String::new();
+    if let Ok(entries) = std::fs::read_dir(&athena_entities_dir) {
+        let mut paths: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "toml"))
+            .collect();
+        paths.sort();
+        for path in paths {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                athena_entities.push_str(&content);
+                athena_entities.push('\n');
+            }
+        }
+    }
+
+    src.push_str(&format!(
+        "pub const ATHENA_FORMULAS_TOML: &str = {:?};\n",
+        athena_formulas
+    ));
+    src.push_str(&format!(
+        "pub const ATHENA_ENTITIES_TOML: &str = {:?};\n",
+        athena_entities
     ));
 
     // Versioned corpus manifest: semver (from Cargo.toml) + a stable content

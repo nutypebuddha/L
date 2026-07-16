@@ -14,6 +14,22 @@ use serde_json::Value;
 use std::borrow::Cow;
 use std::io::{self, BufRead, BufReader, Write};
 
+use std::collections::HashMap;
+
+// Athena type aliases (prefixed to avoid shadowing laverna::prelude types)
+use athena::asauchi::Asauchi as AthenaAsauchi;
+use athena::bankai::Bankai as AthenaBankai;
+use athena::descent::DescentEngine as AthenaDescentEngine;
+use athena::entity::EntityRegistry as AthenaEntityRegistry;
+use athena::formula::FormulaRegistry as AthenaFormulaRegistry;
+use athena::gyro::GyroState as AthenaGyroState;
+use athena::shikai::Shikai as AthenaShikai;
+use athena::wheel::Domain as AthenaDomain;
+use athena::wheel::WheelGraph as AthenaWheelGraph;
+use athena::zanpakuto::nlp::NlpEngine as AthenaNlpEngine;
+use athena::zanpakuto::{AccessTier as AthenaAccessTier, Zanpakuto as AthenaZanpakuto};
+use athena::astrology::Aspect as AthenaAspect;
+
 /// Beyond this many whitespace-delimited tokens a query is refused as
 /// `TooComplex`: the deterministic kernel settles a bounded token window (the
 /// descent matrix is capped to avoid O(n²) blow-up), so it cannot make a
@@ -25,6 +41,28 @@ const TOO_COMPLEX_TOKEN_LIMIT: usize = 200;
 enum OutputFormat {
     Text,
     Json,
+}
+
+#[derive(Debug, Clone)]
+struct KeyVal {
+    key: String,
+    value: f64,
+}
+
+fn parse_key_val(s: &str) -> Result<KeyVal, String> {
+    let (k, v) = s
+        .split_once('=')
+        .ok_or_else(|| format!("expected key=value, got '{s}'"))?;
+    let value: f64 = v
+        .parse()
+        .map_err(|e| format!("invalid value for '{k}': {e}"))?;
+    if !value.is_finite() {
+        return Err(format!("value for '{k}' must be finite (got {value})"));
+    }
+    Ok(KeyVal {
+        key: k.to_string(),
+        value,
+    })
 }
 
 #[derive(Parser)]
@@ -277,6 +315,11 @@ enum Commands {
         #[command(subcommand)]
         action: TantoAction,
     },
+    /// L.ai · Athena: relational intelligence — formulas, not facts
+    Athena {
+        #[command(subcommand)]
+        action: AthenaAction,
+    },
 }
 
 /// Subcommands of `laverna corpus`.
@@ -448,6 +491,287 @@ enum TantoAction {
         /// Path to the proof object JSON file
         path: String,
     },
+}
+
+/// Subcommands of `lai athena`.
+#[derive(Subcommand)]
+enum AthenaAction {
+    /// Show Athena system info
+    Info,
+    /// Validate text through asauchi gates
+    Validate {
+        /// Text to validate
+        text: String,
+        /// Gate to use (default: math)
+        #[arg(long, default_value = "math")]
+        gate: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Register a new identity with the zanpakuto
+    Register {
+        /// Identity name
+        #[arg(long)]
+        name: String,
+        /// Access tier (asauchi, shikai, bankai)
+        #[arg(long, default_value = "shikai")]
+        tier: String,
+    },
+    /// List registered identities
+    Identities,
+    /// Process a query through the Shikai NLP pipeline
+    Shikai {
+        /// Query string
+        query: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Full Bankai solve pipeline (descent → gyro → shikai → solve)
+    Solve {
+        /// Query to solve
+        query: String,
+        /// Identity to use
+        #[arg(long, default_value = "default")]
+        identity: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Evaluate a formula by ID
+    Eval {
+        /// Formula ID
+        #[arg(long)]
+        formula: String,
+        /// Arguments as key=value pairs (repeatable)
+        #[arg(long, num_args = 1..)]
+        args: Vec<String>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Chain multiple formulas together
+    Chain {
+        /// Comma-separated formula IDs
+        #[arg(long)]
+        formulas: String,
+        /// Arguments as key=value pairs (repeatable)
+        #[arg(long, num_args = 1..)]
+        args: Vec<String>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Compose formulas into a composite
+    Compose {
+        /// Comma-separated formula IDs
+        #[arg(long)]
+        formulas: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Traverse the zodiac wheel from a domain
+    Traverse {
+        /// Starting domain
+        #[arg(long)]
+        domain: String,
+        /// Maximum depth
+        #[arg(long, default_value_t = 5)]
+        depth: usize,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Show the zodiac wheel (full or a specific domain)
+    Wheel {
+        /// Domain to show (optional)
+        #[arg(long)]
+        domain: Option<String>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Search formulas by keyword
+    Search {
+        /// Search keyword
+        keyword: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// BFS path-finding: derive one variable from others via formula chain
+    Reason {
+        /// Comma-separated variable names you already have
+        #[arg(long)]
+        have: String,
+        /// The variable you want to derive
+        #[arg(long)]
+        want: String,
+        /// Maximum search depth
+        #[arg(long, default_value_t = 5)]
+        max_depth: usize,
+        /// Execute the chain
+        #[arg(long)]
+        execute: bool,
+        /// Arguments as key=value pairs
+        #[arg(long, num_args = 1..)]
+        args: Vec<String>,
+        /// Output without astrological names
+        #[arg(long)]
+        neutral: bool,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Reason from an entity's properties to a target variable
+    EntityReason {
+        /// Entity ID
+        #[arg(long)]
+        entity: String,
+        /// Target variable
+        #[arg(long)]
+        want: String,
+        /// Maximum search depth
+        #[arg(long, default_value_t = 5)]
+        max_depth: usize,
+        /// Execute the chain
+        #[arg(long)]
+        execute: bool,
+        /// Output without astrological names
+        #[arg(long)]
+        neutral: bool,
+        /// Additional arguments as key=value pairs
+        #[arg(long, num_args = 1..)]
+        args: Vec<String>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Show the Bankai pipeline trace for a query
+    Pipeline {
+        /// Query to trace
+        query: String,
+        /// Identity to use
+        #[arg(long, default_value = "default")]
+        identity: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Start Athena MCP server on stdin/stdout
+    #[cfg(feature = "mcp")]
+    Mcp,
+    /// List all seed entities
+    EntityList {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Get an entity by ID
+    EntityGet {
+        /// Entity ID
+        id: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Compute the aspect between two entities
+    EntityAspect {
+        /// Source entity ID
+        #[arg(long)]
+        from: String,
+        /// Target entity ID
+        #[arg(long)]
+        to: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Search entities by keyword
+    EntitySearch {
+        /// Search keyword
+        keyword: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Evaluate a formula grounded in an entity
+    EntityEval {
+        /// Formula ID
+        #[arg(long)]
+        formula: String,
+        /// Entity ID
+        #[arg(long)]
+        entity: String,
+        /// Additional arguments as key=value pairs
+        #[arg(long, num_args = 1..)]
+        args: Vec<String>,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Classify a token across 7 astrological axes
+    Classify {
+        /// Token to classify
+        token: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Show gyroscopic wheel state
+    Gyro {
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Run 7-layer token descent on a query
+    Descent {
+        /// Query to analyze
+        query: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Raw descent matrix for a query
+    DescentMatrix {
+        /// Query to analyze
+        query: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Compute planetary positions for a date
+    Ephemeris {
+        /// Date as YYYY-MM-DD (Gregorian, UT)
+        #[arg(long)]
+        date: String,
+        /// Time of day as HH:MM (UT)
+        #[arg(long, default_value = "00:00")]
+        time: String,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Distill formula pairs for LLM training
+    #[cfg(feature = "llm")]
+    Distill {
+        /// Output JSONL file (default: stdout)
+        #[arg(long)]
+        out: Option<String>,
+        /// Cap the number of pairs
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    /// Route a query through the LLM capstone
+    #[cfg(feature = "llm")]
+    Llm {
+        /// Query to route through the LLM
+        query: String,
+        /// Show full routing decision
+        #[arg(long)]
+        verbose: bool,
+        /// Backend type: 'local' or 'remote'
+        #[arg(long)]
+        backend: Option<String>,
+        /// Path to GGUF model file
+        #[arg(long)]
+        model: Option<String>,
+        /// Endpoint URL
+        #[arg(long)]
+        endpoint: Option<String>,
+        /// Show backend health
+        #[arg(long)]
+        health: bool,
+        /// Free-form generation
+        #[arg(long)]
+        generate: bool,
+    },
+    /// Show token budget status
+    #[cfg(feature = "budget")]
+    Budget,
+    /// Reset token budget counters
+    #[cfg(feature = "budget")]
+    BudgetReset,
 }
 
 fn main() {
@@ -772,6 +1096,134 @@ fn main() {
                 cmd_tanto_verify(&path);
             }
         },
+        Commands::Athena { action } => match action {
+            AthenaAction::Info => cmd_athena_info(),
+            AthenaAction::Validate { text, gate, format } => {
+                cmd_athena_validate(&text, &gate, format);
+            }
+            AthenaAction::Register { name, tier } => {
+                cmd_athena_register(&name, &tier);
+            }
+            AthenaAction::Identities => cmd_athena_identities(),
+            AthenaAction::Shikai { query, format } => {
+                cmd_athena_shikai(&query, format);
+            }
+            AthenaAction::Solve { query, identity, format } => {
+                cmd_athena_solve(&query, &identity, format);
+            }
+            AthenaAction::Eval { formula, args, format } => {
+                cmd_athena_eval(&formula, &args, format);
+            }
+            AthenaAction::Chain { formulas, args, format } => {
+                cmd_athena_chain(&formulas, &args, format);
+            }
+            AthenaAction::Compose { formulas, format } => {
+                cmd_athena_compose(&formulas, format);
+            }
+            AthenaAction::Traverse { domain, depth, format } => {
+                cmd_athena_traverse(&domain, depth, format);
+            }
+            AthenaAction::Wheel { domain, format } => {
+                cmd_athena_wheel(domain.as_deref(), format);
+            }
+            AthenaAction::Search { keyword, format } => {
+                cmd_athena_search(&keyword, format);
+            }
+            AthenaAction::Reason {
+                have,
+                want,
+                max_depth,
+                execute,
+                args,
+                neutral,
+                format,
+            } => {
+                cmd_athena_reason(&have, &want, max_depth, execute, &args, neutral, format);
+            }
+            AthenaAction::EntityReason {
+                entity,
+                want,
+                max_depth,
+                execute,
+                neutral,
+                args,
+                format,
+            } => {
+                cmd_athena_entity_reason(
+                    &entity,
+                    &want,
+                    max_depth,
+                    execute,
+                    neutral,
+                    &args,
+                    format,
+                );
+            }
+            AthenaAction::Pipeline { query, identity, format } => {
+                cmd_athena_pipeline(&query, &identity, format);
+            }
+            #[cfg(feature = "mcp")]
+            AthenaAction::Mcp => cmd_athena_mcp(),
+            AthenaAction::EntityList { format } => cmd_athena_entity_list(format),
+            AthenaAction::EntityGet { id, format } => {
+                cmd_athena_entity_get(&id, format);
+            }
+            AthenaAction::EntityAspect { from, to, format } => {
+                cmd_athena_entity_aspect(&from, &to, format);
+            }
+            AthenaAction::EntitySearch { keyword, format } => {
+                cmd_athena_entity_search(&keyword, format);
+            }
+            AthenaAction::EntityEval {
+                formula,
+                entity,
+                args,
+                format,
+            } => {
+                cmd_athena_entity_eval(&formula, &entity, &args, format);
+            }
+            AthenaAction::Classify { token, format } => {
+                cmd_athena_classify(&token, format);
+            }
+            AthenaAction::Gyro { format } => cmd_athena_gyro(format),
+            AthenaAction::Descent { query, format } => {
+                cmd_athena_descent(&query, format);
+            }
+            AthenaAction::DescentMatrix { query, format } => {
+                cmd_athena_descent_matrix(&query, format);
+            }
+            AthenaAction::Ephemeris { date, time, format } => {
+                cmd_athena_ephemeris(&date, &time, format);
+            }
+            #[cfg(feature = "llm")]
+            AthenaAction::Distill { out, limit } => {
+                cmd_athena_distill(out.as_deref(), limit);
+            }
+            #[cfg(feature = "llm")]
+            AthenaAction::Llm {
+                query,
+                verbose,
+                backend,
+                model,
+                endpoint,
+                health,
+                generate,
+            } => {
+                cmd_athena_llm(
+                    &query,
+                    verbose,
+                    backend.as_deref(),
+                    model.as_deref(),
+                    endpoint.as_deref(),
+                    health,
+                    generate,
+                );
+            }
+            #[cfg(feature = "budget")]
+            AthenaAction::Budget => cmd_athena_budget(),
+            #[cfg(feature = "budget")]
+            AthenaAction::BudgetReset => cmd_athena_budget_reset(),
+        },
     }
 }
 
@@ -851,6 +1303,17 @@ fn load_events() -> EventRegistry {
     let mut events = EventRegistry::new();
     let _ = events.load_from_str(EVENTS_TOML);
     events
+}
+
+fn load_athena_registries() -> (AthenaFormulaRegistry, AthenaEntityRegistry) {
+    let mut formula_reg = AthenaFormulaRegistry::new();
+    let _ = formula_reg.load_from_toml_str(ATHENA_FORMULAS_TOML);
+    formula_reg.rebuild_tfidf();
+
+    let mut entity_reg = AthenaEntityRegistry::new();
+    let _ = entity_reg.load_seeds_from_str(ATHENA_ENTITIES_TOML, None);
+
+    (formula_reg, entity_reg)
 }
 
 // ─── solve Command ──────────────────────────────────────────────────────────
@@ -4954,4 +5417,1738 @@ fn cmd_tanto_verify(path: &str) {
             std::process::exit(1);
         }
     }
+}
+
+// ─── Athena handlers ───────────────────────────────────────────────────────
+
+fn cmd_athena_info() {
+    let asauchi = AthenaAsauchi::new();
+    let info = asauchi.info();
+    println!("{}", serde_json::to_string_pretty(&info).unwrap());
+}
+
+fn cmd_athena_validate(text: &str, gate: &str, format: OutputFormat) {
+    let asauchi = AthenaAsauchi::new();
+    let result = asauchi.public_validate(text, gate);
+    if format == OutputFormat::Json {
+        println!("{}", serde_json::to_string_pretty(&result).unwrap());
+    } else {
+        println!("=== Validation Result ===");
+        for g in &result.gates {
+            let icon = if g.passed { "✓" } else { "✗" };
+            println!(
+                "  {icon} {}: {} (confidence: {:.2})",
+                g.gate, g.message, g.confidence
+            );
+            for issue in &g.issues {
+                println!("    Issue: {issue}");
+            }
+            for suggestion in &g.suggestions {
+                println!("    → {suggestion}");
+            }
+        }
+    }
+}
+
+fn cmd_athena_register(name: &str, tier: &str) {
+    let mut zanpakuto = AthenaZanpakuto::new();
+    let access_tier = match tier.to_lowercase().as_str() {
+        "bankai" => AthenaAccessTier::Bankai,
+        "shikai" => AthenaAccessTier::Shikai,
+        "zanpakuto" => AthenaAccessTier::Zanpakuto,
+        "asauchi" => AthenaAccessTier::Asauchi,
+        _ => {
+            eprintln!("Warning: unknown tier '{tier}'. Defaulting to Asauchi.");
+            AthenaAccessTier::Asauchi
+        }
+    };
+    let identity = zanpakuto.register(name, access_tier);
+    println!("Registered: {} ({:?})", identity.name, identity.tier);
+    println!("Session: {}", identity.session);
+    println!(
+        "Capabilities: {:?}",
+        identity
+            .capabilities
+            .iter()
+            .map(|c| format!("{:?}", c))
+            .collect::<Vec<_>>()
+    );
+}
+
+fn cmd_athena_identities() {
+    let mut zanpakuto = AthenaZanpakuto::new();
+    let default = zanpakuto.register("default", AthenaAccessTier::Bankai);
+    println!("=== Zanpakuto: Registered Identities ===");
+    println!("Default: {} ({:?})", default.name, default.tier);
+}
+
+fn cmd_athena_shikai(query: &str, format: OutputFormat) {
+    let (formula_reg, entity_reg) = load_athena_registries();
+    let shikai = AthenaShikai::with_entities(formula_reg.clone(), entity_reg.clone());
+    let nlp_engine = AthenaNlpEngine::new(entity_reg.clone(), formula_reg.clone());
+    let descent_engine = AthenaDescentEngine::new(formula_reg, entity_reg);
+    let mut gyro_state = AthenaGyroState::new();
+    let mut zanpakuto = AthenaZanpakuto::new();
+    let default_identity = zanpakuto.register("default", AthenaAccessTier::Bankai);
+
+    let nlp_ctx = nlp_engine.preprocess(query);
+    let matrix = descent_engine.resolve_nlp(&nlp_ctx);
+    gyro_state.apply_matrix(&matrix);
+    gyro_state.update(0.1);
+
+    match shikai.process_with_context(
+        query,
+        &default_identity,
+        Some(&nlp_ctx),
+        Some(&matrix),
+        Some(&gyro_state),
+    ) {
+        Ok(shikai_query) => {
+            if format == OutputFormat::Json {
+                let (sign, strength) = gyro_state.dominant_sign_info();
+                let value = serde_json::json!({
+                    "query": query,
+                    "shikai": athena::shikai::Shikai::format_query(&shikai_query),
+                    "nlp": {
+                        "intent": format!("{:?}", nlp_ctx.likely_intent),
+                        "domain": nlp_ctx.likely_domain.map(|d| serde_json::json!({
+                            "symbol": d.symbol(), "name": d.full_name()
+                        })),
+                        "entity": nlp_ctx.likely_entity,
+                        "query_type": format!("{:?}", nlp_ctx.query_type),
+                        "tokens": nlp_ctx.tokens.len(),
+                        "significant_tokens": nlp_ctx.significant_tokens.len(),
+                    },
+                    "gyro": {
+                        "dominant_sign": format!("{:?}", sign),
+                        "dominant_strength": strength,
+                        "precession": gyro_state.precession(),
+                    },
+                });
+                println!("{}", serde_json::to_string_pretty(&value).unwrap());
+            } else {
+                println!("=== Shikai: Query Processed ===");
+                println!("{}", athena::shikai::Shikai::format_query(&shikai_query));
+                println!("\n=== NLP Context ===");
+                println!(
+                    "  Intent:    {:?} (score: {:.2})",
+                    nlp_ctx.likely_intent,
+                    nlp_ctx
+                        .intent_scores
+                        .first()
+                        .map_or(0.0, |(_, s)| *s)
+                );
+                if let Some(d) = nlp_ctx.likely_domain {
+                    println!("  Domain:    {} ({})", d.symbol(), d.full_name());
+                }
+                if let Some(ref e) = nlp_ctx.likely_entity {
+                    println!("  Entity:    {}", e);
+                }
+                println!("  QueryType: {:?}", nlp_ctx.query_type);
+                println!(
+                    "  Tokens:    {} ({} significant)",
+                    nlp_ctx.tokens.len(),
+                    nlp_ctx.significant_tokens.len()
+                );
+                println!("\n=== Descent Matrix ===");
+                println!("{}", matrix.format());
+                println!("\n=== Gyro State ===");
+                let (sign, strength) = gyro_state.dominant_sign_info();
+                println!("  Dominant: {:?} (strength: {:.3})", sign, strength);
+                println!("  Current sign: {:?}", gyro_state.current_sign());
+                println!("  Precession: {:.3}", gyro_state.precession());
+            }
+        }
+        Err(e) => {
+            eprintln!("Shikai error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_athena_solve(query: &str, identity: &str, format: OutputFormat) {
+    let (formula_reg, entity_reg) = load_athena_registries();
+    let shikai = AthenaShikai::with_entities(formula_reg.clone(), entity_reg.clone());
+    let mut bankai = AthenaBankai::new(formula_reg.clone());
+    let nlp_engine = AthenaNlpEngine::new(entity_reg.clone(), formula_reg.clone());
+    let descent_engine = AthenaDescentEngine::new(formula_reg, entity_reg);
+    let mut gyro_state = AthenaGyroState::new();
+    let mut zanpakuto = AthenaZanpakuto::new();
+    let default_identity = zanpakuto.register("default", AthenaAccessTier::Bankai);
+
+    let id = zanpakuto
+        .authenticate(&format!("session_{identity}"))
+        .unwrap_or(&default_identity);
+    let nlp_ctx = nlp_engine.preprocess(query);
+    let matrix = descent_engine.resolve_nlp(&nlp_ctx);
+    gyro_state.apply_matrix(&matrix);
+    gyro_state.update(0.1);
+    bankai.gyro.gyro_state_mut().apply_matrix(&matrix);
+    bankai.gyro.gyro_state_mut().update(0.1);
+
+    match shikai.process_with_context(
+        query,
+        id,
+        Some(&nlp_ctx),
+        Some(&matrix),
+        Some(&gyro_state),
+    ) {
+        Ok(shikai_query) => {
+            let solve = bankai.solve(&shikai_query, id);
+            if format == OutputFormat::Json {
+                let value = serde_json::json!({
+                    "query": query,
+                    "summary": solve.summary,
+                    "chain": solve.chain.as_ref().map(|c| c.format()),
+                    "validation": solve.validation.as_ref().map(|v| v.summary.clone()),
+                });
+                println!("{}", serde_json::to_string_pretty(&value).unwrap());
+            } else {
+                println!("=== Bankai Solve ===");
+                println!("{}", solve.summary);
+                if let Some(chain) = &solve.chain {
+                    println!("\n{}", chain.format());
+                }
+                if let Some(validation) = &solve.validation {
+                    println!("\nValidation: {}", validation.summary);
+                }
+            }
+        }
+        Err(e) => match bankai.evaluate(query, &HashMap::new()) {
+            Ok(value) => {
+                if format == OutputFormat::Json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "direct_eval": value
+                        }))
+                        .unwrap()
+                    );
+                } else {
+                    println!("Direct eval: {query} = {value:.6}");
+                }
+            }
+            Err(_) => {
+                eprintln!("Bankai error: {e}");
+                std::process::exit(1);
+            }
+        },
+    }
+}
+
+fn cmd_athena_eval(formula: &str, args: &[String], format: OutputFormat) {
+    let (formula_reg, _entity_reg) = load_athena_registries();
+    let bankai = AthenaBankai::new(formula_reg);
+    let mut args_map = HashMap::new();
+    for arg in args {
+        if let Ok(kv) = parse_key_val(arg) {
+            args_map.insert(kv.key, kv.value);
+        }
+    }
+    match bankai.evaluate(formula, &args_map) {
+        Ok(value) => {
+            if format == OutputFormat::Json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "formula": formula,
+                        "result": value,
+                        "args": args_map,
+                    }))
+                    .unwrap()
+                );
+            } else {
+                println!("Bankai: {formula} → {value:.6}");
+            }
+        }
+        Err(e) => {
+            eprintln!("Evaluation failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_athena_chain(formulas: &str, args: &[String], format: OutputFormat) {
+    let formula_ids: Vec<&str> = formulas.split(',').map(|s| s.trim()).collect();
+    let (formula_reg, _entity_reg) = load_athena_registries();
+    let bankai = AthenaBankai::new(formula_reg);
+    let mut args_map = HashMap::new();
+    for arg in args {
+        if let Ok(kv) = parse_key_val(arg) {
+            args_map.insert(kv.key, kv.value);
+        }
+    }
+    match bankai.chain(&formula_ids, &args_map) {
+        Ok(result) => {
+            if format == OutputFormat::Json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "formulas": formula_ids,
+                        "result": result.format(),
+                    }))
+                    .unwrap()
+                );
+            } else {
+                println!("{}", result.format());
+            }
+        }
+        Err(e) => {
+            eprintln!("Chain failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_athena_compose(formulas: &str, format: OutputFormat) {
+    let formula_ids: Vec<&str> = formulas.split(',').map(|s| s.trim()).collect();
+    let (formula_reg, _entity_reg) = load_athena_registries();
+    let bankai = AthenaBankai::new(formula_reg);
+    match bankai.compose(&formula_ids) {
+        Ok(comp) => {
+            if format == OutputFormat::Json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "formulas": formula_ids,
+                        "description": comp.description,
+                    }))
+                    .unwrap()
+                );
+            } else {
+                println!("Composition:");
+                println!("  {}", comp.description);
+            }
+        }
+        Err(e) => {
+            eprintln!("Composition failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_athena_traverse(domain: &str, depth: usize, format: OutputFormat) {
+    let start = match AthenaDomain::parse(domain) {
+        Some(d) => d,
+        None => {
+            eprintln!("Error: unknown domain '{domain}'.");
+            eprintln!("Valid domains: aries, taurus, gemini, cancer, leo, virgo, libra, scorpio, sagittarius, capricorn, aquarius, pisces");
+            std::process::exit(1);
+        }
+    };
+    let (formula_reg, _entity_reg) = load_athena_registries();
+    let bankai = AthenaBankai::new(formula_reg);
+    let traversal = bankai.traverse(start, depth);
+    if format == OutputFormat::Json {
+        let steps: Vec<_> = traversal
+            .path
+            .iter()
+            .enumerate()
+            .map(|(i, step)| {
+                serde_json::json!({
+                    "step": i + 1,
+                    "domain": step.domain.symbol(),
+                    "name": step.domain.full_name(),
+                    "formula_count": step.formulas_at_node.len(),
+                    "formulas": step.formulas_at_node,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "path": traversal.format_path(),
+                "domains_visited": traversal.domains_visited().len(),
+                "formula_count": traversal.formula_count(),
+                "steps": steps,
+            }))
+            .unwrap()
+        );
+    } else {
+        println!("=== Bankai Traversal ===");
+        println!("Path: {}", traversal.format_path());
+        println!("Domains visited: {}", traversal.domains_visited().len());
+        println!("Formulas found: {}", traversal.formula_count());
+        for (i, step) in traversal.path.iter().enumerate() {
+            println!(
+                "  {}. {}{} — {} formula(s): {}",
+                i + 1,
+                step.domain.symbol(),
+                step.domain.full_name(),
+                step.formulas_at_node.len(),
+                step.formulas_at_node.join(", "),
+            );
+        }
+    }
+}
+
+fn cmd_athena_wheel(domain: Option<&str>, format: OutputFormat) {
+    let wheel = AthenaWheelGraph::new();
+    if let Some(d) = domain {
+        if let Some(parsed) = AthenaDomain::parse(d) {
+            let node = wheel.node(parsed);
+            if format == OutputFormat::Json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "symbol": node.symbol,
+                        "name": node.name,
+                        "description": node.description,
+                        "knowledge_domain": parsed.knowledge_domain(),
+                        "opposite": {
+                            "symbol": node.opposite.symbol(),
+                            "name": node.opposite.full_name()
+                        },
+                        "trines": parsed.trines().iter().map(|t| serde_json::json!({
+                            "symbol": t.symbol(), "name": t.full_name()
+                        })).collect::<Vec<_>>(),
+                        "adjacent": parsed.adjacent().iter().map(|a| serde_json::json!({
+                            "symbol": a.symbol(), "name": a.full_name()
+                        })).collect::<Vec<_>>(),
+                    }))
+                    .unwrap()
+                );
+            } else {
+                println!("{} {} — {}", node.symbol, node.name, node.description);
+                println!("  Knowledge: {}", parsed.knowledge_domain());
+                println!(
+                    "  Opposite: {} {}",
+                    node.opposite.symbol(),
+                    node.opposite.full_name()
+                );
+                println!("  Trines:");
+                for t in parsed.trines() {
+                    println!("    {} {}", t.symbol(), t.full_name());
+                }
+                println!("  Adjacent:");
+                for a in parsed.adjacent() {
+                    println!("    {} {}", a.symbol(), a.full_name());
+                }
+            }
+        } else {
+            eprintln!("Unknown domain: {d}");
+            std::process::exit(1);
+        }
+    } else if format == OutputFormat::Json {
+        let nodes: Vec<_> = wheel
+            .all_nodes()
+            .iter()
+            .map(|node| {
+                serde_json::json!({
+                    "symbol": node.symbol,
+                    "name": node.name,
+                    "description": node.description,
+                    "opposite": node.opposite.full_name(),
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "wheel": wheel.render_wheel(),
+                "domains": nodes,
+            }))
+            .unwrap()
+        );
+    } else {
+        println!("{}", wheel.render_wheel());
+        println!("\nDomains:");
+        for node in wheel.all_nodes() {
+            println!(
+                "  {} {:12} {:30} ↕ {}",
+                node.symbol, node.name, node.description, node.opposite.full_name()
+            );
+        }
+    }
+}
+
+fn cmd_athena_search(keyword: &str, format: OutputFormat) {
+    let (formula_reg, _entity_reg) = load_athena_registries();
+    let results = formula_reg.search(keyword);
+    if format == OutputFormat::Json {
+        let items: Vec<_> = results
+            .iter()
+            .map(|f| {
+                let type_str = match f.formula_type {
+                    athena::formula::FormulaType::Math => "math",
+                    athena::formula::FormulaType::Logic => "logic",
+                    athena::formula::FormulaType::Llm => "llm",
+                };
+                serde_json::json!({
+                    "id": f.id,
+                    "domain": f.domain.symbol(),
+                    "domain_name": f.domain.full_name(),
+                    "type": type_str,
+                    "description": f.description,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "keyword": keyword,
+                "count": items.len(),
+                "formulas": items,
+            }))
+            .unwrap()
+        );
+    } else if results.is_empty() {
+        println!("No formulas found for '{keyword}'.");
+        println!("Athena stores formulas, not facts. Try a broader concept.");
+    } else {
+        println!("Found {} formula(s) for '{keyword}':", results.len());
+        for f in results {
+            let type_str = match f.formula_type {
+                athena::formula::FormulaType::Math => "math",
+                athena::formula::FormulaType::Logic => "logic",
+                athena::formula::FormulaType::Llm => "llm",
+            };
+            println!(
+                "  {:<24} | {:12} | {:6} | {}",
+                f.id,
+                format!("{}{}", f.domain.symbol(), f.domain.full_name()),
+                type_str,
+                f.description,
+            );
+        }
+    }
+}
+
+fn cmd_athena_reason(
+    have: &str,
+    want: &str,
+    max_depth: usize,
+    execute: bool,
+    args: &[String],
+    neutral: bool,
+    format: OutputFormat,
+) {
+    let have_vars: Vec<String> = have.split(',').map(|s| s.trim().to_string()).collect();
+    let (formula_reg, _entity_reg) = load_athena_registries();
+    let bankai = AthenaBankai::new(formula_reg.clone());
+
+    match bankai.find_path(&have_vars, want, max_depth) {
+        Ok(path) => {
+            if path.is_empty() {
+                if format == OutputFormat::Json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "status": "already_have",
+                            "variable": want,
+                        }))
+                        .unwrap()
+                    );
+                } else {
+                    println!("Already have '{want}' — no derivation needed.");
+                }
+                return;
+            }
+
+            if format == OutputFormat::Json {
+                let chain: Vec<_> = path
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, fid)| {
+                        formula_reg.get(fid).map(|f| {
+                            serde_json::json!({
+                                "step": i + 1,
+                                "formula": fid,
+                                "domain": if neutral { f.domain.knowledge_domain().to_string() } else { f.domain.symbol().to_string() },
+                                "inputs": f.inputs,
+                                "output": f.output,
+                            })
+                        })
+                    })
+                    .collect();
+                let mut args_map = HashMap::new();
+                for arg in args {
+                    if let Ok(kv) = parse_key_val(arg) {
+                        args_map.insert(kv.key, kv.value);
+                    }
+                }
+                let chain_result = if execute {
+                    let refs: Vec<&str> = path.iter().map(|s| s.as_str()).collect();
+                    bankai.chain(&refs, &args_map).ok().map(|r| r.format())
+                } else {
+                    None
+                };
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "have": have_vars,
+                        "want": want,
+                        "path": path,
+                        "chain": chain,
+                        "executed": execute,
+                        "result": chain_result,
+                    }))
+                    .unwrap()
+                );
+            } else {
+                println!("=== Reason: {} → {} ===", have, want);
+                println!(
+                    "Found path ({} step(s)): {}",
+                    path.len(),
+                    path.join(" → ")
+                );
+                println!("\nFormula chain:");
+                for (i, fid) in path.iter().enumerate() {
+                    if let Some(f) = formula_reg.get(fid) {
+                        let satisfied: Vec<&str> = f.inputs.iter().map(|_| "✓").collect();
+                        let domain_label = if neutral {
+                            f.domain.knowledge_domain()
+                        } else {
+                            f.domain.symbol()
+                        };
+                        println!(
+                            "  {}. {} [{}]: {} → {}  inputs: {}",
+                            i + 1,
+                            fid,
+                            domain_label,
+                            f.inputs.join(", "),
+                            f.output,
+                            satisfied.join(", ")
+                        );
+                    }
+                }
+                if execute {
+                    println!("\nExecuting chain...");
+                    let mut args_map = HashMap::new();
+                    for arg in args {
+                        if let Ok(kv) = parse_key_val(arg) {
+                            args_map.insert(kv.key, kv.value);
+                        }
+                    }
+                    let refs: Vec<&str> = path.iter().map(|s| s.as_str()).collect();
+                    match bankai.chain(&refs, &args_map) {
+                        Ok(result) => println!("\n{}", result.format()),
+                        Err(e) => eprintln!("Chain execution failed: {e}"),
+                    }
+                } else {
+                    println!(
+                        "\nTip: re-run with --execute and --args key=value to run the chain."
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+            eprintln!(
+                "\nNo chain found to derive '{}' from '{:?}'.",
+                want, have_vars
+            );
+            eprintln!("Try increasing --max-depth or checking the formula registry.");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_athena_entity_reason(
+    entity: &str,
+    want: &str,
+    max_depth: usize,
+    execute: bool,
+    neutral: bool,
+    args: &[String],
+    format: OutputFormat,
+) {
+    let (formula_reg, entity_reg) = load_athena_registries();
+    let bankai = AthenaBankai::new(formula_reg.clone());
+
+    let seed = match entity_reg.get_seed(entity) {
+        Some(s) => s,
+        None => {
+            eprintln!("Entity not found: '{entity}'");
+            eprintln!("Use `lai athena entity-search <keyword>` to find entities.");
+            std::process::exit(1);
+        }
+    };
+
+    let mut have_vars: Vec<String> = seed.properties.keys().cloned().collect();
+    if let Some(ref formula) = seed.formula {
+        if let Some(f) = formula_reg.get(formula) {
+            if !have_vars.contains(&f.output) {
+                have_vars.push(f.output.clone());
+            }
+        }
+    }
+
+    if have_vars.is_empty() {
+        eprintln!("Entity '{entity}' has no properties to reason from.");
+        std::process::exit(1);
+    }
+
+    match bankai.find_path(&have_vars, want, max_depth) {
+        Ok(path) => {
+            if path.is_empty() {
+                if format == OutputFormat::Json {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "status": "already_have",
+                            "entity": entity,
+                            "variable": want,
+                        }))
+                        .unwrap()
+                    );
+                } else {
+                    println!("Already have '{want}' in entity properties — no derivation needed.");
+                }
+                return;
+            }
+
+            if format == OutputFormat::Json {
+                let chain: Vec<_> = path
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, fid)| {
+                        formula_reg.get(fid).map(|f| {
+                            serde_json::json!({
+                                "step": i + 1,
+                                "formula": fid,
+                                "domain": if neutral { f.domain.knowledge_domain().to_string() } else { f.domain.symbol().to_string() },
+                                "inputs": f.inputs,
+                                "output": f.output,
+                            })
+                        })
+                    })
+                    .collect();
+                let mut args_map: HashMap<String, f64> =
+                    seed.properties.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                for arg in args {
+                    if let Ok(kv) = parse_key_val(arg) {
+                        args_map.insert(kv.key, kv.value);
+                    }
+                }
+                let chain_result = if execute {
+                    let refs: Vec<&str> = path.iter().map(|s| s.as_str()).collect();
+                    bankai.chain(&refs, &args_map).ok().map(|r| r.format())
+                } else {
+                    None
+                };
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "entity": entity,
+                        "have": have_vars,
+                        "want": want,
+                        "path": path,
+                        "chain": chain,
+                        "executed": execute,
+                        "result": chain_result,
+                    }))
+                    .unwrap()
+                );
+            } else {
+                println!("=== Entity Reason: {} → {} ===", entity, want);
+                println!(
+                    "Entity properties ({}): {}",
+                    have_vars.len(),
+                    have_vars.join(", ")
+                );
+                println!(
+                    "Found path ({} step(s)): {}",
+                    path.len(),
+                    path.join(" → ")
+                );
+                println!("\nFormula chain:");
+                for (i, fid) in path.iter().enumerate() {
+                    if let Some(f) = formula_reg.get(fid) {
+                        let satisfied: Vec<&str> = f.inputs.iter().map(|_| "✓").collect();
+                        let domain_label = if neutral {
+                            f.domain.knowledge_domain()
+                        } else {
+                            f.domain.symbol()
+                        };
+                        println!(
+                            "  {}. {} [{}]: {} → {}  inputs: {}",
+                            i + 1,
+                            fid,
+                            domain_label,
+                            f.inputs.join(", "),
+                            f.output,
+                            satisfied.join(", ")
+                        );
+                    }
+                }
+                if execute {
+                    println!("\nExecuting chain with entity properties...");
+                    let mut args_map: HashMap<String, f64> =
+                        seed.properties.iter().map(|(k, v)| (k.clone(), *v)).collect();
+                    for arg in args {
+                        if let Ok(kv) = parse_key_val(arg) {
+                            args_map.insert(kv.key, kv.value);
+                        }
+                    }
+                    let refs: Vec<&str> = path.iter().map(|s| s.as_str()).collect();
+                    match bankai.chain(&refs, &args_map) {
+                        Ok(result) => println!("\n{}", result.format()),
+                        Err(e) => eprintln!("Chain execution failed: {e}"),
+                    }
+                } else {
+                    println!(
+                        "\nExecutable: re-run with --execute to evaluate using entity '{}'s properties.",
+                        entity
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("{}", e);
+            eprintln!(
+                "\nNo chain found to derive '{}' from entity '{}'s properties.",
+                want, entity
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_athena_pipeline(query: &str, identity: &str, format: OutputFormat) {
+    let (formula_reg, entity_reg) = load_athena_registries();
+    let shikai = AthenaShikai::with_entities(formula_reg.clone(), entity_reg.clone());
+    let bankai = AthenaBankai::new(formula_reg.clone());
+    let nlp_engine = AthenaNlpEngine::new(entity_reg, formula_reg);
+    let mut zanpakuto = AthenaZanpakuto::new();
+    let default_identity = zanpakuto.register("default", AthenaAccessTier::Bankai);
+    let id = zanpakuto
+        .authenticate(&format!("session_{identity}"))
+        .unwrap_or(&default_identity);
+
+    let pipeline = bankai.describe_pipeline(query, id);
+    let nlp_ctx = nlp_engine.preprocess(query);
+
+    if format == OutputFormat::Json {
+        let shikai_parsed = shikai
+            .process(query, id, Some(&nlp_ctx))
+            .ok()
+            .map(|sq| athena::shikai::Shikai::format_query(&sq));
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "query": query,
+                "pipeline": pipeline.to_string(),
+                "shikai": shikai_parsed,
+                "nlp": {
+                    "intent": format!("{:?}", nlp_ctx.likely_intent),
+                    "domain": nlp_ctx.likely_domain.map(|d| serde_json::json!({
+                        "symbol": d.symbol(), "name": d.full_name()
+                    })),
+                    "entity": nlp_ctx.likely_entity,
+                    "query_type": format!("{:?}", nlp_ctx.query_type),
+                },
+            }))
+            .unwrap()
+        );
+    } else {
+        println!("{pipeline}");
+        if let Ok(shikai_query) = shikai.process(query, id, Some(&nlp_ctx)) {
+            println!(
+                "\nShikai parsed:\n{}",
+                athena::shikai::Shikai::format_query(&shikai_query)
+            );
+        }
+        println!("\nNLP context:");
+        println!("  Intent:    {:?}", nlp_ctx.likely_intent);
+        if let Some(d) = nlp_ctx.likely_domain {
+            println!("  Domain:    {} ({})", d.symbol(), d.full_name());
+        }
+        if let Some(ref e) = nlp_ctx.likely_entity {
+            println!("  Entity:    {}", e);
+        }
+        println!("  QueryType: {:?}", nlp_ctx.query_type);
+    }
+}
+
+fn cmd_athena_entity_list(format: OutputFormat) {
+    let (_formula_reg, entity_reg) = load_athena_registries();
+    let seeds = entity_reg.list_seeds();
+    if format == OutputFormat::Json {
+        let items: Vec<_> = seeds
+            .iter()
+            .filter_map(|id| {
+                entity_reg.get_seed(id).map(|s| {
+                    let sign_str = s
+                        .classification
+                        .as_ref()
+                        .and_then(|c| c.dominant_sign())
+                        .map(|sign| format!("{:?}", sign))
+                        .unwrap_or_default();
+                    serde_json::json!({
+                        "id": s.id,
+                        "sign": sign_str,
+                        "description": s.description,
+                    })
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "count": items.len(),
+                "entities": items,
+            }))
+            .unwrap()
+        );
+    } else if seeds.is_empty() {
+        println!("No seed entities loaded.");
+    } else {
+        println!("=== Seed Entities ({}) ===", seeds.len());
+        for id in &seeds {
+            if let Some(s) = entity_reg.get_seed(id) {
+                let sign_str = s
+                    .classification
+                    .as_ref()
+                    .and_then(|c| c.dominant_sign())
+                    .map(|sign| format!("{:?}", sign))
+                    .unwrap_or_default();
+                println!("  {:30} | {:12} | {}", s.id, sign_str, s.description);
+            }
+        }
+    }
+}
+
+fn cmd_athena_entity_get(id: &str, format: OutputFormat) {
+    let (_formula_reg, entity_reg) = load_athena_registries();
+    if let Some(s) = entity_reg.get_seed(id) {
+        if format == OutputFormat::Json {
+            let sign_str = s
+                .classification
+                .as_ref()
+                .and_then(|c| c.dominant_sign())
+                .map(|sign| format!("{:?}", sign))
+                .unwrap_or_default();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "type": "seed",
+                    "id": s.id,
+                    "name": s.name,
+                    "sign": sign_str,
+                    "description": s.description,
+                    "tags": s.tags,
+                    "properties": s.properties,
+                    "constants": s.constants,
+                    "formula": s.formula,
+                }))
+                .unwrap()
+            );
+        } else {
+            println!("=== Seed Entity: {} ===", s.name);
+            println!("  ID:          {}", s.id);
+            let sign_str = s
+                .classification
+                .as_ref()
+                .and_then(|c| c.dominant_sign())
+                .map(|sign| format!("{:?}", sign))
+                .unwrap_or_else(|| "none".to_string());
+            println!("  Sign:        {}", sign_str);
+            println!("  Description: {}", s.description);
+            if !s.tags.is_empty() {
+                println!("  Tags:        {}", s.tags.join(", "));
+            }
+            if !s.properties.is_empty() {
+                println!("  Properties:");
+                for (k, v) in &s.properties {
+                    println!("    {:<30} = {}", k, v);
+                }
+            }
+            if !s.constants.is_empty() {
+                println!("  Constants:");
+                for (k, v) in &s.constants {
+                    println!("    {:<30} = {}", k, v);
+                }
+            }
+            if let Some(ref formula) = s.formula {
+                println!("  Formula:     {}", formula);
+            }
+        }
+    } else if let Some(e) = entity_reg.get(id) {
+        if format == OutputFormat::Json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "type": "runtime",
+                    "id": e.id,
+                    "text": e.text,
+                    "seq": e.seq,
+                    "truth": e.truth,
+                    "sign": e.dominant_sign().map(|s| format!("{:?}", s)),
+                    "element": e.dominant_element().map(|el| format!("{:?}", el)),
+                    "modality": e.dominant_modality().map(|m| format!("{:?}", m)),
+                    "tags": e.tags,
+                    "values": e.values,
+                }))
+                .unwrap()
+            );
+        } else {
+            println!("=== Runtime Entity: {} ===", e.text);
+            println!("  ID:           {}", e.id);
+            println!("  Text:         {}", e.text);
+            println!("  Seq:          {}", e.seq);
+            println!("  Truth:        {}", e.truth);
+            if let Some(sign) = e.dominant_sign() {
+                println!("  Sign:         {:?}", sign);
+            }
+            if let Some(el) = e.dominant_element() {
+                println!("  Element:      {:?}", el);
+            }
+            if let Some(moda) = e.dominant_modality() {
+                println!("  Modality:     {:?}", moda);
+            }
+            if !e.tags.is_empty() {
+                println!("  Tags:         {}", e.tags.join(", "));
+            }
+            if !e.values.is_empty() {
+                println!("  Values:");
+                for (k, v) in &e.values {
+                    println!("    {:<30} = {}", k, v);
+                }
+            }
+        }
+    } else {
+        eprintln!("Entity not found: '{id}'");
+        std::process::exit(1);
+    }
+}
+
+fn cmd_athena_entity_aspect(from: &str, to: &str, format: OutputFormat) {
+    let (_formula_reg, entity_reg) = load_athena_registries();
+    match entity_reg.aspect_between(from, to) {
+        Some((aspect, a, b)) => {
+            let sign_a = a
+                .dominant_sign()
+                .map(|s| format!("{:?}", s))
+                .unwrap_or_default();
+            let sign_b = b
+                .dominant_sign()
+                .map(|s| format!("{:?}", s))
+                .unwrap_or_default();
+            let aspect_desc = match aspect {
+                AthenaAspect::Conjunction => "Conjunction — same sign, aligned",
+                AthenaAspect::Sextile => "Sextile — adjacent, natural flow",
+                AthenaAspect::Trine => "Trine — harmonious, complementary",
+                AthenaAspect::Square => "Square — tension, requires work",
+                AthenaAspect::Opposition => "Opposition — complementary opposites",
+            };
+            if format == OutputFormat::Json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "from": {"id": a.id, "text": a.text, "sign": sign_a},
+                        "to": {"id": b.id, "text": b.text, "sign": sign_b},
+                        "aspect": format!("{:?}", aspect),
+                        "description": aspect_desc,
+                        "arc_distance": AthenaAspect::arc_distance_between(
+                            a.dominant_sign().map_or(0, |s| s.index()),
+                            b.dominant_sign().map_or(0, |s| s.index()),
+                        ),
+                    }))
+                    .unwrap()
+                );
+            } else {
+                println!("=== Aspect: {} <-> {} ===", a.text, b.text);
+                println!("  {} in {:?}", a.text, sign_a);
+                println!("  {} in {:?}", b.text, sign_b);
+                println!("  Aspect:      {:?} ({})", aspect, aspect_desc);
+                println!(
+                    "  Arc Distance: {} steps",
+                    AthenaAspect::arc_distance_between(
+                        a.dominant_sign().map_or(0, |s| s.index()),
+                        b.dominant_sign().map_or(0, |s| s.index()),
+                    )
+                );
+            }
+        }
+        None => {
+            eprintln!(
+                "Cannot compute aspect: one or both entities not found ('{from}', '{to}')"
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_athena_entity_search(keyword: &str, format: OutputFormat) {
+    let (formula_reg, entity_reg) = load_athena_registries();
+    let seed_results = entity_reg.search_seeds(keyword);
+    let runtime_results = entity_reg.search(keyword);
+    if format == OutputFormat::Json {
+        let seeds: Vec<_> = seed_results
+            .iter()
+            .map(|s| {
+                let sign_str = s
+                    .classification
+                    .as_ref()
+                    .and_then(|c| c.dominant_sign())
+                    .map(|sign| format!("{:?}", sign))
+                    .unwrap_or_default();
+                serde_json::json!({
+                    "id": s.id, "sign": sign_str, "description": s.description, "source": "seed"
+                })
+            })
+            .collect();
+        let runtime: Vec<_> = runtime_results
+            .iter()
+            .map(|e| {
+                let sign_str = e.dominant_sign().map(|s| format!("{:?}", s)).unwrap_or_default();
+                serde_json::json!({
+                    "id": e.id, "sign": sign_str, "text": e.text, "source": "runtime"
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "keyword": keyword,
+                "count": seeds.len() + runtime.len(),
+                "seeds": seeds,
+                "runtime": runtime,
+            }))
+            .unwrap()
+        );
+    } else if seed_results.is_empty() && runtime_results.is_empty() {
+        println!("No entities found for '{keyword}'.");
+        let formulas = formula_reg.search(keyword);
+        if !formulas.is_empty() {
+            println!("But found {} formula(s) with that keyword.", formulas.len());
+        }
+    } else {
+        let total = seed_results.len() + runtime_results.len();
+        println!("Found {} entity(ies) for '{keyword}':", total);
+        for s in &seed_results {
+            let sign_str = s
+                .classification
+                .as_ref()
+                .and_then(|c| c.dominant_sign())
+                .map(|sign| format!("{:?}", sign))
+                .unwrap_or_default();
+            println!(
+                "  {:30} | {:12} | {} [seed]",
+                s.id, sign_str, s.description,
+            );
+        }
+        for e in &runtime_results {
+            let sign_str = e.dominant_sign().map(|s| format!("{:?}", s)).unwrap_or_default();
+            println!(
+                "  {:30} | {:12} | {} [runtime]",
+                e.id, sign_str, e.text,
+            );
+        }
+    }
+}
+
+fn cmd_athena_entity_eval(formula: &str, entity: &str, args: &[String], format: OutputFormat) {
+    let (formula_reg, entity_reg) = load_athena_registries();
+    let bankai = AthenaBankai::new(formula_reg.clone());
+
+    let seed = match entity_reg.get_seed(entity) {
+        Some(s) => s,
+        None => {
+            eprintln!("Seed entity not found: '{entity}' (entity-eval requires a seed entity)");
+            std::process::exit(1);
+        }
+    };
+
+    let mut args_map = HashMap::new();
+    for arg in args {
+        if let Ok(kv) = parse_key_val(arg) {
+            args_map.insert(kv.key, kv.value);
+        }
+    }
+
+    if let Some(f) = formula_reg.get(formula) {
+        let entity_sign = seed
+            .classification
+            .as_ref()
+            .and_then(|c| c.dominant_sign())
+            .map(AthenaDomain::from_sign);
+        let domain_aligned = entity_sign == Some(f.domain);
+        for input in &f.inputs {
+            if !args_map.contains_key(input) {
+                let val = seed
+                    .properties
+                    .get(input)
+                    .cloned()
+                    .or_else(|| AthenaBankai::match_constant(&seed.constants, input));
+                if let Some(v) = val {
+                    args_map.insert(input.clone(), v);
+                }
+            }
+        }
+        if !domain_aligned && format != OutputFormat::Json {
+            let seed_domain = entity_sign
+                .map(|d| d.full_name().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            println!(
+                "(Warning: formula '{}' is in {} but entity '{}' is in {} — domain mismatch)",
+                formula,
+                f.domain.full_name(),
+                entity,
+                seed_domain,
+            );
+        }
+    }
+
+    match bankai.evaluate(formula, &args_map) {
+        Ok(value) => {
+            if format == OutputFormat::Json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "formula": formula,
+                        "entity": entity,
+                        "entity_name": seed.name,
+                        "result": value,
+                        "args": args_map,
+                    }))
+                    .unwrap()
+                );
+            } else {
+                println!("{} → {:.6}", formula, value);
+                println!("Entity: {} ({})", seed.name, entity);
+                println!("Args: {:?}", args_map);
+            }
+        }
+        Err(e) => {
+            eprintln!("Evaluation failed: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_athena_classify(token: &str, format: OutputFormat) {
+    use athena::astrology::ChangeSorter;
+    let sorter = ChangeSorter::new();
+    let classification = sorter.classify_token(token);
+
+    if format == OutputFormat::Json {
+        let signs: Vec<_> = (0..12)
+            .map(|i| {
+                let s = athena::astrology::Sign::from_index(i);
+                serde_json::json!({
+                    "sign": format!("{:?}", s),
+                    "symbol": s.symbol(),
+                    "activation": classification.signs[i],
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "token": token,
+                "dominant_sign": classification.dominant_sign().map(|s| format!("{:?}", s)),
+                "dominant_element": classification.dominant_element().map(|e| format!("{:?}", e)),
+                "dominant_modality": classification.dominant_modality().map(|m| format!("{:?}", m)),
+                "polarity": classification.polarity,
+                "signs": signs,
+            }))
+            .unwrap()
+        );
+    } else {
+        println!("=== Classification for '{}' ===\n", token);
+        if let Some(sign) = classification.dominant_sign() {
+            println!(
+                "  Sign:        {} {:?} ({:?})",
+                sign.symbol(),
+                sign,
+                sign.element()
+            );
+            println!("  All signs:");
+            for i in 0..12 {
+                let s = athena::astrology::Sign::from_index(i);
+                let bar = "█".repeat((classification.signs[i] * 20.0) as usize);
+                println!(
+                    "    {:12} {:3} {:20} {:.3}",
+                    format!("{}{:?}", s.symbol(), s),
+                    format!("[{}]", i),
+                    bar,
+                    classification.signs[i]
+                );
+            }
+        }
+        println!();
+        if let Some(element) = classification.dominant_element() {
+            println!(
+                "  Element:     {} {:?} (strength: {:.3})",
+                element.symbol(),
+                element,
+                classification.elements[element.index()]
+            );
+        }
+        if let Some(modality) = classification.dominant_modality() {
+            println!(
+                "  Modality:    {} {:?} (strength: {:.3})",
+                modality.symbol(),
+                modality,
+                classification.modalities[modality.index()]
+            );
+        }
+        println!(
+            "  Polarity:    {:.3} (0=Yang, 1=Yin)\n",
+            classification.polarity
+        );
+        println!("  Vedic:");
+        if let Some(graha) = classification.vedic.dominant_graha() {
+            println!(
+                "    Graha:     {} {} ({})",
+                graha.symbol(),
+                graha.name(),
+                graha.element_affinity()
+            );
+        }
+        if let Some(guna) = classification.vedic.dominant_guna() {
+            println!(
+                "    Guṇa:      {} {} — {}",
+                guna.symbol(),
+                guna.name(),
+                guna.quality()
+            );
+        }
+        if let Some(nak) = classification.vedic.dominant_nakshatra() {
+            println!("    Nakṣatra:  {:?} — {}", nak, nak.shakti());
+        }
+        if let Some(ve) = classification.vedic.dominant_vedic_element() {
+            println!(
+                "    Bhūta:     {} {} ({})",
+                ve.symbol(),
+                ve.sanskrit(),
+                ve.guna().quality()
+            );
+        }
+    }
+}
+
+fn cmd_athena_gyro(format: OutputFormat) {
+    let (formula_reg, _entity_reg) = load_athena_registries();
+    let bankai = AthenaBankai::new(formula_reg);
+    let gyro = bankai.gyro_state();
+    let (dominant_sign, dominant_mass) = gyro.dominant_sign_info();
+    let weights = gyro.alignment_weights();
+
+    if format == OutputFormat::Json {
+        let mass_dist: Vec<_> = gyro
+            .mass_distribution
+            .iter()
+            .enumerate()
+            .map(|(i, &mass)| {
+                let s = athena::astrology::Sign::from_index(i);
+                serde_json::json!({"sign": format!("{:?}", s), "mass": mass})
+            })
+            .collect();
+        let align_weights: Vec<_> = weights
+            .iter()
+            .enumerate()
+            .map(|(i, &w)| {
+                let s = athena::astrology::Sign::from_index(i);
+                serde_json::json!({"sign": format!("{:?}", s), "weight": w})
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "orientation_deg": gyro.orientation.0,
+                "orientation_sign": format!("{:?}", gyro.orientation.dominant_sign()),
+                "dominant_sign": format!("{:?}", dominant_sign),
+                "dominant_mass": dominant_mass,
+                "angular_velocity": gyro.angular_velocity,
+                "precession": gyro.precession(),
+                "torque_accumulator": gyro.torque_accumulator,
+                "mass_distribution": mass_dist,
+                "alignment_weights": align_weights,
+            }))
+            .unwrap()
+        );
+    } else {
+        println!("=== Gyroscopic Wheel State ===\n");
+        println!(
+            "  Orientation:    {:.1}° ({:?})",
+            gyro.orientation.0,
+            gyro.orientation.dominant_sign()
+        );
+        println!(
+            "  Dominant sign:  {:?} (mass: {:.3})",
+            dominant_sign, dominant_mass
+        );
+        println!("  Angular vel:    {:.3} °/s", gyro.angular_velocity);
+        println!("  Precession:     {:.3}", gyro.precession());
+        println!("  Torque accum:   {:.6}", gyro.torque_accumulator);
+        println!("\n  Mass distribution:");
+        for (i, &mass) in gyro.mass_distribution.iter().enumerate() {
+            let s = athena::astrology::Sign::from_index(i);
+            let bar = "█".repeat((mass * 20.0) as usize);
+            println!(
+                "    {:12} {:20} {:.3}",
+                format!("{}{:?}", s.symbol(), s),
+                bar,
+                mass
+            );
+        }
+        println!("\n  Alignment weights:");
+        for (i, &weight) in weights.iter().enumerate() {
+            let s = athena::astrology::Sign::from_index(i);
+            let bar = "█".repeat((weight * 20.0) as usize);
+            println!(
+                "    {:12} {:20} {:.3}",
+                format!("{}{:?}", s.symbol(), s),
+                bar,
+                weight
+            );
+        }
+    }
+}
+
+fn cmd_athena_descent(query: &str, format: OutputFormat) {
+    let (formula_reg, entity_reg) = load_athena_registries();
+    let descent_engine = AthenaDescentEngine::new(formula_reg, entity_reg);
+    let matrix = descent_engine.descend(query);
+
+    if format == OutputFormat::Json {
+        let agg = &matrix.aggregate_vedic;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "query": query,
+                "matrix": matrix.format(),
+                "vedic": {
+                    "graha": agg.dominant_graha().map(|g| serde_json::json!({
+                        "symbol": g.symbol(), "name": g.name(), "element": g.element_affinity()
+                    })),
+                    "nakshatra": agg.dominant_nakshatra().map(|n| format!("{:?}", n)),
+                    "guna": agg.dominant_guna().map(|g| serde_json::json!({
+                        "symbol": g.symbol(), "name": g.name(), "quality": g.quality()
+                    })),
+                    "element": agg.dominant_vedic_element().map(|e| serde_json::json!({
+                        "symbol": e.symbol(), "sanskrit": e.sanskrit()
+                    })),
+                },
+                "stats": {
+                    "resolution": matrix.resolution_score,
+                    "average_depth": matrix.average_depth,
+                    "domains_active": matrix.dominant_domains.len(),
+                    "aspects_found": matrix.aspects.len(),
+                },
+            }))
+            .unwrap()
+        );
+    } else {
+        println!("{}", matrix.format());
+        println!("\n=== Vedic Summary ===");
+        let agg = &matrix.aggregate_vedic;
+        if let Some(graha) = agg.dominant_graha() {
+            println!(
+                "  Graha:      {} {} ({})",
+                graha.symbol(),
+                graha.name(),
+                graha.element_affinity()
+            );
+        }
+        if let Some(nak) = agg.dominant_nakshatra() {
+            println!("  Nakṣatra:   {:?} — {}", nak, nak.shakti());
+        }
+        if let Some(guna) = agg.dominant_guna() {
+            println!(
+                "  Guṇa:       {} {} — {}",
+                guna.symbol(),
+                guna.name(),
+                guna.quality()
+            );
+        }
+        if let Some(ve) = agg.dominant_vedic_element() {
+            println!(
+                "  Bhūta:      {} {} (Akasha: {})",
+                ve.symbol(),
+                ve.sanskrit(),
+                ve.sanskrit()
+            );
+        }
+        println!("\n=== Descent Stats ===");
+        println!("  Resolution:     {:.1}%", matrix.resolution_score * 100.0);
+        println!("  Avg depth:      {:.2}/6", matrix.average_depth);
+        println!("  Domains active: {}", matrix.dominant_domains.len());
+        println!("  Aspects found:  {}", matrix.aspects.len());
+    }
+}
+
+fn cmd_athena_descent_matrix(query: &str, format: OutputFormat) {
+    let (formula_reg, entity_reg) = load_athena_registries();
+    let descent_engine = AthenaDescentEngine::new(formula_reg, entity_reg);
+    let matrix = descent_engine.descend(query);
+    if format == OutputFormat::Json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "query": query,
+                "matrix": matrix.format(),
+            }))
+            .unwrap()
+        );
+    } else {
+        println!("{}", matrix.format());
+    }
+}
+
+fn cmd_athena_ephemeris(date: &str, time: &str, format: OutputFormat) {
+    let parts: Vec<i32> = date.split('-').filter_map(|p| p.parse().ok()).collect();
+    let tparts: Vec<f64> = time.split(':').filter_map(|p| p.parse().ok()).collect();
+    if parts.len() != 3 || tparts.is_empty() {
+        eprintln!("Expected --date YYYY-MM-DD and --time HH:MM");
+        std::process::exit(1);
+    }
+    let hour = tparts[0] + tparts.get(1).copied().unwrap_or(0.0) / 60.0;
+    let jd = athena::ephemeris::julian_day(
+        parts[0] as i16,
+        parts[1] as u8,
+        parts[2] as u8,
+        hour,
+    );
+    let ayanamsa = athena::ephemeris::lahiri_ayanamsa(jd);
+    let positions = athena::ephemeris::all_graha_positions(jd);
+
+    if format == OutputFormat::Json {
+        let pos_json: Vec<_> = positions
+            .iter()
+            .map(|p| {
+                serde_json::json!({
+                    "graha": p.graha.full_name(),
+                    "tropical": p.tropical,
+                    "sidereal": p.sidereal,
+                    "rashi": p.rashi.name(),
+                    "nakshatra": p.nakshatra.name(),
+                    "pada": p.pada,
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "date": date,
+                "time": time,
+                "julian_day": jd,
+                "ayanamsa": ayanamsa,
+                "positions": pos_json,
+            }))
+            .unwrap()
+        );
+    } else {
+        println!("=== Ephemeris {date} {time} UT (JD {jd:.5}) ===");
+        println!("Lahiri ayanamsa: {ayanamsa:.4}°  (sidereal = tropical − ayanamsa)\n");
+        println!(
+            "{:12} | {:>9} | {:>9} | {:10} | {:16} | pada",
+            "graha", "tropical", "sidereal", "rashi", "nakshatra"
+        );
+        for pos in &positions {
+            println!(
+                "{:12} | {:8.4}° | {:8.4}° | {:10} | {:16} | {}",
+                pos.graha.full_name(),
+                pos.tropical,
+                pos.sidereal,
+                pos.rashi.name(),
+                pos.nakshatra.name(),
+                pos.pada
+            );
+        }
+    }
+}
+
+#[cfg(feature = "mcp")]
+fn cmd_athena_mcp() {
+    let (formula_reg, entity_reg) = load_athena_registries();
+    let athena_mcp = athena::mcp::AthenaMCP::with_entities(formula_reg, entity_reg);
+    let handler = athena::mcp::McpHandler::new(athena_mcp);
+    eprintln!("Athena MCP server starting (stdio)...");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        match rmcp::serve_server(handler, (tokio::io::stdin(), tokio::io::stdout())).await {
+            Ok(service) => {
+                if let Err(e) = service.waiting().await {
+                    eprintln!("MCP server error: {e}");
+                }
+            }
+            Err(e) => eprintln!("MCP server error: {e}"),
+        }
+    });
+}
+
+#[cfg(feature = "llm")]
+fn cmd_athena_distill(out: Option<&str>, limit: Option<usize>) {
+    let (formula_reg, entity_reg) = load_athena_registries();
+    let mut pairs = athena::bankai::distill::distill(&formula_reg, &entity_reg);
+    if let Some(n) = limit {
+        pairs.truncate(n);
+    }
+    let mut buf = String::new();
+    for p in &pairs {
+        buf.push_str(&serde_json::to_string(p).expect("pair serializes"));
+        buf.push('\n');
+    }
+    match out {
+        Some(path) => {
+            if let Err(e) = std::fs::write(path, &buf) {
+                eprintln!("distill: cannot write {}: {}", path, e);
+                std::process::exit(1);
+            }
+            eprintln!("Distilled {} training pairs -> {}", pairs.len(), path);
+        }
+        None => {
+            print!("{}", buf);
+            eprintln!("Distilled {} training pairs", pairs.len());
+        }
+    }
+}
+
+#[cfg(feature = "llm")]
+fn cmd_athena_llm(
+    query: &str,
+    verbose: bool,
+    backend: Option<&str>,
+    model: Option<&str>,
+    endpoint: Option<&str>,
+    health: bool,
+    generate: bool,
+) {
+    use athena::inference::config::{ConfigOverrides, InferenceConfig};
+    use athena::inference::BackendKind;
+    use std::str::FromStr;
+
+    let overrides = ConfigOverrides {
+        backend: backend.and_then(|s| BackendKind::from_str(s).ok()),
+        model_path: model.map(|s| s.to_string()),
+        endpoint_url: endpoint.map(|s| s.to_string()),
+        temperature: None,
+        max_tokens: None,
+    };
+    let config = InferenceConfig::load(overrides);
+
+    let mut router = match athena::llm::LlmRouter::from_config(config) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("LLM router error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if health {
+        let h = router.health();
+        println!("=== Copilot Health ===");
+        println!("Healthy:     {}", h.healthy);
+        println!("Backend:     {}", h.backend_kind);
+        println!("Model:       {}", h.model_loaded.unwrap_or_default());
+        println!(
+            "Context:     {}",
+            h.context_size.map(|c| c.to_string()).unwrap_or_default()
+        );
+        println!("Message:     {}", h.message);
+        println!("Capabilities:");
+        for cap in router.capabilities() {
+            println!(
+                "  - {} v{}",
+                cap.name,
+                cap.version.as_deref().unwrap_or("?")
+            );
+            for feat in &cap.supported_features {
+                println!("      feat: {}", feat);
+            }
+        }
+        return;
+    }
+
+    if generate {
+        match router.generate(query, None) {
+            Ok(resp) => {
+                println!("{}", resp.text);
+                if verbose {
+                    eprintln!(
+                        "--- tokens: {}, finish: {} ---",
+                        resp.tokens_generated, resp.finish_reason
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("Generation failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    match router.route(query) {
+        Ok(decision) => {
+            if verbose {
+                println!("=== LLM Routing Decision ===");
+                println!("Query:        {}", query);
+                println!("Category:     {:?}", decision.category);
+                println!("Confidence:   {:.2}", decision.confidence);
+                println!("Deterministic: {}", decision.deterministic_only);
+                println!("Tokens:       {}", decision.tokens.len());
+                for (i, t) in decision.tokens.iter().enumerate() {
+                    println!(
+                        "  [{i}] text={} domain={:?} mass={}",
+                        t.text, t.domain, t.mass
+                    );
+                }
+                println!("Suggested chain: {:?}", decision.suggested_chain);
+                println!("Suggested entities: {:?}", decision.suggested_entities);
+                println!("Explanation:\n  {}", decision.explanation);
+            } else {
+                println!(
+                    "category: {:?} | confidence: {:.2} | chain: {:?}",
+                    decision.category, decision.confidence, decision.suggested_chain
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("Routing failed: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(feature = "budget")]
+fn cmd_athena_budget() {
+    let budget = athena::budget::TokenBudget::new("", 0, 0);
+    let stats = budget.stats();
+    println!("{:?}", stats);
+    let spends = budget.spends();
+    if spends.is_empty() {
+        println!(
+            "\nNo token spends recorded yet. LLM calls are tracked here automatically."
+        );
+    } else {
+        println!("\nRecent token spends:");
+        for s in spends.iter().rev().take(10) {
+            println!(
+                "  {} | {} | {:>6} tok | {}",
+                s.id,
+                s.domain.symbol(),
+                s.total_tokens,
+                s.purpose,
+            );
+        }
+        let mut by_domain: HashMap<String, (usize, usize)> = HashMap::new();
+        for s in spends {
+            let entry = by_domain
+                .entry(s.domain.full_name().to_string())
+                .or_insert((0, 0));
+            entry.0 += 1;
+            entry.1 += s.total_tokens;
+        }
+        println!("\nTotal by domain:");
+        let mut domains: Vec<_> = by_domain.into_iter().collect();
+        domains.sort_by_key(|d| std::cmp::Reverse(d.1 .1));
+        for (domain, (count, tokens)) in &domains {
+            println!(
+                "  {:12} | {:3} spends | {:6} tokens",
+                domain, count, tokens
+            );
+        }
+    }
+}
+
+#[cfg(feature = "budget")]
+fn cmd_athena_budget_reset() {
+    let mut budget = athena::budget::TokenBudget::new("", 0, 0);
+    budget.reset();
+    println!("Token budget reset. All counters cleared.");
 }

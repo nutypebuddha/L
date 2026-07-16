@@ -29,11 +29,11 @@ impl RemoteBackend {
             .clone()
             .unwrap_or_else(|| DEFAULT_ENDPOINT_URL.to_string());
 
-        let client = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(10))
-            .timeout_read(Duration::from_secs(60))
-            .timeout_write(Duration::from_secs(30))
-            .build();
+        let client = ureq::Agent::new_with_config(
+            ureq::config::Config::builder()
+                .timeout_global(Some(Duration::from_secs(60)))
+                .build(),
+        );
 
         Self {
             config,
@@ -79,24 +79,26 @@ impl RemoteBackend {
             stream: false,
         };
 
+        let body_json = serde_json::to_string(&body).map_err(|e| {
+            InferenceError::InferenceFailed(format!("serialization error: {}", e))
+        })?;
+
         let mut req = self
             .client
             .post(&url)
-            .set("Content-Type", "application/json");
+            .header("Content-Type", "application/json");
 
         // Add API key if configured
         if let Some(ref key) = self.config.api_key {
-            req = req.set("Authorization", &format!("Bearer {}", key));
+            req = req.header("Authorization", &format!("Bearer {}", key));
         }
 
         let response: ChatCompletionResponse = req
-            .send_json(serde_json::to_value(&body).map_err(|e| {
-                InferenceError::InferenceFailed(format!("serialization error: {}", e))
-            })?)
+            .send(&body_json)
             .map_err(|e| {
                 InferenceError::BackendUnavailable(format!("HTTP request to {} failed: {}", url, e))
             })?
-            .into_json()
+            .json()
             .map_err(|e| {
                 InferenceError::InferenceFailed(format!("response parsing failed: {}", e))
             })?;
@@ -132,7 +134,7 @@ impl RemoteBackend {
         let health_url = format!("{}/health", base);
         match self.client.get(&health_url).call() {
             Ok(resp) => {
-                if let Ok(health) = resp.into_json::<HealthResponse>() {
+                if let Ok(health) = resp.json::<HealthResponse>() {
                     return Ok(HealthStatus {
                         healthy: true,
                         model_loaded: health.model_path,

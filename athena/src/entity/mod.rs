@@ -526,13 +526,18 @@ impl EntityRegistry {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("cannot read {}: {}", path.display(), e))?;
 
+        self.load_seeds_from_str(&content, Some(&path.display().to_string()))
+    }
+
+    /// Load seed entities from a TOML string (for embedded corpus).
+    pub fn load_seeds_from_str(&mut self, toml_str: &str, source: Option<&str>) -> Result<(), String> {
         #[derive(Deserialize)]
         struct EntityFile {
             entity: Option<Vec<SeedEntity>>,
         }
 
-        let parsed: EntityFile = toml::from_str(&content)
-            .map_err(|e| format!("{}: TOML parse error: {}", path.display(), e))?;
+        let parsed: EntityFile = toml::from_str(toml_str)
+            .map_err(|e| format!("{}: TOML parse error: {}", source.unwrap_or("<str>"), e))?;
 
         if let Some(entities) = parsed.entity {
             for (i, entity) in entities.into_iter().enumerate() {
