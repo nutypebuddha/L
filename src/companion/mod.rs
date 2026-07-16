@@ -39,7 +39,7 @@ as facts. Do not explain how you work or name any internal systems.";
 /// Terms the companion must never surface in a user-facing answer. These name
 /// internal mechanics/branding that are out of scope for the public voice.
 pub const LEAKED_TERMS: &[&str] = &[
-    "Ł.AI",
+    "L.ai",
     "L.AI",
     "proof cascade",
     "NAND",
@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn sanitize_blocks_leaks() {
         assert!(answer_leaks("computed via the NAND proof cascade"));
-        assert!(answer_leaks("routed through Ł.AI gate"));
+        assert!(answer_leaks("routed through L.ai gate"));
         let clean = sanitize_answer("this uses the NAND proof cascade internally");
         assert!(!answer_leaks(&clean));
         assert!(clean.contains("[redacted]"));

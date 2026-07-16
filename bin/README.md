@@ -1,6 +1,6 @@
 # Bundled local LLM
 
-`laverna` ships with a local llama.cpp engine so the **Laverna** personality
+`laverna` ships with a local llama.cpp engine so the **L.ai** personality
 agent (`laverna_companion` MCP tool, `--features llm`) runs **offline, on
 device** — no network, no API key, no external trust.
 
@@ -13,8 +13,9 @@ device** — no network, no API key, no external trust.
 ## Add a model
 
 The engine needs a GGUF weights file to actually *speak*. Any instruct-tuned
-GGUF works; for a phone, a tiny model (~50–100 MB, e.g. SmolLM2-135M or
-TinyLlama Q4) is plenty for short, practical answers.
+GGUF works; for a phone, a tiny model (~50–100 MB, e.g. Qwen2.5-0.5B Q4) is
+plenty for short, practical answers. The quickest path is
+`./scripts/get-model.sh`, which downloads a pinned default into `bin/models/`.
 
 ```bash
 # example (run where you have Hugging Face access, then move the file here)

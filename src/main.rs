@@ -3139,7 +3139,7 @@ fn handle_jsonrpc(
                     "prompts": {"listChanged": false}
                 },
                 "serverInfo": {
-                    "name": "laverna",
+                    "name": "lai",
                     "version": env!("CARGO_PKG_VERSION")
                 }
             },
@@ -3152,7 +3152,7 @@ fn handle_jsonrpc(
                 "tools": [
                     {
                         "name": "solve",
-                        "title": "Laverna Solve",
+                        "title": "L.ai Solve",
                         "description": "Run the full deterministic reasoning pipeline on a query: intent + domain classification, 7-layer token descent, and Tanto exact-math evaluation. Use this as the PRIMARY tool for any computation, formula lookup, or cross-domain reasoning. Do NOT use it to fetch a raw entity record (use entity_get) or to generate a birth chart (use chart). Output is exact and reproducible; no values are invented.",
                         "inputSchema": {
                             "type": "object",
@@ -3182,11 +3182,11 @@ fn handle_jsonrpc(
                                 }}
                             }
                         },
-                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Laverna Solve"}
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "L.ai Solve"}
                     },
                     {
                         "name": "entity_get",
-                        "title": "Laverna Entity Lookup",
+                        "title": "L.ai Entity Lookup",
                         "description": "Look up a seed entity by exact ID, or search the embedded corpus by keyword. Returns the entity's name, description, and properties, or a ranked list of matches. Use this to inspect a known entity; use solve for reasoning over an entity. Returns only embedded, curated data — never synthesizes new facts.",
                         "inputSchema": {
                             "type": "object",
@@ -3195,11 +3195,11 @@ fn handle_jsonrpc(
                             },
                             "required": ["entity_id"]
                         },
-                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Laverna Entity Lookup"}
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "L.ai Entity Lookup"}
                     },
                     {
                         "name": "chart",
-                        "title": "Laverna Vedic Chart",
+                        "title": "L.ai Vedic Chart",
                         "description": "Generate a deterministic Vedic (sidereal/Lahiri) chart for a birth datetime. A datetime must be unambiguous: pass either `datetime_utc` (a UTC instant, trailing Z optional) OR `datetime` together with an explicit `tz` IANA timezone identifier. Bare `datetime` without `tz` is rejected (silent UTC assumption corrupts sidereal math). Pass explicit latitude/longitude, OR a location name that is geocoded to coordinates; lagna and bhavas are only computed when coordinates are available. Use this for chart generation only — use solve for reasoning about chart output. All positions are computed from VSOP87, no network calls.",
                         "inputSchema": {
                             "type": "object",
@@ -3240,11 +3240,11 @@ fn handle_jsonrpc(
                                 }}
                             }
                         },
-                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Laverna Vedic Chart"}
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "L.ai Vedic Chart"}
                     },
                     {
                         "name": "validate",
-                        "title": "Laverna Validate",
+                        "title": "L.ai Validate",
                         "description": "Validate a mathematical or logical expression and return a structured diagnostic report (passed flag + per-issue severity/message). Use this to check a formula or expression before trusting it. Does not evaluate to a final number — use solve for that.",
                         "inputSchema": {
                             "type": "object",
@@ -3267,11 +3267,11 @@ fn handle_jsonrpc(
                                 }}
                             }
                         },
-                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Laverna Validate"}
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "L.ai Validate"}
                     },
                     {
                         "name": "formulas",
-                        "title": "Laverna Formula List",
+                        "title": "L.ai Formula List",
                         "description": "Search the embedded formula corpus by domain keyword, or list all formulas. Use this for discovery of available relationships; prefer solve to actually apply a formula. Pass 'limit' to cap output for token efficiency.",
                         "inputSchema": {
                             "type": "object",
@@ -3280,11 +3280,11 @@ fn handle_jsonrpc(
                                 "limit": {"type": "integer", "description": "Max results returned", "default": 20}
                             }
                         },
-                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Laverna Formula List"}
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "L.ai Formula List"}
                     },
                     {
                         "name": "entities",
-                        "title": "Laverna Entity List",
+                        "title": "L.ai Entity List",
                         "description": "List seed entities from the embedded corpus, optionally filtered by keyword. Use this for corpus discovery; prefer entity_get for a single known entity. Pass 'limit' to cap output for token efficiency.",
                         "inputSchema": {
                             "type": "object",
@@ -3293,11 +3293,11 @@ fn handle_jsonrpc(
                                 "limit": {"type": "integer", "description": "Max results returned", "default": 20}
                             }
                         },
-                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Laverna Entity List"}
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "L.ai Entity List"}
                     },
                     {
                         "name": "optimize",
-                        "title": "Laverna Optimize",
+                        "title": "L.ai Optimize",
                         "description": "Solve a domain-agnostic stat/point-allocation optimization from a TOML schema (see 'laverna schema optimize' for the shape). Returns top-K Pareto-optimal allocations. Use this only for allocation/optimization problems expressible in the schema; use solve for general reasoning.",
                         "inputSchema": {
                             "type": "object",
@@ -3308,11 +3308,11 @@ fn handle_jsonrpc(
                             },
                             "required": ["schema_path"]
                         },
-                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Laverna Optimize"}
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "L.ai Optimize"}
                     },
                     {
                         "name": "route",
-                        "title": "Laverna Route",
+                        "title": "L.ai Route",
                         "description": "Reverse-route a query through the 9-graha wheel to reveal which grahas/pillars drive the strategy. Use this to explain *why* a query maps to certain domains, or to map a set of repo/topics to a strategy. Complements solve.",
                         "inputSchema": {
                             "type": "object",
@@ -3321,11 +3321,11 @@ fn handle_jsonrpc(
                                 "repos": {"type": "string", "description": "Comma-separated repo/topic list to route by strategy instead of a free-text query"}
                             }
                         },
-                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Laverna Route"}
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "L.ai Route"}
                     },
                     {
                         "name": "build",
-                        "title": "Laverna Build",
+                        "title": "L.ai Build",
                         "description": "End-to-end build: cast a Vedic chart for a datetime+location, map grahas to pillar weights, then run the Pareto-optimal allocation solver. The flagship chart-to-optimize pipeline. Requires a domain profile TOML (see 'laverna schema domain'). The datetime must be unambiguous: pass `datetime_utc` (UTC instant) OR `datetime` with an explicit `tz` IANA timezone; bare `datetime` is rejected.",
                         "inputSchema": {
                             "type": "object",
@@ -3340,11 +3340,11 @@ fn handle_jsonrpc(
                             },
                             "required": ["domain"]
                         },
-                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Laverna Build"}
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "L.ai Build"}
                     },
                     {
                         "name": "laverna_companion",
-                        "title": "Laverna Assistant",
+                        "title": "L.ai Assistant",
                         "description": "Talk to Laverna in plain language. She answers practical questions directly, and for any factual, numeric, or computable claim she checks it against her tools before answering. If she cannot verify a claim, she says so plainly and never guesses. Use this for natural conversation, explanations, and everyday questions.",
                         "inputSchema": {
                             "type": "object",
@@ -3353,7 +3353,7 @@ fn handle_jsonrpc(
                             },
                             "required": ["query"]
                         },
-                        "annotations": {"readOnlyHint": false, "openWorldHint": false, "title": "Laverna Assistant"}
+                        "annotations": {"readOnlyHint": false, "openWorldHint": false, "title": "L.ai Assistant"}
                     }
                 ]
             },
@@ -3957,16 +3957,17 @@ fn companion_tool(
             Ok(answer) => return Ok(ToolOutput::text_only(answer)),
             Err(laverna::inference::CopilotError::BinaryMissing) => {
                 return Ok(ToolOutput::text_only(
-                    "The local assistant model isn't installed. Drop a .gguf file into \
-                     bin/models/ (or set LAVERNA_LLAMA_BIN / LAVERNA_LLAMA_MODEL) and I'll \
-                     answer in plain language."
+                    "The local assistant engine isn't available. Run ./scripts/get-model.sh \
+                     to fetch a model, then I'll answer in plain language. (Set \
+                     LAVERNA_LLAMA_BIN to point at a llama.cpp binary if needed.)"
                         .to_string(),
                 ))
             }
             Err(laverna::inference::CopilotError::ModelMissing) => {
                 return Ok(ToolOutput::text_only(
-                    "No model file found. Add a .gguf to bin/models/ so I can answer \
-                     naturally; until then I'll give you the verified result directly."
+                    "No model file found. Run ./scripts/get-model.sh to download one into \
+                     bin/models/ so I can answer naturally; until then I'll give you the \
+                     verified result directly."
                         .to_string(),
                 ))
             }
@@ -3975,7 +3976,7 @@ fn companion_tool(
     }
 
     let answer = format!(
-        "{}\n\n(This came from a verified check — I didn't make it up.)",
+        "Here's the verified result:\n\n{}\n\nI checked this against my deterministic engine rather than guessing, so the numbers are reproducible.",
         sanitize_answer(&context)
     );
     Ok(ToolOutput::text_only(answer))
