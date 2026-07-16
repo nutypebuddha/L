@@ -8,8 +8,8 @@
 //!
 //! Laverna is the external signal. This module is the single entry point.
 
-use crate::bankai::diagnostics::{Diagnostic, DiagnosticGate, DiagnosticReport};
 use crate::validation::{fallacy_gate, logic_gate, math_gate};
+use crate::verify::diagnostics::{Diagnostic, DiagnosticGate, DiagnosticReport};
 
 /// What kind of proposal the LLM submitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -192,16 +192,57 @@ fn verify_structural(input: &str, report: &mut DiagnosticReport) {
     }
 }
 
+/// A "bare single token" is exactly one whitespace-delimited word containing no
+/// arithmetic operators, parentheses, brackets, or '='. Examples: `"x"`,
+/// `"foo"`, `"5"`. Used by `verify_arithmetic` to reject lone identifiers that
+/// Tanto silently treats as zero (T56).
+fn is_bare_single_token(s: &str) -> bool {
+    let t = s.trim();
+    if t.is_empty() {
+        return false;
+    }
+    if t.split_whitespace().count() != 1 {
+        return false;
+    }
+    !t.chars().any(|c| {
+        matches!(
+            c,
+            '+' | '-'
+                | '*'
+                | '/'
+                | '^'
+                | '('
+                | ')'
+                | '['
+                | ']'
+                | '='
+                | '<'
+                | '>'
+                | '&'
+                | '|'
+                | '!'
+                | ','
+                | ':'
+                | '.'
+        )
+    })
+}
+
+/// True if `s` parses as a plain numeric literal (integer/float, optional sign).
+fn is_numeric_literal(s: &str) -> bool {
+    s.trim().parse::<f64>().is_ok()
+}
+
 /// Gate: Arithmetic verification via Tanto.
 fn verify_arithmetic(input: &str, context: &str, report: &mut DiagnosticReport) {
-    let env = crate::tanto::create_env();
+    let env = crate::compute::create_env();
 
     // If input contains '=', verify both sides evaluate.
     if let Some(eq_pos) = input.find('=') {
         let lhs = input[..eq_pos].trim();
         let rhs = input[eq_pos + 1..].trim();
-        let lhs_val = crate::tanto::evaluate_pipeline(lhs, &env);
-        let rhs_val = crate::tanto::evaluate_pipeline(rhs, &env);
+        let lhs_val = crate::compute::evaluate_pipeline(lhs, &env);
+        let rhs_val = crate::compute::evaluate_pipeline(rhs, &env);
 
         match (lhs_val, rhs_val) {
             (Some(l), Some(r)) => {
@@ -243,7 +284,7 @@ fn verify_arithmetic(input: &str, context: &str, report: &mut DiagnosticReport) 
         }
     } else {
         // Standalone expression: check if it evaluates.
-        if let Some(val) = crate::tanto::evaluate_pipeline(input, &env) {
+        if let Some(val) = crate::compute::evaluate_pipeline(input, &env) {
             if val.is_infinite() || val.is_nan() {
                 report.push(
                     Diagnostic::error(
@@ -256,7 +297,39 @@ fn verify_arithmetic(input: &str, context: &str, report: &mut DiagnosticReport) 
                     .with_constraint_id("math.finite_result")
                     .with_fix_suggestion("Check for division by zero or overflow"),
                 );
+            } else if is_bare_single_token(input) && !is_numeric_literal(input) {
+                // T56: a lone identifier (e.g. "x") evaluates to 0 in Tanto
+                // because unknown variables default to zero, so it must NOT
+                // silently pass validation.
+                report.push(
+                    Diagnostic::error(
+                        DiagnosticGate::Math,
+                        format!(
+                            "Bare identifier '{}' has no defined value — undeclared variable",
+                            input.trim()
+                        ),
+                    )
+                    .with_constraint_id("math.undeclared_variable")
+                    .with_fix_suggestion(
+                        "Provide a complete expression, or declare the variable's value (e.g. \"x = 5\")",
+                    ),
+                );
             }
+        } else if is_bare_single_token(input) {
+            // Couldn't evaluate a bare single token at all → undeclared variable.
+            report.push(
+                Diagnostic::error(
+                    DiagnosticGate::Math,
+                    format!(
+                        "Bare token '{}' could not be evaluated — undeclared variable",
+                        input.trim()
+                    ),
+                )
+                .with_constraint_id("math.undeclared_variable")
+                .with_fix_suggestion(
+                    "Provide a complete expression, or declare the variable's value (e.g. \"x = 5\")",
+                ),
+            );
         } else if !input
             .trim()
             .chars()
@@ -277,7 +350,7 @@ fn verify_arithmetic(input: &str, context: &str, report: &mut DiagnosticReport) 
     }
 
     // Also run the existing math_gate for operator validity and domain checks.
-    use crate::pachinko::ball::{Ball, TokenCandidate};
+    use crate::scoring::ball::{Ball, TokenCandidate};
     let candidate = TokenCandidate::new(0, input, 0.5);
     let mut ball = Ball::new(candidate);
     let gate_result = math_gate::validate(&mut ball, context);
@@ -296,7 +369,7 @@ fn verify_arithmetic(input: &str, context: &str, report: &mut DiagnosticReport) 
 
 /// Gate: Logic verification.
 fn verify_logic(input: &str, context: &str, report: &mut DiagnosticReport) {
-    use crate::pachinko::ball::{Ball, TokenCandidate};
+    use crate::scoring::ball::{Ball, TokenCandidate};
     let candidate = TokenCandidate::new(0, input, 0.5);
     let mut ball = Ball::new(candidate);
     let gate_result = logic_gate::validate(&mut ball, context);
@@ -416,7 +489,7 @@ fn verify_confidence_calibration(claimed: f64, actual: f64, output: &mut Diagnos
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bankai::diagnostics::Severity;
+    use crate::verify::diagnostics::Severity;
 
     #[test]
     fn test_verify_simple_arithmetic() {
@@ -469,6 +542,33 @@ mod tests {
             .diagnostics
             .iter()
             .any(|d| d.constraint_id.as_deref() == Some("structural.non_empty")));
+    }
+
+    #[test]
+    fn test_verify_bare_identifier_fails() {
+        // T56: a lone identifier must not silently pass — it is an undeclared
+        // variable (Tanto defaults unknowns to zero).
+        for token in ["x", "foo", "energy", "velocity_unknown"] {
+            let report = verify_expression(token);
+            assert!(
+                !report.passed,
+                "bare identifier '{token}' must not pass validation"
+            );
+            assert!(
+                report
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.constraint_id.as_deref() == Some("math.undeclared_variable")),
+                "bare identifier '{token}' should report math.undeclared_variable"
+            );
+        }
+    }
+
+    #[test]
+    fn test_verify_bare_numeric_literal_passes() {
+        // A bare numeric constant is a valid (if trivial) arithmetic expression.
+        let report = verify_expression("5");
+        assert!(report.passed, "bare numeric literal should pass");
     }
 
     #[test]

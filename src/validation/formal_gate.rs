@@ -1,5 +1,5 @@
-use crate::pachinko::ball::{Ball, GateResult};
-use crate::pachinko::pin::GateKind;
+use crate::scoring::ball::{Ball, GateResult};
+use crate::scoring::pin::GateKind;
 
 fn check_proof_structure(token: &str, context: &str) -> (bool, f64) {
     let lower_token = token.to_lowercase();
@@ -159,7 +159,7 @@ pub fn validate(ball: &mut Ball, context: &str) -> GateResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pachinko::ball::TokenCandidate;
+    use crate::scoring::ball::TokenCandidate;
 
     #[test]
     fn test_formal_gate_valid() {

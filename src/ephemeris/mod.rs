@@ -17,6 +17,64 @@ use serde::{Deserialize, Serialize};
 
 use crate::astrology::{Graha, Nakshatra, Rashi};
 
+/// Which ayanamsa (tropical→sidereal precession offset) system a chart uses.
+///
+/// Part 1.4: the numeric ayanamsa value is meaningless without naming the
+/// *method* — official Lahiri (linear from the 285 CE epoch) and "True
+/// Chitrapaksha" (re-anchors Spica's real position each date) diverge by
+/// 30″–60″, enough to flip a nakshatra pada or sub-lord near a cusp. Laverna
+/// pins and emits the method on every chart so output is self-documenting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum AyanamsaSystem {
+    /// Lahiri (Chitrapaksha) — linear formula from the 285 CE zero-point.
+    /// Official Indian Ephemeris & Nautical Almanac system.
+    #[default]
+    Lahiri,
+    /// True Chitrapaksha — Spica anchored at exactly 180° sidereal of date
+    /// (IAU 2006/P03 precession + IAU 2000B nutation + aberration). Diverges
+    /// from Lahiri by ~30″–60″.
+    TrueChitra,
+}
+
+impl AyanamsaSystem {
+    /// The underlying xalen ayanamsa model.
+    fn inner(self) -> xalen_ayanamsa::Ayanamsa {
+        match self {
+            AyanamsaSystem::Lahiri => xalen_ayanamsa::Ayanamsa::Lahiri,
+            AyanamsaSystem::TrueChitra => xalen_ayanamsa::Ayanamsa::TrueChitra,
+        }
+    }
+
+    /// Human-readable method name, e.g. "Lahiri (Chitrapaksha)".
+    pub fn name(self) -> String {
+        self.inner().to_string()
+    }
+
+    /// Parse a CLI token (`lahiri` | `true-chitra`). Defaults to Lahiri.
+    pub fn from_cli(token: Option<&str>) -> Result<Self, String> {
+        match token {
+            None | Some("lahiri") | Some("chitrapaksha") => Ok(AyanamsaSystem::Lahiri),
+            Some("true-chitra") | Some("true-chitrapaksha") => Ok(AyanamsaSystem::TrueChitra),
+            Some(other) => Err(format!(
+                "unknown ayanamsa system '{other}': expected 'lahiri' or 'true-chitra'"
+            )),
+        }
+    }
+}
+
+/// Ayanamsa in degrees at the given UT1 Julian Day for a specific system.
+///
+/// Uses IAU 2006/P03 precession (via `xalen-ayanamsa`), converting UT1→TT
+/// internally through `xalen-time` Delta-T.
+pub fn ayanamsa_deg(jd_ut1: f64, system: AyanamsaSystem) -> f64 {
+    let delta_t = xalen_time::delta_t(
+        jd_ut1,
+        &xalen_time::DeltaTModel::StephensonMorrisonHohenkerk2016,
+    ) / 86400.0;
+    let jd_tt = jd_ut1 + delta_t;
+    system.inner().compute_deg(jd_tt)
+}
+
 /// Position of one graha at a moment in time. All longitudes in degrees.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GrahaPosition {
@@ -107,15 +165,10 @@ pub fn julian_day_to_date(julian_day: f64) -> (i32, u8, u8) {
 
 /// Lahiri ayanamsa in degrees at the given UT1 Julian Day.
 ///
-/// Uses `xalen-ayanamsa` with the IAU 2006/P03 precession model.
-/// Converts from UT1 to TT internally via `xalen-time`.
+/// Convenience wrapper around [`ayanamsa_deg`] with the default
+/// (`AyanamsaSystem::Lahiri`) system. Kept for backward compatibility.
 pub fn lahiri_ayanamsa(jd_ut1: f64) -> f64 {
-    let delta_t = xalen_time::delta_t(
-        jd_ut1,
-        &xalen_time::DeltaTModel::StephensonMorrisonHohenkerk2016,
-    ) / 86400.0;
-    let jd_tt = jd_ut1 + delta_t;
-    xalen_ayanamsa::Ayanamsa::vedic_default().compute_deg(jd_tt)
+    ayanamsa_deg(jd_ut1, AyanamsaSystem::Lahiri)
 }
 
 /// Geocentric ecliptic-of-date longitude of a VSOP87D planet, in degrees.
@@ -163,9 +216,12 @@ pub fn tropical_longitude(graha: Graha, jd: f64) -> f64 {
 }
 
 /// Full position (tropical, sidereal, rashi, nakshatra, pada) of one graha.
-pub fn graha_position(graha: Graha, jd: f64) -> GrahaPosition {
+///
+/// `system` selects the ayanamsa method used for the sidereal reduction
+/// (Part 1.4 — must be named, not assumed).
+pub fn graha_position(graha: Graha, jd: f64, system: AyanamsaSystem) -> GrahaPosition {
     let tropical = tropical_longitude(graha, jd);
-    let sidereal = norm360(tropical - lahiri_ayanamsa(jd));
+    let sidereal = norm360(tropical - ayanamsa_deg(jd, system));
     let xrashi = xalen_vedic::rashi::Rashi::from_longitude_deg(sidereal);
     let xnak = xalen_vedic::nakshatra::Nakshatra::from_longitude_deg(sidereal);
     let pada = xalen_vedic::nakshatra::Nakshatra::pada(sidereal);
@@ -179,10 +235,23 @@ pub fn graha_position(graha: Graha, jd: f64) -> GrahaPosition {
     }
 }
 
-/// Positions of all 9 grahas at the given Julian Day, in wheel order.
+/// Positions of all 9 grahas at the given Julian Day, in wheel order, using
+/// the default (Lahiri) ayanamsa system.
 pub fn all_graha_positions(jd: f64) -> Vec<GrahaPosition> {
+    all_graha_positions_with(jd, AyanamsaSystem::default())
+}
+
+/// Positions of all 9 grahas at the given Julian Day with an explicit
+/// ayanamsa system.
+pub fn all_graha_positions_with(jd: f64, system: AyanamsaSystem) -> Vec<GrahaPosition> {
     (0..9)
-        .map(|i| graha_position(Graha::from_index(i).expect("valid graha index 0..9"), jd))
+        .map(|i| {
+            graha_position(
+                Graha::from_index(i).expect("valid graha index 0..9"),
+                jd,
+                system,
+            )
+        })
         .collect()
 }
 

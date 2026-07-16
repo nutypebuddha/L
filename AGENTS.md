@@ -1,7 +1,7 @@
 # Ł.AI · Proof — Agent Instructions (*Laverna* code name)
 
-Vedic reasoning engine reboot. 4-layer architecture:
-**Asauchi** → **Zanpakuto** → **Shikai** → **Bankai**.
+Vedic reasoning engine reboot. 4-layer architecture (functional module names):
+**aspect** → **nlp/query** → **verify** (over **primitive** NAND gates at the base).
 NAND gate primitives at the bottom. Determinism-first.
 
 Part of the **Ł.AI** umbrella (see `docs/brand.md`): *Laverna* = **Ł.AI · Proof**
@@ -74,7 +74,7 @@ Dead deps removed (P0): `sha2`, `postcard`, `rmcp`, `tokio`, `llama-gguf`.
 ## Elevation roadmap
 
 `docs/ELEVATING_LAVERNA.md` is the strategic plan (black-box audit + competitive
-research). Thesis: Laverna's differentiator is the **NAND-to-bankai proof cascade**
+research). Thesis: Laverna's differentiator is the **NAND-to-verify proof cascade**
 + **fail-loud contract** + **deterministic optimization** — NOT the Vedic astrology
 layer (Vedākṣha/XALEN out-feature it there). Astrology is a *classifier profile*,
 not the product.
@@ -125,13 +125,13 @@ The seed corpus (formulas, synonyms, nonmath, shikai forms, events, entities) is
 reports `embedded-corpus` to make this explicit.
 
 ## Architecture
-- **Layer 0 — Primitive**: `src/primitive/`, `src/descent/`, `src/gyro/`
-- **Layer 1 — Asauchi**: `src/asauchi/`, `src/formula/`, `src/entity/`, `src/ephemeris/`, `src/chart/`
-- **Layer 2 — Zanpakuto**: `src/zanpakuto/`, `src/shikai/`
-- **Layer 3 — Bankai**: `src/bankai/`, `src/mcp/`
+- **Layer 0 — Primitive**: `src/primitive/`, `src/descent/`, `src/router/`
+- **Layer 1 — Aspect**: `src/aspect/`, `src/formula/`, `src/entity/`, `src/ephemeris/`, `src/chart/`
+- **Layer 2 — NLP/Query**: `src/nlp/`, `src/query/`
+- **Layer 3 — Verify**: `src/verify/`, `src/mcp/`
 - **Cross-cutting**: `src/optimize/`, `src/build/`, `src/graph/` (T47), `src/hungarian/` (T48), `src/csp/` (T49)
 
-Pipeline: query → zanpakuto_nlp → descent_engine → shikai_process → bankai_solve
+Pipeline: query → nlp_parse → descent_engine → query_process → verify_solve
 
 ### `laverna build` (T45)
 Chains chart → graha weight mapping → optimize in one command.
@@ -168,7 +168,7 @@ sort by a stable key before printing/aggregating. This includes:
 - `--explain` trace output (T50 fix)
 - `scoring.*` aggregation steps
 - petgraph algorithm results (T47 — dijkstra returns `HashMap<NodeId, K>`)
-- `wheel/graph.rs` `neighbors()` output (sorted by domain index)
+- `domain_graph/graph.rs` `neighbors()` output (sorted by domain index)
 - Any future `BTreeMap`-free code path
 
 Treat unsorted iteration over HashMap as a **correctness bug**, not a style issue.
@@ -226,5 +226,5 @@ Attribution lives in `NOTICE`; per-file headers are advisory.
 ## Conventions
 - Formulas, not facts: encode relationships, not static lookups
 - Cross-domain by default: new formulas reference ≥2 grahas
-- Commits: Conventional Commits (`feat(wheel):`, `fix(bankai):`)
+- Commits: Conventional Commits (`feat(domain_graph):`, `fix(verify):`)
 - Errors: `anyhow` at call sites, `thiserror` for library types

@@ -31,6 +31,63 @@ pub enum DiagnosticGate {
     Domain,
 }
 
+/// High-level, machine-readable refusal category an LLM orchestration loop can
+/// branch on (roadmap Part 2.3). These sit *above* individual `Diagnostic`s: a
+/// single refusal may be backed by several diagnostics, but the category tells
+/// the caller what to do next without parsing messages.
+///
+/// - `OutOfScope` — the query isn't something Laverna's corpus/formulas address.
+/// - `Underspecified` — missing the bindings/facts needed to evaluate.
+/// - `TooComplex` — parseable but exceeds some bounded complexity limit.
+/// - `NoTranslation` — the LLM's attempted formalization didn't parse as valid Tanto.
+/// - `MissingTimezone` — a chart/time input was given without an IANA timezone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum RefusalKind {
+    OutOfScope,
+    Underspecified,
+    TooComplex,
+    NoTranslation,
+    MissingTimezone,
+}
+
+impl std::fmt::Display for RefusalKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            RefusalKind::OutOfScope => "OutOfScope",
+            RefusalKind::Underspecified => "Underspecified",
+            RefusalKind::TooComplex => "TooComplex",
+            RefusalKind::NoTranslation => "NoTranslation",
+            RefusalKind::MissingTimezone => "MissingTimezone",
+        };
+        write!(f, "{s}")
+    }
+}
+
+/// A typed refusal: a specific, machine-actionable reason Laverna declined to
+/// produce a claim, plus a human-readable reason and optional fix hint. Emitted
+/// in structured output (JSON / `format_for_llm`) so callers can branch.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Refusal {
+    pub kind: RefusalKind,
+    pub reason: String,
+    pub fix_suggestion: Option<String>,
+}
+
+impl Refusal {
+    pub fn new(kind: RefusalKind, reason: impl Into<String>) -> Self {
+        Refusal {
+            kind,
+            reason: reason.into(),
+            fix_suggestion: None,
+        }
+    }
+
+    pub fn with_fix_suggestion(mut self, suggestion: impl Into<String>) -> Self {
+        self.fix_suggestion = Some(suggestion.into());
+        self
+    }
+}
+
 impl std::fmt::Display for DiagnosticGate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -145,6 +202,9 @@ pub struct DiagnosticReport {
     pub input: String,
     /// All diagnostics produced, in gate-evaluation order.
     pub diagnostics: Vec<Diagnostic>,
+    /// Typed refusals (roadmap Part 2.3). Present when Laverna declines to
+    /// produce a claim; empty otherwise. A non-empty `refusals` implies failure.
+    pub refusals: Vec<Refusal>,
     /// Whether every gate passed (no Error-level diagnostics).
     pub passed: bool,
     /// Aggregate confidence score [0.0, 1.0].
@@ -160,6 +220,7 @@ impl DiagnosticReport {
         DiagnosticReport {
             input: input.into(),
             diagnostics: Vec::new(),
+            refusals: Vec::new(),
             passed: true,
             confidence: 1.0,
             error_count: 0,
@@ -176,6 +237,14 @@ impl DiagnosticReport {
             self.warning_count += 1;
         }
         self.diagnostics.push(diagnostic);
+    }
+
+    /// Record a typed refusal (roadmap Part 2.3). Refusals force `passed =
+    /// false` so a caller that only checks `passed` still sees the failure, and
+    /// the structured `refusals` list lets an orchestration loop branch by kind.
+    pub fn refuse(&mut self, refusal: Refusal) {
+        self.passed = false;
+        self.refusals.push(refusal);
     }
 
     pub fn errors(&self) -> impl Iterator<Item = &Diagnostic> {
@@ -212,6 +281,17 @@ impl DiagnosticReport {
             self.error_count,
             self.warning_count,
         );
+
+        if !self.refusals.is_empty() {
+            out.push_str("Refusals:\n");
+            for refusal in &self.refusals {
+                out.push_str(&format!("  [{}] {}\n", refusal.kind, refusal.reason));
+                if let Some(ref fix) = refusal.fix_suggestion {
+                    out.push_str(&format!("    Fix: {fix}\n"));
+                }
+            }
+            out.push('\n');
+        }
 
         for (i, diag) in self.errors().enumerate() {
             out.push_str(&format!("{}. [{}] {}\n", i + 1, diag.gate, diag.message,));
@@ -333,5 +413,48 @@ mod tests {
 
         assert_eq!(report.errors().count(), 2);
         assert_eq!(report.warnings().count(), 1);
+    }
+
+    #[test]
+    fn test_refusal_kind_display() {
+        assert_eq!(RefusalKind::OutOfScope.to_string(), "OutOfScope");
+        assert_eq!(RefusalKind::Underspecified.to_string(), "Underspecified");
+        assert_eq!(RefusalKind::TooComplex.to_string(), "TooComplex");
+        assert_eq!(RefusalKind::NoTranslation.to_string(), "NoTranslation");
+        assert_eq!(RefusalKind::MissingTimezone.to_string(), "MissingTimezone");
+    }
+
+    #[test]
+    fn test_refuse_forces_failure() {
+        let mut report = DiagnosticReport::new("query");
+        assert!(report.passed);
+        assert!(report.refusals.is_empty());
+
+        report.refuse(
+            Refusal::new(RefusalKind::OutOfScope, "nothing resolved")
+                .with_fix_suggestion("rephrase"),
+        );
+
+        assert!(!report.passed, "a refusal must force passed = false");
+        assert_eq!(report.refusals.len(), 1);
+        assert_eq!(report.refusals[0].kind, RefusalKind::OutOfScope);
+        assert_eq!(
+            report.refusals[0].fix_suggestion.as_deref(),
+            Some("rephrase")
+        );
+    }
+
+    #[test]
+    fn test_format_for_llm_surfaces_refusals() {
+        let mut report = DiagnosticReport::new("query");
+        report.refuse(
+            Refusal::new(RefusalKind::MissingTimezone, "no tz given")
+                .with_fix_suggestion("pass --tz"),
+        );
+        let formatted = report.format_for_llm();
+        assert!(formatted.contains("FAIL"));
+        assert!(formatted.contains("MissingTimezone"));
+        assert!(formatted.contains("no tz given"));
+        assert!(formatted.contains("pass --tz"));
     }
 }

@@ -64,6 +64,10 @@ impl AtomClassification {
         self
     }
 
+    pub fn set_sign(&mut self, sign: Sign, value: f64) {
+        self.signs[sign.index()] = value.clamp(0.0, 1.0);
+    }
+
     pub fn with_element(mut self, element: Element, value: f64) -> Self {
         self.elements[element.index()] = value.clamp(0.0, 1.0);
         self
@@ -129,40 +133,31 @@ impl AtomClassification {
 
     pub fn merge_max(&self, other: &AtomClassification) -> AtomClassification {
         let mut result = self.clone();
+        result.merge_max_into(other);
+        result
+    }
+
+    pub fn merge_max_into(&mut self, other: &AtomClassification) {
         for i in 0..12 {
-            result.signs[i] = result.signs[i].max(other.signs[i]);
+            self.signs[i] = self.signs[i].max(other.signs[i]);
         }
         for i in 0..4 {
-            result.elements[i] = result.elements[i].max(other.elements[i]);
+            self.elements[i] = self.elements[i].max(other.elements[i]);
         }
         for i in 0..3 {
-            result.modalities[i] = result.modalities[i].max(other.modalities[i]);
+            self.modalities[i] = self.modalities[i].max(other.modalities[i]);
         }
         for i in 0..7 {
-            result.rulers[i] = result.rulers[i].max(other.rulers[i]);
+            self.rulers[i] = self.rulers[i].max(other.rulers[i]);
         }
         for i in 0..12 {
-            result.houses[i] = result.houses[i].max(other.houses[i]);
+            self.houses[i] = self.houses[i].max(other.houses[i]);
         }
         for i in 0..5 {
-            result.aspects[i] = result.aspects[i].max(other.aspects[i]);
+            self.aspects[i] = self.aspects[i].max(other.aspects[i]);
         }
-        result.polarity = result.polarity.max(other.polarity);
-        for i in 0..9 {
-            result.vedic.grahas[i] = result.vedic.grahas[i].max(other.vedic.grahas[i]);
-        }
-        for i in 0..27 {
-            result.vedic.nakshatras[i] = result.vedic.nakshatras[i].max(other.vedic.nakshatras[i]);
-        }
-        for i in 0..3 {
-            result.vedic.gunas[i] = result.vedic.gunas[i].max(other.vedic.gunas[i]);
-        }
-        for i in 0..5 {
-            result.vedic.vedic_elements[i] =
-                result.vedic.vedic_elements[i].max(other.vedic.vedic_elements[i]);
-        }
-        result.vedic.confidence = result.vedic.confidence.max(other.vedic.confidence);
-        result
+        self.polarity = self.polarity.max(other.polarity);
+        self.vedic.merge_max_into(&other.vedic);
     }
 
     pub fn merge_sum(&self, other: &AtomClassification) -> AtomClassification {

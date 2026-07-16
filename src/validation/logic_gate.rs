@@ -1,5 +1,5 @@
-use crate::pachinko::ball::{Ball, GateResult};
-use crate::pachinko::pin::GateKind;
+use crate::scoring::ball::{Ball, GateResult};
+use crate::scoring::pin::GateKind;
 
 static CONTRADICTIONS: &[(&str, &str)] = &[
     ("always", "never"),
@@ -335,7 +335,7 @@ pub fn validate(ball: &mut Ball, context: &str) -> GateResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pachinko::ball::TokenCandidate;
+    use crate::scoring::ball::TokenCandidate;
 
     #[test]
     fn test_logic_gate_valid() {

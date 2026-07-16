@@ -1,10 +1,10 @@
-use crate::pachinko::ball::{Ball, GateResult};
-use crate::pachinko::pin::GateKind;
-use crate::tanto;
+use crate::compute;
+use crate::scoring::ball::{Ball, GateResult};
+use crate::scoring::pin::GateKind;
 
 fn eval_tanto(expr: &str) -> Option<f64> {
-    let env = tanto::create_env();
-    tanto::evaluate_nl(expr, &env)
+    let env = compute::create_env();
+    compute::evaluate_nl(expr, &env)
 }
 
 fn check_equation_correctness(token: &str) -> (bool, f64) {
@@ -132,7 +132,7 @@ pub fn validate(ball: &mut Ball, context: &str) -> GateResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pachinko::ball::TokenCandidate;
+    use crate::scoring::ball::TokenCandidate;
 
     #[test]
     fn test_math_gate_simple() {

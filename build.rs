@@ -87,5 +87,57 @@ fn main() {
         events_toml
     ));
 
+    // Versioned corpus manifest: semver (from Cargo.toml) + a stable content
+    // hash over the embedded corpus, so downstream tooling / community forks
+    // can detect corpus drift. Uses FNV-1a (no external crypto deps, which
+    // were deliberately removed) — deterministic across builds and platforms.
+    let version = env!("CARGO_PKG_VERSION");
+    let mut hasher = Fnv1a64::new();
+    hasher.write(formulas.as_bytes());
+    hasher.write(nonmath.as_bytes());
+    hasher.write(entities.as_bytes());
+    let content_hash = hasher.hex();
+    let manifest = format!(
+        "version = \"{}\"\ncontent_hash = \"{}\"\n",
+        version, content_hash
+    );
+    src.push_str(&format!(
+        "pub const CORPUS_VERSION: &str = {:?};\n",
+        version
+    ));
+    src.push_str(&format!(
+        "pub const CORPUS_CONTENT_HASH: &str = {:?};\n",
+        content_hash
+    ));
+    src.push_str(&format!(
+        "pub const CORPUS_VERSION_TOML: &str = {:?};\n",
+        manifest
+    ));
+
     std::fs::write(&embedded, src).expect("write embedded.rs");
+}
+
+/// FNV-1a 64-bit hasher — dependency-free, stable across platforms/builds.
+struct Fnv1a64 {
+    state: u64,
+}
+
+impl Fnv1a64 {
+    fn new() -> Self {
+        Fnv1a64 {
+            state: 0xcbf29ce484222325,
+        }
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        const PRIME: u64 = 0x100000001b3;
+        for &b in bytes {
+            self.state ^= b as u64;
+            self.state = self.state.wrapping_mul(PRIME);
+        }
+    }
+
+    fn hex(&self) -> String {
+        format!("{:016x}", self.state)
+    }
 }

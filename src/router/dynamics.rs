@@ -1,4 +1,4 @@
-use crate::wheel::Domain;
+use crate::domain_graph::Domain;
 
 /// Map a graha to its natural zodiac sign index (0–11).
 /// Uses traditional Vedic sign rulership.

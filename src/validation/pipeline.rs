@@ -1,8 +1,8 @@
-use crate::tanto;
+use crate::compute;
 
 pub fn evaluate_pipeline(line: &str) -> Option<f64> {
-    let env = tanto::create_env();
-    tanto::evaluate_pipeline(line, &env)
+    let env = compute::create_env();
+    compute::evaluate_pipeline(line, &env)
 }
 
 #[cfg(test)]

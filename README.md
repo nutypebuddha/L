@@ -1,7 +1,7 @@
 # Ł.AI · Proof — *Laverna*
 
 **Deterministic verification engine** — a 9-graha (Navagraha) wheel, a
-NAND-to-bankai compute cascade, and verifiable proof objects. Rust, edition 2021.
+NAND-to-verify compute cascade, and verifiable proof objects. Rust, edition 2021.
 
 *Laverna* is the code name for **Ł.AI · Proof**: the deterministic-proof pure
 function in the Ł.AI substrate (see [`docs/brand.md`](docs/brand.md)). The other
@@ -13,22 +13,22 @@ derivation back to primitive NAND gates or is explicitly marked unproven
 (e.g. LLM-estimated steps, confidence-penalized). No hallucination, no silent
 fallback.
 
-> **Thesis.** The differentiator is the **NAND-to-bankai proof cascade** plus the
+> **Thesis.** The differentiator is the **NAND-to-verify proof cascade** plus the
 > **fail-loud, no-hallucination contract** plus **deterministic optimization** —
 > not the Vedic chart. The astrology layer is a *classifier profile*, not the product.
 
 ## Architecture
 
-Four layers, deterministically composed:
+Four layers, deterministically composed (module names are functional):
 
 ```
-Layer 3 — Bankai       Expression verification, diagnostics, confidence scoring
-Layer 2 — Zanpakutō    NLP tokenization, intent parsing, domain classification
-Layer 1 — Asauchi      Formula registry, entity registry, ephemeris, charts
-Layer 0 — Primitive    NAND gates, descent engine, gyro router (9-graha wheel)
+Layer 3 — verify       Expression verification, diagnostics, confidence scoring
+Layer 2 — nlp/query    NLP tokenization, intent parsing, domain classification
+Layer 1 — aspect       Formula registry, entity registry, ephemeris, charts
+Layer 0 — primitive    NAND gates, descent engine, router (9-graha wheel)
 ```
 
-Pipeline: `query → zanpakuto_nlp → descent_engine → shikai_process → bankai_solve`.
+Pipeline: `query → nlp_parse → descent_engine → query_process → verify_solve`.
 
 The embedded corpus (528 formulas, 214 entities) is compiled into the binary by
 `build.rs`, so it works from any working directory.

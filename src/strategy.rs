@@ -9,8 +9,10 @@
 //! Strategy mapping audited in `laverna_reverse_routing_strategy.md`: each
 //! graha is an archetypal force with a standing strategic principle.
 
-use crate::descent::{SettledToken, SettlingMatrix};
-use crate::wheel::Domain;
+use crate::chart::personality::Pillar;
+use crate::descent::SettledToken;
+use crate::domain_graph::Domain;
+use crate::nlp::is_stopword;
 
 /// Strategic principle carried by each graha (archetypal force). This is the
 /// "upward" leg of reverse routing: force → recommended action framework.
@@ -50,15 +52,38 @@ pub fn graha_default_target(graha: Domain) -> &'static str {
 pub struct StrategyReport {
     /// The original query text.
     pub query: String,
-    /// Dominant graha forces, ranked by hit count (desc), then wheel index.
-    /// Tuple is `(graha, hit_count, share_of_total_hits [0,1])`.
-    pub ranked: Vec<(Domain, usize, f64)>,
+    /// Dominant graha forces, ranked by accumulated specificity weight (desc),
+    /// then wheel index. Tuple is `(graha, weight, share_of_total_weight [0,1])`.
+    pub ranked: Vec<(Domain, f64, f64)>,
     /// Strongest force (primary strategy).
     pub primary: Option<Domain>,
     /// Second force (secondary / balancing strategy).
     pub secondary: Option<Domain>,
     /// Third force (tertiary strategy), if present.
     pub tertiary: Option<Domain>,
+    /// Content tokens (post-stopword) that mapped to no corpus graha.
+    pub unresolved: Vec<String>,
+    /// Tokens filtered out as stopwords before scoring.
+    pub stopwords: Vec<String>,
+    /// Fail-loud diagnostic when routing confidence is too low to trust
+    /// (e.g. no forces resolved, or most content tokens unresolved).
+    pub warning: Option<String>,
+}
+
+/// Per-token routing classification feeding `synthesize_strategy`.
+///
+/// Pure: derived from the token text alone (corpus lookup + stopword set),
+/// **not** from any other token in the query. This is the T54 fix — routing no
+/// longer inherits a neighbor's domain via query-global constraint propagation,
+/// and stopwords/unknown words no longer invent a graha.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenForce {
+    /// Function word excluded from scoring (T55). Carries no domain signal.
+    Stopword,
+    /// Survived stopword filtering but maps to no corpus graha.
+    Unresolved,
+    /// Mapped to a single graha with a corpus-specificity weight in (0, 1].
+    Resolved { graha: Domain, weight: f64 },
 }
 
 impl StrategyReport {
@@ -68,22 +93,38 @@ impl StrategyReport {
         out.push_str("═══ Reverse-Routing Strategy ═══\n");
         out.push_str(&format!("query: \"{}\"\n\n", self.query));
 
-        out.push_str("GRAHA FORCES (by dominance):\n");
+        out.push_str("GRAHA FORCES (by specificity weight):\n");
         if self.ranked.is_empty() {
             out.push_str("  (no graha forces resolved — query is outside the wheel's scope)\n");
         } else {
-            for (graha, count, share) in &self.ranked {
+            for (graha, weight, share) in &self.ranked {
                 out.push_str(&format!(
-                    "  {} {} ({}) — {} — {} hits ({:.0}%) — {}\n",
+                    "  {} {} ({}) — {} — weight {:.3} ({:.0}%) — {}\n",
                     graha.symbol(),
                     graha.name(),
                     graha.full_name(),
                     graha.archetype(),
-                    count,
+                    weight,
                     share * 100.0,
                     strategy_principle(*graha),
                 ));
             }
+        }
+
+        if !self.stopwords.is_empty() {
+            out.push_str(&format!(
+                "\nstopwords (excluded from scoring): {}\n",
+                self.stopwords.join(", ")
+            ));
+        }
+        if !self.unresolved.is_empty() {
+            out.push_str(&format!(
+                "\nunresolved (no corpus graha): {}\n",
+                self.unresolved.join(", ")
+            ));
+        }
+        if let Some(warning) = &self.warning {
+            out.push_str(&format!("\n⚠ {warning}\n"));
         }
 
         out.push_str("\nSYNTHESIZED STRATEGY:\n");
@@ -122,11 +163,13 @@ impl StrategyReport {
     }
 }
 
-/// The single strongest graha force a token resolved to. A token may map to
-/// several domains; for strategy synthesis we credit only its dominant force,
-/// which keeps the resulting strategy focused rather than smeared across all
-/// nine grahas. Falls back to the first listed domain when no graha weight was
-/// scored (e.g. unit-built tokens).
+/// Pure: the single strongest graha force a token resolved to, read ONLY from
+/// the token's own scored vedic classification. No query-global fallback — a
+/// token with no scored graha weight (stopword, unknown word, or a word whose
+/// force was only ever propagated from a neighbor) resolves to `None` rather
+/// than inheriting a sibling's domain. This is the core T54 fix: routing is now
+/// a function of the token text alone, so identical tokens route identically
+/// regardless of their neighbors in a query (T54).
 pub fn dominant_graha_of(token: &SettledToken) -> Option<Domain> {
     let best = token
         .vedic_classification
@@ -136,41 +179,112 @@ pub fn dominant_graha_of(token: &SettledToken) -> Option<Domain> {
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     match best {
         Some((i, &w)) if w > 0.0 => Domain::from_index(i),
-        _ => token.domains.first().copied(),
+        _ => None,
     }
 }
 
-/// Pure reverse-routing synthesis: each token votes for its dominant graha
-/// force; the forces are ranked and the primary/secondary/tertiary are picked.
-/// Deterministic — identical queries yield identical reports.
-pub fn synthesize_strategy(query: &str, matrix: &SettlingMatrix) -> StrategyReport {
-    let mut counts = [0usize; 9];
-    for token in &matrix.tokens {
-        if let Some(graha) = dominant_graha_of(token) {
-            counts[graha.index()] += 1;
+/// Build the per-token `TokenForce` classification for a descent matrix token.
+///
+/// - Stopwords (function words) are filtered out before scoring (T55).
+/// - Everything else resolves through the *pure* `dominant_graha_of` — no
+///   neighbor-domain inheritance (T54). Tokens with no corpus graha are
+///   reported as `Unresolved`.
+/// - Resolved tokens carry a corpus-specificity `weight` (higher = rarer /
+///   more discriminating). The caller supplies the weight via `specificity`,
+///   which keeps this function free of any registry dependency.
+pub fn classify_route_token(token: &SettledToken, specificity: f64) -> TokenForce {
+    if is_stopword(&token.text) {
+        return TokenForce::Stopword;
+    }
+    match dominant_graha_of(token) {
+        Some(graha) => TokenForce::Resolved {
+            graha,
+            weight: specificity,
+        },
+        None => TokenForce::Unresolved,
+    }
+}
+
+/// Fail-loud threshold: if this fraction (or more) of *content* tokens are
+/// unresolved, the report carries a warning and the primary/secondary/tertiary
+/// forces are left `None` rather than guessed from noise.
+const UNRESOLVED_WARN_FRACTION: f64 = 0.5;
+
+/// Pure reverse-routing synthesis: each content token contributes its resolved
+/// graha's specificity `weight`; the forces are ranked and the
+/// primary/secondary/tertiary are picked. Deterministic — identical inputs
+/// yield identical reports. Stopwords and unresolved tokens are recorded but
+/// carry no vote (T54/T55).
+pub fn synthesize_strategy(query: &str, forces: &[(String, TokenForce)]) -> StrategyReport {
+    let mut weights = [0.0f64; 9];
+    let mut unresolved = Vec::new();
+    let mut stopwords = Vec::new();
+    let mut resolved_total = 0.0f64;
+    let mut content_count = 0usize;
+
+    for (text, force) in forces {
+        match force {
+            TokenForce::Stopword => stopwords.push(text.clone()),
+            TokenForce::Unresolved => {
+                unresolved.push(text.clone());
+                content_count += 1;
+            }
+            TokenForce::Resolved { graha, weight } => {
+                weights[graha.index()] += *weight;
+                resolved_total += *weight;
+                content_count += 1;
+            }
         }
     }
-    let total: usize = counts.iter().sum();
 
-    let mut ranked: Vec<(Domain, usize, f64)> = Domain::all()
+    let mut ranked: Vec<(Domain, f64, f64)> = Domain::all()
         .iter()
-        .map(|&graha| {
-            let count = counts[graha.index()];
-            let share = if total > 0 {
-                count as f64 / total as f64
-            } else {
-                0.0
-            };
-            (graha, count, share)
-        })
-        .filter(|(_, count, _)| *count > 0)
+        .map(|&graha| (graha, weights[graha.index()], 0.0))
+        .filter(|(_, weight, _)| *weight > 0.0)
         .collect();
 
-    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.index().cmp(&b.0.index())));
+    ranked.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.0.index().cmp(&b.0.index()))
+    });
+    for entry in ranked.iter_mut() {
+        entry.2 = if resolved_total > 0.0 {
+            entry.1 / resolved_total
+        } else {
+            0.0
+        };
+    }
 
-    let primary = ranked.first().map(|(g, _, _)| *g);
-    let secondary = ranked.get(1).map(|(g, _, _)| *g);
-    let tertiary = ranked.get(2).map(|(g, _, _)| *g);
+    let warning = if resolved_total == 0.0 {
+        Some(
+            "no graha forces resolved — query maps to no corpus domain; routing is speculative"
+                .to_string(),
+        )
+    } else if content_count > 0
+        && unresolved.len() as f64 / content_count as f64 >= UNRESOLVED_WARN_FRACTION
+    {
+        Some(format!(
+            "{} of {} content tokens unresolved — routing confidence low",
+            unresolved.len(),
+            content_count
+        ))
+    } else {
+        None
+    };
+
+    // Fail loud: when confidence is too low to trust, do NOT assert a strategy.
+    // The forces are still reported (for transparency) but primary/secondary/
+    // tertiary are left `None` rather than guessed from noise (T54).
+    let (primary, secondary, tertiary) = if warning.is_some() {
+        (None, None, None)
+    } else {
+        (
+            ranked.first().map(|(g, _, _)| *g),
+            ranked.get(1).map(|(g, _, _)| *g),
+            ranked.get(2).map(|(g, _, _)| *g),
+        )
+    };
 
     StrategyReport {
         query: query.to_string(),
@@ -178,56 +292,88 @@ pub fn synthesize_strategy(query: &str, matrix: &SettlingMatrix) -> StrategyRepo
         primary,
         secondary,
         tertiary,
+        unresolved,
+        stopwords,
+        warning,
     }
+}
+
+/// Map a wheel `Domain` (graha) onto its strategic `Pillar`. Rahu/Ketu carry no
+/// pillar (they are boundary/detachment forces, not capability axes), so they
+/// return `None`. Mirrors `chart::personality::graha_to_pillar`.
+pub fn domain_to_pillar(graha: Domain) -> Option<Pillar> {
+    match graha {
+        Domain::Surya => Some(Pillar::Spear),
+        Domain::Chandra => Some(Pillar::Olive),
+        Domain::Mangala => Some(Pillar::Forge),
+        Domain::Budha => Some(Pillar::Owl),
+        Domain::Brihaspati => Some(Pillar::Council),
+        Domain::Shukra => Some(Pillar::Loom),
+        Domain::Shani => Some(Pillar::Stone),
+        Domain::Rahu | Domain::Ketu => None,
+    }
+}
+
+/// Aggregate a `StrategyReport`'s per-graha shares into a normalized 7-pillar
+/// objective vector. Each graha's `share` (already in `[0,1]`, summing to 1.0
+/// over resolved grahas) is added into its pillar bucket. Pillars that no graha
+/// resolved to stay at 0.0.
+///
+/// Pure + deterministic. The result feeds the optimizer as `objective.weights`.
+pub fn aggregate_pillars(report: &StrategyReport) -> [f64; 7] {
+    let mut pillars = [0.0f64; 7];
+    for (graha, _weight, share) in &report.ranked {
+        if let Some(pillar) = domain_to_pillar(*graha) {
+            pillars[pillar.index()] += *share;
+        }
+    }
+    pillars
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::descent::{SettledToken, SettlingMatrix};
+    use crate::domain_graph::Domain;
 
-    /// Build a matrix from token→domain assignments (no registries needed).
-    fn matrix_from(tokens: &[(&str, &[Domain])]) -> SettlingMatrix {
-        let settled: Vec<SettledToken> = tokens
-            .iter()
-            .map(|(text, domains)| {
-                let mut t = SettledToken::new(text);
-                t.domains = domains.to_vec();
-                t
-            })
-            .collect();
-        SettlingMatrix::new(settled)
+    /// A resolved content token carrying `weight`.
+    fn resolved(graha: Domain, weight: f64) -> (String, TokenForce) {
+        ("x".to_string(), TokenForce::Resolved { graha, weight })
+    }
+    fn unresolved(text: &str) -> (String, TokenForce) {
+        (text.to_string(), TokenForce::Unresolved)
+    }
+    fn stopword(text: &str) -> (String, TokenForce) {
+        (text.to_string(), TokenForce::Stopword)
     }
 
     #[test]
     fn synthesizes_primary_secondary_from_dominant_grahas() {
-        let matrix = matrix_from(&[
-            ("architect", &[Domain::Mangala]),
-            ("build", &[Domain::Mangala]),
-            ("test", &[Domain::Mangala]),
-            ("verify", &[Domain::Mangala]),
-            ("wisdom", &[Domain::Brihaspati]),
-        ]);
-        let report = synthesize_strategy("how to architect safely", &matrix);
+        let forces = vec![
+            resolved(Domain::Mangala, 1.0),
+            resolved(Domain::Mangala, 1.0),
+            resolved(Domain::Mangala, 1.0),
+            resolved(Domain::Mangala, 1.0),
+            resolved(Domain::Brihaspati, 1.0),
+        ];
+        let report = synthesize_strategy("how to architect safely", &forces);
 
         assert_eq!(report.primary, Some(Domain::Mangala));
         assert_eq!(report.secondary, Some(Domain::Brihaspati));
         assert_eq!(report.tertiary, None);
 
-        // Mangala = 4/5 = 80%, Brihaspati = 1/5 = 20%.
+        // Mangala = 4/5 = 80%, Brihaspati = 1/5 = 20% (weight-weighted).
         let mangala = report
             .ranked
             .iter()
             .find(|(g, _, _)| *g == Domain::Mangala)
             .unwrap();
-        assert_eq!(mangala.1, 4);
+        assert!((mangala.1 - 4.0).abs() < 1e-9);
         assert!((mangala.2 - 0.8).abs() < 1e-9);
     }
 
     #[test]
     fn empty_matrix_yields_no_forces() {
-        let matrix = matrix_from(&[]);
-        let report = synthesize_strategy("???", &matrix);
+        let report = synthesize_strategy("???", &[]);
         assert!(report.ranked.is_empty());
         assert!(report.primary.is_none());
         assert!(report.format().contains("no graha forces resolved"));
@@ -235,15 +381,44 @@ mod tests {
 
     #[test]
     fn determinism_same_input_same_report() {
-        let matrix = matrix_from(&[
-            ("integrate", &[Domain::Shukra]),
-            ("bridge", &[Domain::Shukra]),
-            ("harmonize", &[Domain::Shukra, Domain::Budha]),
-        ]);
-        let a = synthesize_strategy("x", &matrix);
-        let b = synthesize_strategy("x", &matrix);
+        let forces = vec![
+            resolved(Domain::Shukra, 0.5),
+            resolved(Domain::Shukra, 0.5),
+            resolved(Domain::Budha, 1.0),
+        ];
+        let a = synthesize_strategy("x", &forces);
+        let b = synthesize_strategy("x", &forces);
         assert_eq!(a.ranked, b.ranked);
         assert_eq!(a.primary, b.primary);
+    }
+
+    #[test]
+    fn stopwords_excluded_unresolved_recorded() {
+        let forces = vec![
+            stopword("how"),
+            stopword("i"),
+            resolved(Domain::Budha, 1.0),
+            resolved(Domain::Budha, 1.0),
+            unresolved("xyzzy"),
+        ];
+        let report = synthesize_strategy("how do i know xyzzy", &forces);
+        assert_eq!(report.primary, Some(Domain::Budha));
+        assert!(report.stopwords.contains(&"how".to_string()));
+        assert!(report.unresolved.contains(&"xyzzy".to_string()));
+    }
+
+    #[test]
+    fn unresolved_majority_triggers_warning() {
+        // 3 of 4 content tokens unresolved → fail-loud warning, no primary.
+        let forces = vec![
+            resolved(Domain::Budha, 1.0),
+            unresolved("aaa"),
+            unresolved("bbb"),
+            unresolved("ccc"),
+        ];
+        let report = synthesize_strategy("query", &forces);
+        assert!(report.warning.is_some());
+        assert_eq!(report.primary, None);
     }
 
     #[test]
@@ -251,5 +426,56 @@ mod tests {
         for graha in Domain::all() {
             assert!(!graha_default_target(graha).is_empty());
         }
+    }
+
+    #[test]
+    fn domain_to_pillar_matches_graha_map() {
+        assert_eq!(domain_to_pillar(Domain::Surya), Some(Pillar::Spear));
+        assert_eq!(domain_to_pillar(Domain::Chandra), Some(Pillar::Olive));
+        assert_eq!(domain_to_pillar(Domain::Mangala), Some(Pillar::Forge));
+        assert_eq!(domain_to_pillar(Domain::Budha), Some(Pillar::Owl));
+        assert_eq!(domain_to_pillar(Domain::Brihaspati), Some(Pillar::Council));
+        assert_eq!(domain_to_pillar(Domain::Shukra), Some(Pillar::Loom));
+        assert_eq!(domain_to_pillar(Domain::Shani), Some(Pillar::Stone));
+        assert_eq!(domain_to_pillar(Domain::Rahu), None);
+        assert_eq!(domain_to_pillar(Domain::Ketu), None);
+    }
+
+    #[test]
+    fn aggregate_pillars_normalizes_from_report() {
+        // Mangala=Forge 0.8, Brihaspati=Council 0.2 → pillar vector.
+        let forces = vec![
+            resolved(Domain::Mangala, 4.0),
+            resolved(Domain::Brihaspati, 1.0),
+        ];
+        let report = synthesize_strategy("how to architect", &forces);
+        let pillars = aggregate_pillars(&report);
+
+        let total: f64 = pillars.iter().sum();
+        assert!(
+            (total - 1.0).abs() < 1e-9,
+            "pillars must sum to 1.0, got {total}"
+        );
+
+        assert!((pillars[Pillar::Forge.index()] - 0.8).abs() < 1e-9);
+        assert!((pillars[Pillar::Council.index()] - 0.2).abs() < 1e-9);
+        // Unmapped pillars stay at zero.
+        assert_eq!(pillars[Pillar::Spear.index()], 0.0);
+        assert_eq!(pillars[Pillar::Olive.index()], 0.0);
+    }
+
+    #[test]
+    fn aggregate_pillars_ignores_rahu_ketu() {
+        let forces = vec![
+            resolved(Domain::Rahu, 1.0),
+            resolved(Domain::Ketu, 1.0),
+            resolved(Domain::Shani, 2.0),
+        ];
+        let report = synthesize_strategy("x", &forces);
+        let pillars = aggregate_pillars(&report);
+        // Shani=Stone is 2/4 = 0.5; Rahu/Ketu contribute nothing.
+        assert!((pillars[Pillar::Stone.index()] - 0.5).abs() < 1e-9);
+        let total: f64 = pillars.iter().sum();
+        assert!((total - 0.5).abs() < 1e-9);
     }
 }

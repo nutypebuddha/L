@@ -11,8 +11,8 @@
 //! An untrusted step is admitted to execution only if it survives every gate. Every decision —
 //! allow or deny — is written to an append-only, deterministic audit log.
 
-use crate::pachinko::ball::{Ball, GateResult, TokenCandidate};
-use crate::pachinko::pin::{PinField, ValidationPin};
+use crate::scoring::ball::{Ball, GateResult, TokenCandidate};
+use crate::scoring::pin::{PinField, ValidationPin};
 use crate::validation::validate_ball;
 use std::collections::VecDeque;
 

@@ -1,0 +1,118 @@
+# Cyberpunk 2077 — Level 1 Permadeath build optimizer
+#
+# Usage:
+#   laverna build --domain domains/cp77_level1.toml \
+#     --datetime "1994-04-15 01:09" \
+#     --latitude 45.41 --longitude -92.64 \
+#     --top-k 3 --explain
+#
+# Maps Vedic chart pillar weights to CP77 attribute scores, then solves
+# the optimal level-1 attribute allocation within a 7-point budget.
+
+[meta]
+domain = "cp77_level1_permadeath"
+description = "Cyberpunk 2077 level 1 permadeath — allocate 7 attribute points across Body, Reflexes, Technical, Intelligence, Cool"
+
+# Graha → score splits.
+# Pillar mapping: surya→Spear, chandra→Olive, mangala→Forge, budha→Owl,
+# brihaspati→Council, shukra→Loom, shani→Stone.
+#
+# The splits below are from the manual CP77 analysis (July 2026).
+# Each graha's pillar_weight is split across the scores it feeds.
+
+[[graha_map]]
+graha = "mangala"
+splits = { score_body = 0.7, score_reflexes = 0.3 }
+note = "Mars governs both raw force and decisive quick action"
+
+[[graha_map]]
+graha = "surya"
+splits = { score_body = 1.0 }
+note = "Sun — pure vitality and presence"
+
+[[graha_map]]
+graha = "budha"
+splits = { score_intelligence = 1.0 }
+note = "Mercury — pure perception and analysis"
+
+[[graha_map]]
+graha = "shani"
+splits = { score_technical = 1.0 }
+note = "Saturn — pure craft and endurance"
+
+[[graha_map]]
+graha = "chandra"
+splits = { score_cool = 1.0 }
+note = "Moon — pure adaptability and flow"
+
+[[graha_map]]
+graha = "brihaspati"
+splits = { score_cool = 1.0 }
+note = "Jupiter — pure growth and expansion"
+
+[[graha_map]]
+graha = "shukra"
+splits = { score_cool = 1.0 }
+note = "Venus — pure synergy and aesthetics"
+
+[budget]
+attribute_points = 7
+perk_points = 0
+
+[[items]]
+id = "body"
+type = "attribute"
+cost = { attribute_points = 1 }
+max_level = 7
+effects = { body_points = 1.0 }
+
+[[items]]
+id = "reflexes"
+type = "attribute"
+cost = { attribute_points = 1 }
+max_level = 7
+effects = { reflex_points = 1.0 }
+
+[[items]]
+id = "technical"
+type = "attribute"
+cost = { attribute_points = 1 }
+max_level = 7
+effects = { tech_points = 1.0 }
+
+[[items]]
+id = "intelligence"
+type = "attribute"
+cost = { attribute_points = 1 }
+max_level = 7
+effects = { intel_points = 1.0 }
+
+[[items]]
+id = "cool"
+type = "attribute"
+cost = { attribute_points = 1 }
+max_level = 7
+effects = { cool_points = 1.0 }
+
+[objective]
+maximize = ["score_body", "score_reflexes", "score_technical", "score_intelligence", "score_cool"]
+
+[scoring.score_body]
+terms = { body_points = 1.0 }
+
+[scoring.score_reflexes]
+terms = { reflex_points = 1.0 }
+
+[scoring.score_technical]
+terms = { tech_points = 1.0 }
+
+[scoring.score_intelligence]
+terms = { intel_points = 1.0 }
+
+[scoring.score_cool]
+terms = { cool_points = 1.0 }
+
+[[caveats]]
+applies_to = "score_intelligence"
+note = "RAM bonus has ~0 value without an equipped cyberdeck + unlocked quickhacks; deprioritize for pure level-1 survival builds even if graha weight ranks it high"
+source = "CDPR official patch notes, 2.0"

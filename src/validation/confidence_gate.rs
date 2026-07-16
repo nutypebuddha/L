@@ -1,5 +1,5 @@
-use crate::pachinko::ball::{Ball, GateResult};
-use crate::pachinko::pin::GateKind;
+use crate::scoring::ball::{Ball, GateResult};
+use crate::scoring::pin::GateKind;
 
 #[derive(Debug, Clone)]
 pub struct Platt {

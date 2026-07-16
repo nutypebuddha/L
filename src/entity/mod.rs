@@ -320,7 +320,7 @@ impl EntityRegistry {
     /// the runtime ring, so `aspect_between` alone leaves them unreachable
     /// (V2).
     ///
-    /// T27: this returns `wheel::CompositionAspect`, NOT a real astronomical
+    /// T27: this returns `domain_graph::CompositionAspect`, NOT a real astronomical
     /// aspect. Two grahas that are always exactly 180° apart in the real sky
     /// (e.g. Rahu and Ketu, which are lunar nodes) can still be `Adjacent`
     /// here if they happen to sit next to each other on the fixed 9-node
@@ -332,12 +332,20 @@ impl EntityRegistry {
         &self,
         id_a: &str,
         id_b: &str,
-    ) -> Option<(crate::wheel::CompositionAspect, &SeedEntity, &SeedEntity)> {
+    ) -> Option<(
+        crate::domain_graph::CompositionAspect,
+        &SeedEntity,
+        &SeedEntity,
+    )> {
         let a = self.seeds.get(id_a)?;
         let b = self.seeds.get(id_b)?;
         let ga = a.classification.as_ref()?.vedic.dominant_graha()?;
         let gb = b.classification.as_ref()?.vedic.dominant_graha()?;
-        Some((crate::wheel::CompositionAspect::between(ga, gb), a, b))
+        Some((
+            crate::domain_graph::CompositionAspect::between(ga, gb),
+            a,
+            b,
+        ))
     }
 
     /// Total runtime entities.
@@ -572,7 +580,7 @@ impl EntityRegistry {
     }
 
     /// Get all seed entities whose dominant graha matches `domain`.
-    pub fn seeds_by_graha(&self, domain: crate::wheel::Domain) -> Vec<SeedEntity> {
+    pub fn seeds_by_graha(&self, domain: crate::domain_graph::Domain) -> Vec<SeedEntity> {
         self.seeds
             .values()
             .filter(|s| s.dominant_graha() == Some(domain))
@@ -728,7 +736,7 @@ impl ShikaiFormRegistry {
         let mut results: Vec<&ShikaiFormEntry> = self
             .forms
             .iter()
-            .filter(|cf| cf.regex.is_match(text))
+            .filter(|cf| self.matches_whole_token(&cf.regex, text))
             .map(|cf| &cf.entry)
             .collect();
         results.sort_by(|a, b| {
@@ -744,11 +752,21 @@ impl ShikaiFormRegistry {
     pub fn match_vedic(&self, text: &str) -> VedicClassification {
         let mut vc = VedicClassification::new();
         for cf in &self.forms {
-            if cf.regex.is_match(text) {
+            if self.matches_whole_token(&cf.regex, text) {
                 vc = vc.merge_max(&cf.vedic);
             }
         }
         vc
+    }
+
+    /// Whether `re` matches `text` as a whole token — the regex must consume the
+    /// entire token (no leading/trailing fragment). This "anchors" every form
+    /// pattern so a form meant for the word `rust` cannot fire on `rust_lang`.
+    /// `find` returns a match on valid UTF-8 char boundaries, so the span check
+    /// is always safe.
+    fn matches_whole_token(&self, re: &regex::Regex, text: &str) -> bool {
+        re.find(text)
+            .is_some_and(|m| m.start() == 0 && m.end() == text.len())
     }
 
     /// Number of forms registered.
@@ -1504,7 +1522,7 @@ mod tests {
 [[form]]
 id = "test_rust"
 name = "Rust Form"
-pattern = ".*rust.*"
+pattern = "rust"
 graha = "mangala"
 priority = 0.9
 description = "Rust language form"
@@ -1517,9 +1535,12 @@ tags = ["rust", "programming"]
         reg.load_from_file(&path).unwrap();
         assert_eq!(reg.len(), 1);
 
-        let matches = reg.match_token("rust_lang");
+        let matches = reg.match_token("rust");
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].id, "test_rust");
+
+        // Whole-word boundary: "rust" as a fragment inside "rust_lang" must NOT match.
+        assert!(reg.match_token("rust_lang").is_empty());
 
         std::fs::remove_file(path).ok();
     }
@@ -1616,7 +1637,7 @@ tags = ["anime", "gundam"]
     /// 9-node structural composition wheel they sit only 1 step apart. This
     /// test locks in the honest structural answer (`Adjacent`) under its
     /// unambiguous T27 name, and confirms `seed_aspect_between` returns
-    /// `wheel::CompositionAspect`, not anything claiming to be astronomical.
+    /// `domain_graph::CompositionAspect`, not anything claiming to be astronomical.
     #[test]
     fn t27_seed_aspect_between_rahu_ketu_is_structural_not_astronomical() {
         // Minimal fixture using exactly the fields `load_seeds_from_str`
@@ -1653,7 +1674,7 @@ tags = ["anime", "gundam"]
         assert_eq!(b.id, "ketu");
         assert_eq!(
             aspect,
-            crate::wheel::CompositionAspect::Adjacent,
+            crate::domain_graph::CompositionAspect::Adjacent,
             "T27: Rahu-Ketu are 1 structural step apart on the composition wheel — \
              this is the correct, honest answer and is NOT a claim about their real \
              (always exactly 180°) ephemeris separation. For that, use ChartSnapshot \

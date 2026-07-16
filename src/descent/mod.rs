@@ -24,10 +24,15 @@ use crate::astrology::{
     AtomClassification, Graha, PlanetaryRuler, Sign, SignAspect, VedicClassification, VedicElement,
 };
 use crate::chart::ChartSnapshot;
-use crate::entity::{generate_dynamic_entity, EntityRegistry, EventRegistry, ShikaiFormRegistry};
+use crate::domain_graph::CompositionAspect;
+use crate::domain_graph::Domain;
+use crate::entity::{
+    generate_dynamic_entity, DynamicEntity, EntityRegistry, EventRegistry, ShikaiFormRegistry,
+};
 use crate::formula::FormulaRegistry;
-use crate::wheel::CompositionAspect;
-use crate::wheel::Domain;
+
+use regex::Regex;
+use std::sync::LazyLock;
 
 // ─── Descent Layers ─────────────────────────────────────────────────────────
 
@@ -820,18 +825,33 @@ fn aspect_details(aspect: SignAspect) -> (i32, &'static str) {
 
 // ─── 9-graha Keyword → Domain Table ────────────────────────────────────────
 // The canonical keyword → structural-domain mapping used by both
-// `resolve_domain` (Layer 2) and `resolve_aspect` (Layer 3). A keyword is
-// matched if the token equals it exactly OR the token contains it (to handle
-// plurals, suffixes, etc.).
+// `resolve_domain` (Layer 2) and `resolve_aspect` (Layer 3). A keyword matches
+// only as a whole word (bounded by word boundaries) — never as a bare substring
+// fragment — so "velocitys" does not resolve to "velocity" and "antimass" does
+// not resolve to "mass". Common inflected forms are listed explicitly below.
 
-/// Map a token to its structural wheel domain via keyword matching.
-/// Returns `None` if no keyword matches — the caller should fall back to
-/// entity/formula lookup.
-pub fn domain_for_keyword(token: &str) -> Option<Domain> {
-    let t = token.to_lowercase();
+/// Pre-compiled whole-word matchers for `DOMAIN_KEYWORDS`. Each pattern is
+/// `\b<keyword>\b` (regex-escaped) so a keyword must appear as a delimited
+/// word within the token to match.
+static DOMAIN_KEYWORD_RE: LazyLock<Vec<(Regex, Domain)>> = LazyLock::new(|| {
     DOMAIN_KEYWORDS
         .iter()
-        .find(|(kw, _)| t == *kw || t.contains(kw))
+        .map(|(kw, domain)| {
+            let pattern = format!(r"\b{}\b", regex::escape(kw));
+            let re = Regex::new(&pattern).expect("domain keyword regex must compile");
+            (re, *domain)
+        })
+        .collect()
+});
+
+/// Map a token to its structural wheel domain via keyword matching.
+/// Returns `None` if no keyword matches as a whole word — the caller should
+/// fall back to entity/formula lookup.
+pub fn domain_for_keyword(token: &str) -> Option<Domain> {
+    let t = token.to_lowercase();
+    DOMAIN_KEYWORD_RE
+        .iter()
+        .find(|(re, _)| re.is_match(&t))
         .map(|(_, domain)| *domain)
 }
 
@@ -1153,6 +1173,52 @@ const DOMAIN_KEYWORDS: &[(&str, Domain)] = &[
     ("accept", Domain::Brihaspati),
     ("agree", Domain::Brihaspati),
     ("disagree", Domain::Brihaspati),
+    // ── Inflected / plural forms (explicit) ──
+    // Whole-word matching drops bare suffixes/plurals, so the common inflected
+    // forms are listed explicitly to preserve legitimate recall without
+    // re-introducing fragment over-match.
+    ("stars", Domain::Budha),
+    ("planets", Domain::Budha),
+    ("galaxies", Domain::Budha),
+    ("forces", Domain::Shukra),
+    ("energies", Domain::Shukra),
+    ("masses", Domain::Shukra),
+    ("velocities", Domain::Shukra),
+    ("atoms", Domain::Shukra),
+    ("molecules", Domain::Shukra),
+    ("bodies", Domain::Surya),
+    ("cells", Domain::Surya),
+    ("genes", Domain::Surya),
+    ("diseases", Domain::Surya),
+    ("brains", Domain::Surya),
+    ("organs", Domain::Surya),
+    ("economies", Domain::Budha),
+    ("markets", Domain::Budha),
+    ("prices", Domain::Budha),
+    ("budgets", Domain::Budha),
+    ("taxes", Domain::Budha),
+    ("programs", Domain::Mangala),
+    ("functions", Domain::Mangala),
+    ("networks", Domain::Mangala),
+    ("threads", Domain::Mangala),
+    ("processes", Domain::Shukra),
+    ("systems", Domain::Shukra),
+    ("models", Domain::Mangala),
+    ("theories", Domain::Brihaspati),
+    ("histories", Domain::Brihaspati),
+    ("cultures", Domain::Brihaspati),
+    ("societies", Domain::Brihaspati),
+    ("minds", Domain::Brihaspati),
+    ("emotions", Domain::Brihaspati),
+    ("feelings", Domain::Brihaspati),
+    ("dreams", Domain::Brihaspati),
+    ("memories", Domain::Mangala),
+    ("languages", Domain::Shani),
+    ("words", Domain::Shani),
+    ("philosophies", Domain::Shani),
+    ("truths", Domain::Shani),
+    ("justices", Domain::Shani),
+    ("psychologies", Domain::Brihaspati),
 ];
 
 /// Formal expressions: token → Tanto-evaluable expression.
@@ -1290,9 +1356,10 @@ impl DescentEngine {
             .filter(|s| !s.is_empty())
             .collect();
 
+        let mut entity_cache = std::collections::HashMap::new();
         let mut settled: Vec<SettledToken> = tokens
             .iter()
-            .map(|t| self.descent_token(t, &tokens))
+            .map(|t| self.descent_token(t, &tokens, &mut entity_cache))
             .collect();
 
         // Phase 3: Constraint propagation — propagate shared domains/formulas
@@ -1307,21 +1374,22 @@ impl DescentEngine {
     /// This is the wired path: Zanpakuto → Descent → Gyro → Shikai → Bankai.
     /// Uses the already-tokenized, stemmed tokens from NLP preprocessing
     /// instead of re-tokenizing the raw query.
-    pub fn resolve_nlp(&self, nlp: &crate::zanpakuto::NlpContext) -> SettlingMatrix {
+    pub fn resolve_nlp(&self, nlp: &crate::nlp::NlpContext) -> SettlingMatrix {
         self.resolve_nlp_with_chart(nlp, None)
     }
 
     /// Run descent using pre-tokenized NLP context, with optional sky context.
     pub fn resolve_nlp_with_chart(
         &self,
-        nlp: &crate::zanpakuto::NlpContext,
+        nlp: &crate::nlp::NlpContext,
         chart: Option<ChartSnapshot>,
     ) -> SettlingMatrix {
         let tokens: Vec<&str> = nlp.tokens.iter().map(|s| s.as_str()).collect();
 
+        let mut entity_cache = std::collections::HashMap::new();
         let mut settled: Vec<SettledToken> = tokens
             .iter()
-            .map(|t| self.descent_token(t, &tokens))
+            .map(|t| self.descent_token(t, &tokens, &mut entity_cache))
             .collect();
 
         // Phase 3: Constraint propagation
@@ -1437,7 +1505,12 @@ impl DescentEngine {
     /// The principle: resolve grounded facts (entities/formulas) before inferring abstract
     /// classifications (domains/elements). If a token directly names a known entity or formula,
     /// no keyword-based domain inference is needed.
-    fn descent_token(&self, token: &str, all_tokens: &[&str]) -> SettledToken {
+    fn descent_token(
+        &self,
+        token: &str,
+        all_tokens: &[&str],
+        entity_cache: &mut std::collections::HashMap<String, DynamicEntity>,
+    ) -> SettledToken {
         let mut st = SettledToken::new(token);
 
         // ── Layer 1: Macro ──
@@ -1452,7 +1525,7 @@ impl DescentEngine {
         // The CID simulation proved: KB lookup BEFORE logic gates yields optimal results.
         // We check entity and formula first — if the token directly names a known entity
         // or formula, we derive domain from that, avoiding keyword-based inference entirely.
-        let found_entity = self.try_lookup_entity(&mut st);
+        let found_entity = self.try_lookup_entity(&mut st, entity_cache);
         let found_formula = self.try_lookup_formula(&mut st);
 
         // ── QWEN COPILOT: semantic hints when KB lookup is ambiguous ──
@@ -1466,7 +1539,7 @@ impl DescentEngine {
                     // Apply copilot's domain hints if our domain list is still empty
                     if st.domains.is_empty() && !hint.domains.is_empty() {
                         for domain_name in &hint.domains {
-                            if let Ok(domain) = domain_name.parse::<crate::wheel::Domain>() {
+                            if let Ok(domain) = domain_name.parse::<crate::domain_graph::Domain>() {
                                 if !st.domains.contains(&domain) {
                                     st.domains.push(domain);
                                 }
@@ -1501,7 +1574,7 @@ impl DescentEngine {
         // Only do keyword-based domain classification if entity/formula lookup didn't resolve it.
         // This prevents "mercury" (the element) from keyword-matching to "mercury" (the planet).
         if st.domains.is_empty() {
-            self.resolve_domain(&mut st);
+            self.resolve_domain(&mut st, entity_cache);
         }
         if st.domains.is_empty() {
             // Couldn't even resolve domain — float at Macro
@@ -1532,7 +1605,7 @@ impl DescentEngine {
         // ── Layer 6: Entity (deeper) ──
         // If formula was found but entity not yet matched, try entity resolution
         if !found_entity {
-            self.resolve_entity(&mut st);
+            self.resolve_entity(&mut st, entity_cache);
         }
 
         // ── Layer 6b: Unification ──
@@ -1552,7 +1625,7 @@ impl DescentEngine {
 
         // ── Layer 7: NAND ──
         // Entity is resolved. Check if we also have formulas for NAND truth.
-        self.resolve_nand(&mut st);
+        self.resolve_nand(&mut st, entity_cache);
         if st.is_absolute {
             st.settled_layer = DescentLayer::Nand;
             st.confidence = 1.0;
@@ -1566,30 +1639,36 @@ impl DescentEngine {
 
     /// Fact-first entity lookup: check if token names a known entity, derive domain from it.
     /// Returns true if entity was found.
-    fn try_lookup_entity(&self, st: &mut SettledToken) -> bool {
+    fn try_lookup_entity(
+        &self,
+        st: &mut SettledToken,
+        entity_cache: &mut std::collections::HashMap<String, DynamicEntity>,
+    ) -> bool {
         let token_lower = st.text.to_lowercase();
 
-        let de = generate_dynamic_entity(&token_lower, &self.shikai_forms, &self.events);
+        let de = entity_cache
+            .entry(token_lower.clone())
+            .or_insert_with(|| {
+                generate_dynamic_entity(&token_lower, &self.shikai_forms, &self.events)
+            })
+            .clone();
         if !de.forms.is_empty() || !de.events.is_empty() {
             st.entity = Some(de.id.clone());
             // Apply merged Vedic classification from forms + birth charts
-            st.vedic_classification = st
-                .vedic_classification
-                .clone()
-                .merge_max(&de.vedic_classification);
+            st.vedic_classification
+                .merge_max_into(&de.vedic_classification);
             // Apply birth chart graha positions
             for chart in &de.birth_charts {
                 for gp in &chart.graha_positions {
                     let weight = if gp.graha == Graha::Surya { 0.9 } else { 0.3 };
-                    st.vedic_classification =
-                        st.vedic_classification.clone().with_graha(gp.graha, weight);
+                    st.vedic_classification.set_graha(gp.graha, weight);
                 }
             }
             // Set western from forms' Vedic dominant graha → sign
             if let Some(graha) = de.vedic_classification.dominant_graha() {
                 let sign = Sign::from_index(graha.index());
-                st.western_classification = st.western_classification.clone().with_sign(sign, 0.9);
-                let domain = crate::wheel::Domain::from_sign(sign);
+                st.western_classification.set_sign(sign, 0.9);
+                let domain = crate::domain_graph::Domain::from_sign(sign);
                 st.domains.push(domain);
             }
             st.settled_layer = DescentLayer::Entity;
@@ -1646,7 +1725,7 @@ impl DescentEngine {
 
             // Set western classification from formula domain
             let sign = sign_from_domain(f.domain);
-            st.western_classification = st.western_classification.clone().with_sign(sign, 0.9);
+            st.western_classification.set_sign(sign, 0.9);
             // Attach formal expression if available
             if st.formal_expression.is_none() {
                 if let Some(expr) = formal_expression_for(&token_lower) {
@@ -1666,21 +1745,28 @@ impl DescentEngine {
     // ─── Layer 2: Domain Resolution ─────────────────────────────────────────
 
     /// Map a token to one or more zodiac domains using keyword matching.
-    fn resolve_domain(&self, st: &mut SettledToken) {
+    fn resolve_domain(
+        &self,
+        st: &mut SettledToken,
+        entity_cache: &mut std::collections::HashMap<String, DynamicEntity>,
+    ) {
         let token_lower = st.text.to_lowercase();
 
         // Dynamic entity lookup — use Vedic dominant graha → domain
-        let de = generate_dynamic_entity(&token_lower, &self.shikai_forms, &self.events);
+        let de = entity_cache
+            .entry(token_lower.clone())
+            .or_insert_with(|| {
+                generate_dynamic_entity(&token_lower, &self.shikai_forms, &self.events)
+            })
+            .clone();
         if !de.forms.is_empty() || !de.events.is_empty() {
             if let Some(graha) = de.vedic_classification.dominant_graha() {
                 let sign = Sign::from_index(graha.index());
                 let domain = Domain::from_sign(sign);
                 st.domains.push(domain);
-                st.western_classification = st.western_classification.clone().with_sign(sign, 0.7);
-                st.vedic_classification = st
-                    .vedic_classification
-                    .clone()
-                    .merge_max(&de.vedic_classification);
+                st.western_classification.set_sign(sign, 0.7);
+                st.vedic_classification
+                    .merge_max_into(&de.vedic_classification);
                 st.confidence = 0.5;
                 return;
             }
@@ -1728,7 +1814,7 @@ impl DescentEngine {
             // Set Vedic classification based on domain's planetary ruler
             let ruler = sign.ruler();
             let graha = ruler_to_graha(ruler);
-            st.vedic_classification = st.vedic_classification.clone().with_graha(graha, 0.7);
+            st.vedic_classification.set_graha(graha, 0.7);
 
             st.settled_layer = DescentLayer::Domain;
             st.confidence = 0.4;
@@ -1843,27 +1929,33 @@ impl DescentEngine {
     // ─── Layer 6: Entity Resolution ─────────────────────────────────────────
 
     /// Attempt to ground the token to a named entity.
-    fn resolve_entity(&self, st: &mut SettledToken) {
+    fn resolve_entity(
+        &self,
+        st: &mut SettledToken,
+        entity_cache: &mut std::collections::HashMap<String, DynamicEntity>,
+    ) {
         let token_lower = st.text.to_lowercase();
 
-        let de = generate_dynamic_entity(&token_lower, &self.shikai_forms, &self.events);
+        let de = entity_cache
+            .entry(token_lower.clone())
+            .or_insert_with(|| {
+                generate_dynamic_entity(&token_lower, &self.shikai_forms, &self.events)
+            })
+            .clone();
         if !de.forms.is_empty() || !de.events.is_empty() {
             st.entity = Some(de.id.clone());
-            st.vedic_classification = st
-                .vedic_classification
-                .clone()
-                .merge_max(&de.vedic_classification);
+            st.vedic_classification
+                .merge_max_into(&de.vedic_classification);
             // Apply birth chart graha positions
             for chart in &de.birth_charts {
                 for gp in &chart.graha_positions {
                     let weight = if gp.graha == Graha::Surya { 0.9 } else { 0.3 };
-                    st.vedic_classification =
-                        st.vedic_classification.clone().with_graha(gp.graha, weight);
+                    st.vedic_classification.set_graha(gp.graha, weight);
                 }
             }
             if let Some(graha) = de.vedic_classification.dominant_graha() {
                 let sign = Sign::from_index(graha.index());
-                st.western_classification = st.western_classification.clone().with_sign(sign, 0.9);
+                st.western_classification.set_sign(sign, 0.9);
             }
         }
     }
@@ -1921,7 +2013,11 @@ impl DescentEngine {
     /// 1. Its entity has birth charts (event-anchored in time)
     /// 2. Its first matched formula has no inputs (it's a constant)
     /// 3. Both entity AND formula are resolved (dual grounding)
-    fn resolve_nand(&self, st: &mut SettledToken) {
+    fn resolve_nand(
+        &self,
+        st: &mut SettledToken,
+        entity_cache: &mut std::collections::HashMap<String, DynamicEntity>,
+    ) {
         // Two INDEPENDENT grounding systems: the entity registry (what is
         // this?) and the formula registry (how does it behave?). Each, on its
         // own, settles the token; both together cross-check it to NAND-level
@@ -1942,8 +2038,13 @@ impl DescentEngine {
         //   - a time-anchored entity (birth charts), OR
         //   - a constant (no-input) formula.
         let dual = has_entity && has_formula;
+        let token_lower = st.text.to_lowercase();
         let time_anchored = has_entity
-            && !generate_dynamic_entity(&st.text.to_lowercase(), &self.shikai_forms, &self.events)
+            && !entity_cache
+                .entry(token_lower.clone())
+                .or_insert_with(|| {
+                    generate_dynamic_entity(&token_lower, &self.shikai_forms, &self.events)
+                })
                 .birth_charts
                 .is_empty();
         let constant = has_formula
@@ -2129,8 +2230,9 @@ mod tests {
     fn test_descent_token_steps() {
         let engine = test_engine();
         let tokens: Vec<&str> = vec!["what", "is", "the", "mass", "of", "an", "electron"];
+        let mut entity_cache = std::collections::HashMap::new();
         for token in &tokens {
-            let st = engine.descent_token(token, &tokens);
+            let st = engine.descent_token(token, &tokens, &mut entity_cache);
             // Every token should at least attempt domain resolution
             assert!(!st.text.is_empty());
         }
@@ -2188,7 +2290,8 @@ mod tests {
     fn test_descent_one_token_per_layer() {
         let engine = test_engine();
         let tokens: Vec<&str> = vec!["calculate"];
-        let st = engine.descent_token("calculate", &tokens);
+        let mut entity_cache = std::collections::HashMap::new();
+        let st = engine.descent_token("calculate", &tokens, &mut entity_cache);
         // "calculate" should at least hit Domain (Aries - Math)
         assert!(st.settled_layer >= DescentLayer::Domain);
         assert!(!st.domains.is_empty());
@@ -2244,9 +2347,22 @@ mod tests {
     }
 
     #[test]
-    fn domain_for_keyword_matches_substring() {
-        // "veloc" should match "velocity" via contains()
-        assert_eq!(domain_for_keyword("velocitys"), Some(Domain::Shukra));
+    fn domain_for_keyword_matches_whole_word() {
+        // Whole-word: keyword as a standalone word, or bounded by space/hyphen.
+        assert_eq!(domain_for_keyword("force"), Some(Domain::Shukra));
+        assert_eq!(domain_for_keyword("force-field"), Some(Domain::Shukra));
+        assert_eq!(domain_for_keyword("the force"), Some(Domain::Shukra));
+        // Explicit plural keywords also resolve (recall restoration).
+        assert_eq!(domain_for_keyword("Stars"), Some(Domain::Budha));
+    }
+
+    #[test]
+    fn domain_for_keyword_rejects_substring_fragments() {
+        // Suffix fragments that are not whole words must NOT match.
+        assert_eq!(domain_for_keyword("velocitys"), None);
+        assert_eq!(domain_for_keyword("antimass"), None);
+        // "star" must not resolve from "start" (fragment, no boundary).
+        assert_eq!(domain_for_keyword("start"), None);
     }
 
     #[test]

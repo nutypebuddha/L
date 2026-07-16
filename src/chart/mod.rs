@@ -3,11 +3,11 @@ pub mod personality;
 use serde::{Deserialize, Serialize};
 
 use crate::astrology::{Graha, House, Rashi};
-use crate::ephemeris::{self, GrahaPosition};
+use crate::ephemeris::{self, AyanamsaSystem, GrahaPosition};
 
 /// A real astronomical aspect between two grahas, computed from their actual
 /// ecliptic longitude separation on a given date (with standard orb
-/// tolerances). Distinct from `crate::wheel::CompositionAspect`, which is a
+/// tolerances). Distinct from `crate::domain_graph::CompositionAspect`, which is a
 /// fixed structural relationship on the 9-node compositional wheel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AstroAspect {
@@ -28,6 +28,51 @@ pub type Aspect = AstroAspect;
 pub use personality::{
     derive_personality, AspectModifier, PersonalityProfile, Pillar, WatchArchetype,
 };
+
+/// House (bhava) system used to derive the 12 cusps.
+///
+/// Part 1.5: Laverna computes **Sidereal Whole Sign** — every cusp lands on a
+/// true sidereal sign boundary, valid at any latitude. Placidus is recorded
+/// (and explicitly refused above ~66° latitude, where it has no closed form)
+/// so a future path can branch on it without silently emitting garbage cusps.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum HouseSystem {
+    /// Sidereal Whole Sign (12 equal sidereal signs; the rising sign = 1st house).
+    #[default]
+    WholeSign,
+    /// Placidus (trisects diurnal/nocturnal semi-arcs in time). Mathematically
+    /// breaks above ~66° latitude where degrees can be circumpolar.
+    Placidus,
+}
+
+impl HouseSystem {
+    /// Latitude (degrees, absolute) above which Placidus has no closed form and
+    /// must be refused. ~66° is the Arctic/Antarctic Circle boundary where the
+    /// Sun can be circumpolar for part of the year, breaking the semi-arc split.
+    pub const PLACIDUS_MAX_LATITUDE: f64 = 66.0;
+
+    /// Validate that this house system is computable at the given latitude.
+    /// Returns `Err(HouseSystemError::PlacidusUnsupportedAtLatitude)` for Placidus
+    /// above the polar circle, so high-latitude input fails loud instead of
+    /// producing garbage cusps.
+    pub fn validate_latitude(self, latitude: f64) -> Result<(), HouseSystemError> {
+        if self == HouseSystem::Placidus && latitude.abs() > Self::PLACIDUS_MAX_LATITUDE {
+            return Err(HouseSystemError::PlacidusUnsupportedAtLatitude(latitude));
+        }
+        Ok(())
+    }
+}
+
+/// Typed failure for unsupported house-system / latitude combinations.
+/// Machine-readable so an LLM orchestration loop (Part 2.3) can branch on it.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum HouseSystemError {
+    #[error(
+        "Placidus house system is undefined above ~66° latitude (Arctic/Antarctic Circle); \
+         got {0:.2}°. Use Whole Sign, which is valid at any latitude."
+    )]
+    PlacidusUnsupportedAtLatitude(f64),
+}
 
 /// A complete sky snapshot at a moment in time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +98,13 @@ pub struct ChartSnapshot {
     pub aspect_matrix: Vec<Vec<Option<Aspect>>>,
     /// Human-readable label (e.g. "birth chart for major_depression").
     pub label: Option<String>,
+    /// Ayanamsa system used for the tropical→sidereal reduction (Part 1.4).
+    /// Named explicitly so the sidereal longitudes are self-documenting.
+    pub ayanamsa_system: AyanamsaSystem,
+    /// House (bhava) system used to derive the cusps (Part 1.5). Sidereal Whole
+    /// Sign is the only system Laverna computes; Placidus is rejected above
+    /// ~66° latitude via [`HouseSystem::validate_latitude`].
+    pub house_system: HouseSystem,
 }
 
 /// A single house cusp: the house, its tropical longitude, and sidereal rashi.
@@ -67,9 +119,16 @@ pub struct HouseCusp {
 }
 
 impl ChartSnapshot {
-    /// Create a new snapshot for the given Julian Day.
+    /// Create a new snapshot for the given Julian Day, using the default
+    /// (Lahiri) ayanamsa system.
     pub fn new(jd: f64) -> Self {
-        let graha_positions = ephemeris::all_graha_positions(jd);
+        Self::with_ayanamsa(jd, AyanamsaSystem::default())
+    }
+
+    /// Create a new snapshot for the given Julian Day with an explicit
+    /// ayanamsa system (Part 1.4).
+    pub fn with_ayanamsa(jd: f64, system: AyanamsaSystem) -> Self {
+        let graha_positions = ephemeris::all_graha_positions_with(jd, system);
         let aspect_matrix = Self::compute_aspect_matrix(&graha_positions);
 
         ChartSnapshot {
@@ -82,11 +141,27 @@ impl ChartSnapshot {
             house_cusps: Vec::new(),
             aspect_matrix,
             label: None,
+            ayanamsa_system: system,
+            house_system: HouseSystem::default(),
         }
     }
 
     /// Set observer location and recompute lagna + house cusps.
+    ///
+    /// Uses the snapshot's configured [`HouseSystem`]; Placidus is refused
+    /// above ~66° latitude (Part 1.5) so no garbage cusps are emitted.
     pub fn with_location(mut self, latitude: f64, longitude: f64) -> Self {
+        if let Err(e) = self.house_system.validate_latitude(latitude) {
+            // Fail loud rather than emit meaningless cusps. The lagna (a single
+            // rising point) is still computable, so we surface the error and
+            // leave cusps empty rather than panicking.
+            eprintln!("warning: {e}");
+            self.latitude = Some(latitude);
+            self.longitude = Some(longitude);
+            self.lagna = self.compute_lagna(latitude, longitude);
+            self.ascendant_deg = Some(self.compute_ascendant_sidereal_deg(latitude, longitude));
+            return self;
+        }
         self.latitude = Some(latitude);
         self.longitude = Some(longitude);
         self.lagna = self.compute_lagna(latitude, longitude);
@@ -113,9 +188,13 @@ impl ChartSnapshot {
                 let result = if i == j {
                     Some(Aspect::Conjunction)
                 } else {
-                    let diff = (positions[i].tropical - positions[j].tropical).abs();
-                    let diff = if diff > 180.0 { 360.0 - diff } else { diff };
-                    angular_diff_to_aspect(diff)
+                    // 3D angular separation (Part 1.3): robust across the
+                    // 0°/360° wraparound that flat-degree subtraction gets wrong.
+                    let sep = crate::router::Vec3::from_ecliptic_longitude(positions[i].tropical)
+                        .angular_separation_deg(crate::router::Vec3::from_ecliptic_longitude(
+                            positions[j].tropical,
+                        ));
+                    angular_diff_to_aspect(sep)
                 };
                 row.push(result);
             }
@@ -148,7 +227,7 @@ impl ChartSnapshot {
         let asc_tropical =
             norm360(xalen_houses::compute_ascendant(ramc_rad, epsilon_rad, lat_rad).to_degrees());
 
-        let ayanamsa = ephemeris::lahiri_ayanamsa(self.julian_day);
+        let ayanamsa = ephemeris::ayanamsa_deg(self.julian_day, self.ayanamsa_system);
         norm360(asc_tropical - ayanamsa)
     }
 
@@ -215,8 +294,11 @@ impl ChartSnapshot {
         let mut results = Vec::new();
         for pos_a in &self.graha_positions {
             for pos_b in &other.graha_positions {
-                let diff = (pos_a.tropical - pos_b.tropical).abs();
-                let diff = if diff > 180.0 { 360.0 - diff } else { diff };
+                // 3D angular separation (Part 1.3): robust across 0°/360° wrap.
+                let diff = crate::router::Vec3::from_ecliptic_longitude(pos_a.tropical)
+                    .angular_separation_deg(crate::router::Vec3::from_ecliptic_longitude(
+                        pos_b.tropical,
+                    ));
                 let aspect = angular_diff_to_aspect(diff);
                 results.push(SynastryAspect {
                     graha_a: pos_a.graha,
@@ -437,6 +519,18 @@ mod tests {
         assert!(snap.lagna.is_some());
         let lagna = snap.lagna.unwrap();
         assert!((lagna.index()) < 12);
+    }
+
+    #[test]
+    fn placidus_refused_above_polar_circle() {
+        // Part 1.5: Placidus has no closed form above ~66° latitude. validate_latitude
+        // must refuse it (Whole Sign stays valid everywhere).
+        assert!(HouseSystem::WholeSign.validate_latitude(80.0).is_ok());
+        assert!(HouseSystem::Placidus.validate_latitude(45.0).is_ok());
+        assert!(matches!(
+            HouseSystem::Placidus.validate_latitude(80.0),
+            Err(HouseSystemError::PlacidusUnsupportedAtLatitude(_))
+        ));
     }
 
     #[test]

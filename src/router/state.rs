@@ -1,6 +1,6 @@
 use crate::astrology::Graha;
 use crate::chart::ChartSnapshot;
-use crate::wheel::Domain;
+use crate::domain_graph::Domain;
 
 /// Gyroscopic state of the zodiac wheel.
 ///

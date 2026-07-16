@@ -17,13 +17,15 @@
 
 pub mod dynamics;
 pub mod mapping;
-pub mod router;
+pub mod route;
 pub mod state;
+pub mod vec3;
 
 pub use dynamics::{GyroDynamics, PrecessionParams};
 pub use mapping::{PrimitiveEntry, PrimitiveMapping};
-pub use router::{GyroRouter, RouteResult};
+pub use route::{GyroRouter, RouteResult};
 pub use state::GyroState;
+pub use vec3::{norm360, Vec3};
 
 #[cfg(test)]
 mod tests {

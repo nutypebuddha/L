@@ -7,7 +7,10 @@
 //! Pareto frontier over the objective and selects via the weights — it never
 //! invents a number, and fails loudly on any structural violation.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+#[cfg(feature = "milp")]
+pub mod milp;
 
 // ── Schema types ────────────────────────────────────────────────────────────
 
@@ -26,6 +29,11 @@ pub struct Meta {
     pub domain: String,
     #[serde(default)]
     pub schema_version: u32,
+    /// Solver shape — determines which algorithm is used.
+    /// Valid values: "knapsack" (default), "milp", "assignment",
+    /// "shortest_path", "mst", "max_flow", "interval_scheduling", "csp".
+    #[serde(default)]
+    pub shape: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
@@ -78,7 +86,7 @@ pub struct ScoreTerm {
 
 #[derive(Debug, Clone)]
 pub struct Allocation {
-    pub levels: HashMap<String, u32>,
+    pub levels: BTreeMap<String, u32>,
     pub stats: HashMap<String, f64>,
     pub scores: HashMap<String, f64>,
     pub objective: f64,
@@ -93,7 +101,7 @@ pub fn parse_schema(toml_str: &str) -> Result<Schema, String> {
 // ── Prerequisite parsing ──────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CmpOp {
+pub(crate) enum CmpOp {
     Ge,
     Gt,
     Le,
@@ -113,7 +121,7 @@ impl CmpOp {
     }
 }
 
-fn parse_prereq(s: &str) -> Result<(String, CmpOp, f64), String> {
+pub(crate) fn parse_prereq(s: &str) -> Result<(String, CmpOp, f64), String> {
     let s = s.trim();
     let (target, op, rest) = if let Some(i) = s.find(">=") {
         (&s[..i], CmpOp::Ge, &s[i + 2..])
@@ -244,7 +252,10 @@ fn dfs_cycle(
 
 // ── Evaluation helpers ────────────────────────────────────────────────────────
 
-fn compute_stats(schema: &Schema, levels: &HashMap<String, u32>) -> HashMap<String, f64> {
+pub(crate) fn compute_stats(
+    schema: &Schema,
+    levels: &BTreeMap<String, u32>,
+) -> HashMap<String, f64> {
     let mut stats: HashMap<String, f64> = HashMap::new();
     for item in &schema.items {
         let l = *levels.get(&item.id).unwrap_or(&0) as f64;
@@ -258,7 +269,10 @@ fn compute_stats(schema: &Schema, levels: &HashMap<String, u32>) -> HashMap<Stri
     stats
 }
 
-fn compute_scores(schema: &Schema, stats: &HashMap<String, f64>) -> HashMap<String, f64> {
+pub(crate) fn compute_scores(
+    schema: &Schema,
+    stats: &HashMap<String, f64>,
+) -> HashMap<String, f64> {
     let mut scores = HashMap::new();
     for (name, st) in &schema.scoring {
         let mut s = 0.0;
@@ -270,7 +284,7 @@ fn compute_scores(schema: &Schema, stats: &HashMap<String, f64>) -> HashMap<Stri
     scores
 }
 
-fn objective_value(schema: &Schema, scores: &HashMap<String, f64>) -> f64 {
+pub(crate) fn objective_value(schema: &Schema, scores: &HashMap<String, f64>) -> f64 {
     let mut total = 0.0;
     for name in &schema.objective.maximize {
         let w = schema.objective.weights.get(name).copied().unwrap_or(1.0);
@@ -279,7 +293,7 @@ fn objective_value(schema: &Schema, scores: &HashMap<String, f64>) -> f64 {
     total
 }
 
-fn cost_of(schema: &Schema, levels: &HashMap<String, u32>) -> HashMap<String, f64> {
+fn cost_of(schema: &Schema, levels: &BTreeMap<String, u32>) -> HashMap<String, f64> {
     let mut cost = HashMap::new();
     for item in &schema.items {
         let l = *levels.get(&item.id).unwrap_or(&0) as f64;
@@ -293,7 +307,7 @@ fn cost_of(schema: &Schema, levels: &HashMap<String, u32>) -> HashMap<String, f6
     cost
 }
 
-fn within_budget(schema: &Schema, levels: &HashMap<String, u32>) -> bool {
+fn within_budget(schema: &Schema, levels: &BTreeMap<String, u32>) -> bool {
     let cost = cost_of(schema, levels);
     for (res, avail) in &schema.budget {
         let used = cost.get(res).copied().unwrap_or(0.0);
@@ -304,7 +318,28 @@ fn within_budget(schema: &Schema, levels: &HashMap<String, u32>) -> bool {
     true
 }
 
-fn prereqs_satisfied(schema: &Schema, levels: &HashMap<String, u32>) -> bool {
+/// Maximum additional level of `item` that keeps the current partial assignment
+/// within budget, for every budget resource. Lets the enumerator skip levels that
+/// would provably exceed the budget — the feasible candidate set is unchanged,
+/// but the search tree shrinks from a full `(cap+1)^K` product to the integer
+/// compositions actually within budget (so 7 pillars × budget 20 stays far under
+/// `NODE_CAP` instead of exploding).
+fn level_ceiling(schema: &Schema, levels: &BTreeMap<String, u32>, item: &Item) -> u32 {
+    let mut ceiling = item.level_cap();
+    let cost = cost_of(schema, levels);
+    for (res, avail) in &schema.budget {
+        let used = cost.get(res).copied().unwrap_or(0.0);
+        let per = item.cost.get(res).copied().unwrap_or(0.0);
+        if per > 0.0 {
+            let room = (avail - used) / per;
+            let room = if room < 0.0 { 0.0 } else { room.floor() };
+            ceiling = ceiling.min(room as u32);
+        }
+    }
+    ceiling
+}
+
+fn prereqs_satisfied(schema: &Schema, levels: &BTreeMap<String, u32>) -> bool {
     for item in &schema.items {
         if *levels.get(&item.id).unwrap_or(&0) == 0 {
             continue;
@@ -327,6 +362,10 @@ fn prereqs_satisfied(schema: &Schema, levels: &HashMap<String, u32>) -> bool {
 
 // ── Solver ───────────────────────────────────────────────────────────────────
 
+/// State-space guard: maximum number of nodes the brute-force enumerator may
+/// visit before aborting. Prevents runaway computation on oversized inputs.
+/// 5M nodes ≈ a few seconds on modern hardware; well beyond any reasonable
+/// domain-profile schema.
 const NODE_CAP: usize = 5_000_000;
 
 /// Solve the allocation problem and return the top-`top_k` distinct Pareto-optimal
@@ -339,7 +378,7 @@ pub fn solve(schema: &Schema, top_k: usize) -> Result<Vec<Allocation>, String> {
 
     let mut candidates: Vec<Allocation> = Vec::new();
     let mut node_count = 0usize;
-    let mut levels: HashMap<String, u32> = HashMap::new();
+    let mut levels: BTreeMap<String, u32> = BTreeMap::new();
     enumerate_attributes(
         schema,
         &attrs,
@@ -349,6 +388,14 @@ pub fn solve(schema: &Schema, top_k: usize) -> Result<Vec<Allocation>, String> {
         &mut candidates,
         &mut node_count,
     );
+
+    if node_count > NODE_CAP {
+        return Err(format!(
+            "state-space guard exceeded: visited {node_count} nodes (cap {NODE_CAP}). \
+             The schema has too many items/levels for brute-force enumeration. \
+             Reduce max_level, remove items, or split into smaller sub-problems."
+        ));
+    }
 
     if candidates.is_empty() {
         return Err("no feasible allocation within budget and prerequisites".to_string());
@@ -390,7 +437,7 @@ fn enumerate_attributes(
     schema: &Schema,
     attrs: &[&Item],
     idx: usize,
-    levels: &mut HashMap<String, u32>,
+    levels: &mut BTreeMap<String, u32>,
     perks: &[&Item],
     candidates: &mut Vec<Allocation>,
     node_count: &mut usize,
@@ -400,7 +447,7 @@ fn enumerate_attributes(
         return;
     }
     let item = attrs[idx];
-    let cap = item.level_cap();
+    let cap = level_ceiling(schema, levels, item);
     for l in 0..=cap {
         *node_count += 1;
         if *node_count > NODE_CAP {
@@ -426,7 +473,7 @@ fn enumerate_perks(
     schema: &Schema,
     perks: &[&Item],
     idx: usize,
-    levels: &mut HashMap<String, u32>,
+    levels: &mut BTreeMap<String, u32>,
     candidates: &mut Vec<Allocation>,
     node_count: &mut usize,
 ) {
@@ -459,30 +506,61 @@ fn enumerate_perks(
 
 fn pareto_frontier(schema: &Schema, candidates: &[Allocation]) -> Vec<Allocation> {
     let objs = &schema.objective.maximize;
+    if objs.is_empty() || candidates.is_empty() {
+        return candidates.to_vec();
+    }
+
+    // Fast path: single objective — just find the maximum.
+    if objs.len() == 1 {
+        let metric = &objs[0];
+        let best = candidates
+            .iter()
+            .max_by(|a, b| {
+                let av = a.scores.get(metric).copied().unwrap_or(0.0);
+                let bv = b.scores.get(metric).copied().unwrap_or(0.0);
+                av.partial_cmp(&bv).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .cloned();
+        return best.into_iter().collect();
+    }
+
+    // Multi-objective: sort by first objective descending for early termination.
+    let first_metric = &objs[0];
+    let mut indexed: Vec<(usize, &Allocation)> = candidates.iter().enumerate().collect();
+    indexed.sort_by(|a, b| {
+        let av = a.1.scores.get(first_metric).copied().unwrap_or(0.0);
+        let bv = b.1.scores.get(first_metric).copied().unwrap_or(0.0);
+        bv.partial_cmp(&av)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+
     let mut frontier = Vec::new();
-    for i in 0..candidates.len() {
-        let a = &candidates[i];
+    for &(i, a) in &indexed {
         let a_vec: Vec<f64> = objs
             .iter()
             .map(|m| a.scores.get(m).copied().unwrap_or(0.0))
             .collect();
         let mut dominated = false;
-        for (j, b) in candidates.iter().enumerate() {
+        for &(j, b) in &indexed {
             if i == j {
                 continue;
             }
-            let b_vec: Vec<f64> = objs
-                .iter()
-                .map(|m| b.scores.get(m).copied().unwrap_or(0.0))
-                .collect();
+            // Early termination: if b's first objective < a's first objective,
+            // then b cannot dominate a (since we sorted descending).
+            let b_first = b.scores.get(first_metric).copied().unwrap_or(0.0);
+            if b_first < a_vec[0] - 1e-9 {
+                break;
+            }
             let mut all_ge = true;
             let mut some_gt = false;
-            for (x, y) in b_vec.iter().zip(a_vec.iter()) {
-                if *x < *y - 1e-9 {
+            for (k, &a_val) in a_vec.iter().enumerate() {
+                let b_val = b.scores.get(&objs[k]).copied().unwrap_or(0.0);
+                if b_val < a_val - 1e-9 {
                     all_ge = false;
                     break;
                 }
-                if *x > *y + 1e-9 {
+                if b_val > a_val + 1e-9 {
                     some_gt = true;
                 }
             }
@@ -512,15 +590,17 @@ pub fn explain(schema: &Schema, alloc: &Allocation) -> String {
         if l == 0 {
             continue;
         }
-        let cost: HashMap<String, f64> = item
-            .cost
+        let mut sorted_cost: Vec<_> = item.cost.iter().collect();
+        sorted_cost.sort_by_key(|(k, _)| k.as_str());
+        let cost: Vec<(&String, f64)> = sorted_cost
             .iter()
-            .map(|(k, v)| (k.clone(), v * l as f64))
+            .map(|(k, v)| (*k, *v * l as f64))
             .collect();
-        let effects: HashMap<String, f64> = item
-            .effects
+        let mut sorted_effects: Vec<_> = item.effects.iter().collect();
+        sorted_effects.sort_by_key(|(k, _)| k.as_str());
+        let effects: Vec<(&String, f64)> = sorted_effects
             .iter()
-            .map(|(k, v)| (k.clone(), v * l as f64))
+            .map(|(k, v)| (*k, *v * l as f64))
             .collect();
         out.push_str(&format!(
             "  {} (lvl {}) cost={:?} effects={:?}\n",
@@ -528,7 +608,9 @@ pub fn explain(schema: &Schema, alloc: &Allocation) -> String {
         ));
     }
     out.push_str("scores:\n");
-    for (name, val) in &alloc.scores {
+    let mut sorted_scores: Vec<_> = alloc.scores.iter().collect();
+    sorted_scores.sort_by_key(|(k, _)| k.as_str());
+    for (name, val) in sorted_scores {
         out.push_str(&format!("  {} = {:.4}\n", name, val));
     }
     out.push_str(&format!("objective (weighted) = {:.4}\n", alloc.objective));
@@ -544,6 +626,7 @@ mod tests {
             meta: Meta {
                 domain: "test".into(),
                 schema_version: 1,
+                shape: None,
             },
             budget: HashMap::new(),
             items: Vec::new(),

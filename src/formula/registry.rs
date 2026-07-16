@@ -8,7 +8,7 @@ use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::wheel::Domain;
+use crate::domain_graph::Domain;
 
 use super::{Formula, FormulaError};
 
@@ -34,15 +34,35 @@ pub struct TfIdfIndex {
 
 /// Build searchable text from a formula (space-separated fields).
 fn formula_searchable_text(formula: &Formula) -> String {
-    format!(
-        "{} {} {} {} {} {}",
-        formula.id,
-        formula.description,
-        formula.expression,
-        formula.output,
-        formula.inputs.join(" "),
-        formula.zodiac.join(" "),
-    )
+    let mut buf = String::with_capacity(128);
+    write_searchable_text(&mut buf, formula);
+    buf
+}
+
+/// Write searchable text into a reusable buffer (avoids intermediate String allocs).
+fn write_searchable_text(buf: &mut String, formula: &Formula) {
+    buf.clear();
+    buf.push_str(&formula.id);
+    buf.push(' ');
+    buf.push_str(&formula.description);
+    buf.push(' ');
+    buf.push_str(&formula.expression);
+    buf.push(' ');
+    buf.push_str(&formula.output);
+    buf.push(' ');
+    for (i, input) in formula.inputs.iter().enumerate() {
+        if i > 0 {
+            buf.push(' ');
+        }
+        buf.push_str(input);
+    }
+    buf.push(' ');
+    for (i, z) in formula.zodiac.iter().enumerate() {
+        if i > 0 {
+            buf.push(' ');
+        }
+        buf.push_str(z);
+    }
 }
 
 impl TfIdfIndex {
@@ -245,6 +265,15 @@ struct FormulaEntry {
     /// Aspect between domains for bridging formulas (TOML `aspect` field).
     #[serde(default)]
     aspect: Option<String>,
+    /// Provenance for this formula (paper, standard, user overlay, …).
+    #[serde(default)]
+    source: Option<String>,
+    /// Confidence in `[0,1]`; defaults to 1.0 when omitted.
+    #[serde(default = "super::default_confidence")]
+    confidence: f64,
+    /// Explicit relations to other formula ids.
+    #[serde(default)]
+    relations: Vec<String>,
 }
 
 // ─── Synonym TOML deserialization types ────────────────────────────────
@@ -324,7 +353,10 @@ impl FormulaRegistry {
     }
 
     /// Register a single formula.
-    pub fn register(&mut self, mut formula: Formula) -> Result<(), FormulaError> {
+    ///
+    /// Word index is NOT built here — call [`finalize`] after batch loading
+    /// to construct it from `search_text_cache` in a single pass.
+    pub fn register(&mut self, mut formula: Formula, buf: &mut String) -> Result<(), FormulaError> {
         let id = formula.id.clone();
         let domain = formula.domain;
         let output = formula.output.clone();
@@ -353,11 +385,7 @@ impl FormulaRegistry {
             merged.dedup();
             formula.also_domains = merged;
 
-            Arc::make_mut(&mut self.word_index)
-                .values_mut()
-                .for_each(|ids| {
-                    ids.remove(&id);
-                });
+            // Drop stale search_text entry — word_index rebuilt by finalize()
             Arc::make_mut(&mut self.search_text_cache).remove(&id);
             // Drop stale by_domain entries for this id from every domain it
             // was previously indexed under, so re-indexing below is clean.
@@ -370,20 +398,9 @@ impl FormulaRegistry {
             }
         }
 
-        // Build word index from id, description, expression, inputs, output, zodiac
-        // Pre-lowercase once, reuse for both word index and search cache
-        let searchable_text = formula_searchable_text(&formula);
-        let searchable_lower = searchable_text.to_lowercase();
-        let word_index = Arc::make_mut(&mut self.word_index);
-        for word in searchable_lower
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|t| !t.is_empty())
-        {
-            word_index
-                .entry(word.to_string())
-                .or_default()
-                .insert(id.clone());
-        }
+        // Build searchable text using reusable buffer — no intermediate allocs
+        write_searchable_text(buf, &formula);
+        let searchable_lower = buf.to_lowercase();
         Arc::make_mut(&mut self.search_text_cache).insert(id.clone(), searchable_lower);
 
         // Index the id under its primary domain *and* every merged domain,
@@ -400,9 +417,29 @@ impl FormulaRegistry {
             .push(id.clone());
 
         Arc::make_mut(&mut self.formulas).insert(id.clone(), formula);
-        self.invalidate_tfidf();
 
         Ok(())
+    }
+
+    /// Build the word index from `search_text_cache` in a single pass.
+    /// Call once after all formulas are registered (e.g. at end of
+    /// `load_from_toml_str` or `register_all`).
+    pub fn finalize(&mut self) {
+        let search_text_cache = &*self.search_text_cache;
+        let word_index = Arc::make_mut(&mut self.word_index);
+        word_index.clear();
+        for (id, text) in search_text_cache {
+            for word in text
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|t| !t.is_empty())
+            {
+                word_index
+                    .entry(word.to_string())
+                    .or_default()
+                    .insert(id.clone());
+            }
+        }
+        self.invalidate_tfidf();
     }
 
     /// Force an eager TF-IDF rebuild. Normally unnecessary — the index builds
@@ -423,12 +460,13 @@ impl FormulaRegistry {
         }
     }
 
-    /// Register a batch of formulas, then rebuild TF-IDF index once.
+    /// Register a batch of formulas, then finalize word index.
     pub fn register_all(&mut self, formulas: Vec<Formula>) -> Result<(), FormulaError> {
+        let mut buf = String::with_capacity(128);
         for f in formulas {
-            self.register(f)?;
+            self.register(f, &mut buf)?;
         }
-        // TF-IDF builds lazily on first semantic search — no eager rebuild.
+        self.finalize();
         Ok(())
     }
 
@@ -445,10 +483,13 @@ impl FormulaRegistry {
 
     /// Find formulas by domain.
     pub fn by_domain(&self, domain: Domain) -> Vec<&Formula> {
-        self.by_domain
+        let mut out: Vec<&Formula> = self
+            .by_domain
             .get(&domain)
             .map(|ids| ids.iter().filter_map(|id| self.formulas.get(id)).collect())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        out.sort_by_key(|f| &f.id);
+        out
     }
 
     /// Find formulas by output variable name.
@@ -456,10 +497,13 @@ impl FormulaRegistry {
     /// Returns all formulas whose `output` field matches the given variable name.
     /// Useful for reverse lookup: "what formulas produce `kinetic_energy`?"
     pub fn by_output(&self, output: &str) -> Vec<&Formula> {
-        self.by_output
+        let mut out: Vec<&Formula> = self
+            .by_output
             .get(output)
             .map(|ids| ids.iter().filter_map(|id| self.formulas.get(id)).collect())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        out.sort_by_key(|f| &f.id);
+        out
     }
 
     /// Find formulas by keyword in ID, description, expression, or zodiac.
@@ -477,7 +521,10 @@ impl FormulaRegistry {
         // Single-token: word index fast path
         if tokens.len() == 1 {
             if let Some(ids) = self.word_index.get(&kw) {
-                return ids.iter().filter_map(|id| self.formulas.get(id)).collect();
+                let mut hits: Vec<&Formula> =
+                    ids.iter().filter_map(|id| self.formulas.get(id)).collect();
+                hits.sort_by(|a, b| a.id.cmp(&b.id));
+                return hits;
             }
         }
 
@@ -599,6 +646,7 @@ impl FormulaRegistry {
 
         // Load primitive formulas
         if let Some(formulas) = parsed.formula {
+            let mut buf = String::with_capacity(128);
             for (i, entry) in formulas.iter().enumerate() {
                 let formula = self.entry_to_formula(entry.clone()).map_err(|e| {
                     FormulaError::SerdeError(format!(
@@ -609,10 +657,11 @@ impl FormulaRegistry {
                         e
                     ))
                 })?;
-                self.register(formula)?;
+                self.register(formula, &mut buf)?;
             }
         }
 
+        self.finalize();
         Ok(())
     }
 
@@ -730,6 +779,9 @@ impl FormulaRegistry {
         formula.from_domain = from_domain;
         formula.to_domain = to_domain;
         formula.bridge_aspect = entry.aspect;
+        formula.source = entry.source;
+        formula.confidence = entry.confidence;
+        formula.relations = entry.relations;
 
         Ok(formula)
     }
@@ -845,14 +897,19 @@ mod tests {
         // loaded gave no hint about the near-miss output name.
         let mut r = FormulaRegistry::new();
         r.register_all(sample_formulas()).unwrap();
-        r.register(Formula::math(
-            "kinetic_energy",
-            vec!["mass", "velocity"],
-            "kinetic_energy",
-            "0.5 * mass * velocity^2",
-            "Kinetic energy",
-        ))
+        let mut buf = String::with_capacity(128);
+        r.register(
+            Formula::math(
+                "kinetic_energy",
+                vec!["mass", "velocity"],
+                "kinetic_energy",
+                "0.5 * mass * velocity^2",
+                "Kinetic energy",
+            ),
+            &mut buf,
+        )
         .unwrap();
+        r.finalize();
 
         assert_eq!(r.suggest_outputs("energy", 5), vec!["kinetic_energy"]);
         // Exact matches are excluded — the hint is only for misses
@@ -913,7 +970,9 @@ mod tests {
         let mut r = FormulaRegistry::new();
         let mut f = Formula::logic("nand", vec!["a", "b"], "out", "1 - a*b", "NAND gate");
         f.zodiac = vec!["♏".to_string(), "scorpio".to_string(), "logic".to_string()];
-        r.register(f).unwrap();
+        let mut buf = String::with_capacity(128);
+        r.register(f, &mut buf).unwrap();
+        r.finalize();
 
         let found = r.search("scorpio");
         assert_eq!(found.len(), 1);
@@ -936,8 +995,10 @@ mod tests {
         first.domain = Domain::Mangala;
         let mut second = Formula::math("add", vec!["a", "b"], "sum", "a + b", "Addition (dup)");
         second.domain = Domain::Budha;
-        r.register(first).unwrap();
-        r.register(second).unwrap();
+        let mut buf = String::with_capacity(128);
+        r.register(first, &mut buf).unwrap();
+        r.register(second, &mut buf).unwrap();
+        r.finalize();
 
         // One formula, not two — and the earlier domain survives as a tag.
         assert_eq!(r.len(), 1);
@@ -956,11 +1017,13 @@ mod tests {
     #[test]
     fn test_triple_duplicate_accumulates_domains() {
         let mut r = FormulaRegistry::new();
+        let mut buf = String::with_capacity(128);
         for domain in [Domain::Mangala, Domain::Budha, Domain::Shani] {
             let mut f = Formula::math("add", vec!["a", "b"], "sum", "a + b", "Addition");
             f.domain = domain;
-            r.register(f).unwrap();
+            r.register(f, &mut buf).unwrap();
         }
+        r.finalize();
 
         assert_eq!(r.len(), 1);
         let f = r.get("add").unwrap();

@@ -377,8 +377,8 @@ fn main() {
                 // evaluate; a query whose every token stays unresolved at the
                 // Macro layer is outside Laverna's corpus/formula scope.
                 if q.trim().is_empty() {
-                    let refusal = laverna::bankai::diagnostics::Refusal::new(
-                        laverna::bankai::diagnostics::RefusalKind::Underspecified,
+                    let refusal = laverna::verify::diagnostics::Refusal::new(
+                        laverna::verify::diagnostics::RefusalKind::Underspecified,
                         "query is empty — nothing to resolve",
                     )
                     .with_fix_suggestion("provide a non-empty query");
@@ -389,8 +389,8 @@ fn main() {
                     .iter()
                     .all(|t| t.settled_layer.depth() == 0)
                 {
-                    let refusal = laverna::bankai::diagnostics::Refusal::new(
-                        laverna::bankai::diagnostics::RefusalKind::OutOfScope,
+                    let refusal = laverna::verify::diagnostics::Refusal::new(
+                        laverna::verify::diagnostics::RefusalKind::OutOfScope,
                         "no token resolved to a known formula/entity — outside corpus scope",
                     )
                     .with_fix_suggestion(
@@ -402,8 +402,8 @@ fn main() {
                     // (descent caps the matrix to avoid O(n²) blow-up), so it
                     // cannot make a trustworthy claim over an unbounded query.
                     let refusal =
-                        laverna::bankai::diagnostics::Refusal::new(
-                            laverna::bankai::diagnostics::RefusalKind::TooComplex,
+                        laverna::verify::diagnostics::Refusal::new(
+                            laverna::verify::diagnostics::RefusalKind::TooComplex,
                             format!(
                                 "query exceeds the bounded token window ({} tokens); the kernel cannot settle it deterministically",
                                 q.split_whitespace().count()
@@ -446,15 +446,15 @@ fn main() {
                 // Part 2.3: a route with no resolved graha (every content token
                 // fell outside the corpus) is a typed OutOfScope refusal.
                 if query.trim().is_empty() {
-                    let refusal = laverna::bankai::diagnostics::Refusal::new(
-                        laverna::bankai::diagnostics::RefusalKind::Underspecified,
+                    let refusal = laverna::verify::diagnostics::Refusal::new(
+                        laverna::verify::diagnostics::RefusalKind::Underspecified,
                         "query is empty — nothing to route",
                     )
                     .with_fix_suggestion("provide a non-empty query");
                     emit_solve_refusal(&refusal, format);
                 } else if result.report.primary.is_none() && !result.report.unresolved.is_empty() {
-                    let refusal = laverna::bankai::diagnostics::Refusal::new(
-                        laverna::bankai::diagnostics::RefusalKind::OutOfScope,
+                    let refusal = laverna::verify::diagnostics::Refusal::new(
+                        laverna::verify::diagnostics::RefusalKind::OutOfScope,
                         "no token resolved to a known corpus graha — outside routing scope",
                     )
                     .with_fix_suggestion(
@@ -462,8 +462,8 @@ fn main() {
                     );
                     emit_solve_refusal(&refusal, format);
                 } else if query.split_whitespace().count() > TOO_COMPLEX_TOKEN_LIMIT {
-                    let refusal = laverna::bankai::diagnostics::Refusal::new(
-                        laverna::bankai::diagnostics::RefusalKind::TooComplex,
+                    let refusal = laverna::verify::diagnostics::Refusal::new(
+                        laverna::verify::diagnostics::RefusalKind::TooComplex,
                         format!(
                             "query exceeds the bounded token window ({} tokens); the kernel cannot route it deterministically",
                             query.split_whitespace().count()
@@ -2206,7 +2206,7 @@ fn cmd_chart(
             // Part 2.3: a timezone/input failure is a typed refusal, not just a
             // stderr line — surface it machine-readably so an LLM loop can branch.
             emit_typed_refusal(
-                laverna::bankai::diagnostics::RefusalKind::MissingTimezone,
+                laverna::verify::diagnostics::RefusalKind::MissingTimezone,
                 format!("could not resolve chart datetime: {e}"),
                 "supply --datetime-utc <UTC ISO> or --datetime <local ISO> with --tz <IANA zone>",
                 format,
@@ -2349,12 +2349,12 @@ fn cmd_chart(
 /// so the caller gets a structured `RefusalKind` instead of a free-text stderr
 /// line it would have to parse.
 fn emit_typed_refusal(
-    kind: laverna::bankai::diagnostics::RefusalKind,
+    kind: laverna::verify::diagnostics::RefusalKind,
     reason: impl Into<String>,
     fix_suggestion: impl Into<String>,
     format: OutputFormat,
 ) -> ! {
-    let refusal = laverna::bankai::diagnostics::Refusal::new(kind, reason)
+    let refusal = laverna::verify::diagnostics::Refusal::new(kind, reason)
         .with_fix_suggestion(fix_suggestion);
     if format == OutputFormat::Json {
         let value = serde_json::json!({
@@ -2375,11 +2375,11 @@ fn emit_typed_refusal(
 
 /// Text-only variant for commands (e.g. `build`) that don't take `--format`.
 fn emit_typed_refusal_text(
-    kind: laverna::bankai::diagnostics::RefusalKind,
+    kind: laverna::verify::diagnostics::RefusalKind,
     reason: impl Into<String>,
     fix_suggestion: impl Into<String>,
 ) -> ! {
-    let refusal = laverna::bankai::diagnostics::Refusal::new(kind, reason)
+    let refusal = laverna::verify::diagnostics::Refusal::new(kind, reason)
         .with_fix_suggestion(fix_suggestion);
     println!("[REFUSAL {}] {}", refusal.kind, refusal.reason);
     if let Some(ref fix) = refusal.fix_suggestion {
@@ -2390,7 +2390,7 @@ fn emit_typed_refusal_text(
 
 /// Emit a `solve`/`route` typed refusal (roadmap Part 2.3) and exit non-zero.
 /// Reuses the structured JSON shape from `emit_typed_refusal`.
-fn emit_solve_refusal(refusal: &laverna::bankai::diagnostics::Refusal, format: OutputFormat) -> ! {
+fn emit_solve_refusal(refusal: &laverna::verify::diagnostics::Refusal, format: OutputFormat) -> ! {
     if format == OutputFormat::Json {
         let value = serde_json::json!({
             "refused": true,
@@ -2419,8 +2419,8 @@ fn cmd_validate(expression: &str, format: OutputFormat) {
     if !report.passed {
         if expression.trim().is_empty() {
             report.refuse(
-                laverna::bankai::diagnostics::Refusal::new(
-                    laverna::bankai::diagnostics::RefusalKind::Underspecified,
+                laverna::verify::diagnostics::Refusal::new(
+                    laverna::verify::diagnostics::RefusalKind::Underspecified,
                     "expression is empty — nothing to verify",
                 )
                 .with_fix_suggestion("provide a non-empty expression or claim"),
@@ -2428,11 +2428,11 @@ fn cmd_validate(expression: &str, format: OutputFormat) {
         } else if report
             .diagnostics
             .iter()
-            .any(|d| d.gate == laverna::bankai::diagnostics::DiagnosticGate::Structural)
+            .any(|d| d.gate == laverna::verify::diagnostics::DiagnosticGate::Structural)
         {
             report.refuse(
-                laverna::bankai::diagnostics::Refusal::new(
-                    laverna::bankai::diagnostics::RefusalKind::NoTranslation,
+                laverna::verify::diagnostics::Refusal::new(
+                    laverna::verify::diagnostics::RefusalKind::NoTranslation,
                     "input did not parse as a valid formal expression",
                 )
                 .with_fix_suggestion(
@@ -2441,8 +2441,8 @@ fn cmd_validate(expression: &str, format: OutputFormat) {
             );
         } else {
             report.refuse(
-                laverna::bankai::diagnostics::Refusal::new(
-                    laverna::bankai::diagnostics::RefusalKind::NoTranslation,
+                laverna::verify::diagnostics::Refusal::new(
+                    laverna::verify::diagnostics::RefusalKind::NoTranslation,
                     "expression could not be verified by the deterministic kernel",
                 )
                 .with_fix_suggestion("check arithmetic/logic and re-submit"),
@@ -2715,7 +2715,7 @@ fn cmd_build(
         Ok(r) => r,
         Err(e) => {
             emit_typed_refusal_text(
-                laverna::bankai::diagnostics::RefusalKind::MissingTimezone,
+                laverna::verify::diagnostics::RefusalKind::MissingTimezone,
                 format!("could not resolve chart datetime: {e}"),
                 "supply --datetime-utc <UTC ISO> or --datetime <local ISO> with --tz <IANA zone>",
             );
@@ -3461,8 +3461,8 @@ fn handle_jsonrpc(
 #[cfg(feature = "mcp")]
 fn solve_tool(query: &str, verbose: bool, engine: &DescentEngine) -> Result<ToolOutput, String> {
     let mut out = String::new();
-    let intent = laverna::shikai::parse_query_intent(query);
-    let domain = laverna::shikai::determine_query_domain(query);
+    let intent = laverna::query::parse_query_intent(query);
+    let domain = laverna::query::determine_query_domain(query);
     out.push_str(&format!("intent: {intent}\ndomain: {domain}\n\n"));
 
     let matrix = engine.descend(query);

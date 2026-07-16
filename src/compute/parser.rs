@@ -143,6 +143,12 @@ impl<'a> Lexer<'a> {
             "clamp",
             "sum",
             "avg",
+            "erf",
+            "log",
+            "diff",
+            "factorial",
+            "gcd",
+            "gauss_inv",
             "rad2deg",
             "deg2rad",
             "norm",
@@ -175,6 +181,11 @@ struct Parser<'a> {
     tokens: Vec<Token>,
     pos: usize,
     env: &'a TantoEnv,
+    /// When true, the parser only checks grammar structure (balanced, known
+    /// operators/functions) and tolerates division/modulo by zero — used by
+    /// `parse_math` for corpus expression validation where a concrete finite
+    /// value is irrelevant.
+    structural: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -183,6 +194,16 @@ impl<'a> Parser<'a> {
             tokens,
             pos: 0,
             env,
+            structural: false,
+        }
+    }
+
+    fn new_structural(tokens: Vec<Token>, env: &'a TantoEnv) -> Self {
+        Parser {
+            tokens,
+            pos: 0,
+            env,
+            structural: true,
         }
     }
 
@@ -229,17 +250,28 @@ impl<'a> Parser<'a> {
                     self.advance();
                     let right = self.parse_power()?;
                     if right == 0.0 {
-                        return None;
+                        if self.structural {
+                            // Division by zero is irrelevant in structural mode;
+                            // leave `left` unchanged so the parse continues.
+                        } else {
+                            return None;
+                        }
+                    } else {
+                        left /= right;
                     }
-                    left /= right;
                 }
                 Token::Mod => {
                     self.advance();
                     let right = self.parse_power()?;
                     if right == 0.0 {
-                        return None;
+                        if self.structural {
+                            // Modulo by zero is irrelevant in structural mode.
+                        } else {
+                            return None;
+                        }
+                    } else {
+                        left %= right;
                     }
-                    left %= right;
                 }
                 _ => break,
             }
@@ -375,6 +407,39 @@ fn eval_func(name: &str, args: &[f64]) -> Option<f64> {
                 Some(args.iter().sum::<f64>() / args.len() as f64)
             }
         }
+        "mean" => {
+            if args.is_empty() {
+                None
+            } else {
+                Some(args.iter().sum::<f64>() / args.len() as f64)
+            }
+        }
+        "erf" => args.first().map(|x| erf(*x)),
+        "log" => {
+            if args.is_empty() {
+                None
+            } else if args.len() == 1 {
+                Some(args[0].ln())
+            } else {
+                Some(args[0].ln() / args[1].ln())
+            }
+        }
+        "diff" => {
+            if args.len() < 2 {
+                Some(0.0)
+            } else {
+                Some(args[1] - args[0])
+            }
+        }
+        "factorial" => args.first().map(|x| factorial(*x)),
+        "gcd" => {
+            if args.len() < 2 {
+                None
+            } else {
+                Some(gcd(args[0], args[1]))
+            }
+        }
+        "gauss_inv" => args.first().map(|p| gauss_inv(*p)),
         "rad2deg" => args.first().map(|x| x.to_degrees()),
         "deg2rad" => args.first().map(|x| x.to_radians()),
         "norm" => {
@@ -415,6 +480,130 @@ pub fn eval_math(input: &[u8], env: &TantoEnv) -> Option<f64> {
     }
     let mut parser = Parser::new(tokens, env);
     parser.parse_expr()
+}
+
+/// Structural-only parse: returns `Some(())` iff the entire input is
+/// well-formed Tanto grammar (balanced, known operators/functions, every
+/// token consumed), independent of whether it would evaluate to a finite
+/// number. Used by `laverna corpus validate` to detect malformed corpus
+/// expressions without false-positiving on legitimate free variables or
+/// division-by-zero special cases.
+pub fn parse_math(input: &[u8], env: &TantoEnv) -> Option<()> {
+    let mut lexer = Lexer::new(input);
+    let mut tokens = Vec::new();
+    while let Some(tok) = lexer.next_token() {
+        tokens.push(tok);
+    }
+    if tokens.is_empty() {
+        return None;
+    }
+    let mut parser = Parser::new_structural(tokens, env);
+    parser.parse_expr()?;
+    if parser.pos != parser.tokens.len() {
+        return None;
+    }
+    Some(())
+}
+
+/// Pure function: Abramowitz & Stegun 7.1.26 approximation of the error
+/// function, max error ~1.5e-7.
+fn erf(x: f64) -> f64 {
+    let sign = if x < 0.0 { -1.0 } else { 1.0 };
+    let x = x.abs();
+    let t = 1.0 / (1.0 + 0.3275911 * x);
+    let y = 1.0
+        - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+            + 0.254829592)
+            * t
+            * (-x * x).exp();
+    sign * y
+}
+
+/// Pure function: factorial of a non-negative integer, computed iteratively.
+/// Non-integer and negative inputs fall back to the gamma extension
+/// `Γ(n+1)` is not available, so we clamp to the nearest non-negative
+/// integer to keep the result finite and deterministic.
+fn factorial(x: f64) -> f64 {
+    if x < 0.0 {
+        return f64::NAN;
+    }
+    let n = x.round() as u64;
+    let mut acc = 1u64;
+    for i in 2..=n {
+        acc = acc.saturating_mul(i);
+        if acc == u64::MAX {
+            break;
+        }
+    }
+    acc as f64
+}
+
+/// Pure function: greatest common divisor via the Euclidean algorithm.
+fn gcd(a: f64, b: f64) -> f64 {
+    let (mut a, mut b) = (a.abs().round() as i64, b.abs().round() as i64);
+    while b != 0 {
+        let r = a % b;
+        a = b;
+        b = r;
+    }
+    a.unsigned_abs() as f64
+}
+
+/// Pure function: inverse of the standard normal CDF (probit) via the
+/// Acklam rational approximation, relative error < 1.15e-9.
+#[allow(clippy::excessive_precision)]
+fn gauss_inv(p: f64) -> f64 {
+    if p <= 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    if p >= 1.0 {
+        return f64::INFINITY;
+    }
+    let a = [
+        -3.969683028665376e1,
+        2.209460984245205e2,
+        -2.759285104469687e2,
+        1.383577518672690e2,
+        -3.066479806614716e1,
+        2.506628277459239,
+    ];
+    let b = [
+        -5.447609879822406e1,
+        1.615858368580409e2,
+        -1.556989798598866e2,
+        6.680131188771972e1,
+        -1.328068155288572e1,
+    ];
+    let c = [
+        -7.784894002430293e-3,
+        -3.223964580411365e-1,
+        -2.400758277161838,
+        -2.549732539343734,
+        4.374664141464968,
+        2.938163982698783,
+    ];
+    let d = [
+        7.784695709041462e-3,
+        3.224671290700398e-1,
+        2.445134137142996,
+        3.754408661907416,
+    ];
+    let plow = 0.02425;
+    let phigh = 1.0 - plow;
+    if p < plow {
+        let q = (-2.0 * p.ln()).sqrt();
+        (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5])
+            / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
+    } else if p <= phigh {
+        let q = p - 0.5;
+        let r = q * q;
+        (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q
+            / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1.0)
+    } else {
+        let q = (-2.0 * (1.0 - p).ln()).sqrt();
+        -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5])
+            / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1.0)
+    }
 }
 
 pub fn eval_op_format(input: &[u8], env: &TantoEnv) -> Option<f64> {
@@ -529,5 +718,45 @@ mod tests {
         assert!((eval_math(b"(2^3)^2", &env).unwrap() - 64.0).abs() < 1e-6);
         assert!((eval_math(b"2^(3^2)", &env).unwrap() - 512.0).abs() < 1e-6);
         assert!((eval_math(b"2^3", &env).unwrap() - 8.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_new_math_functions() {
+        let env = TantoEnv::new();
+        // erf — Abramowitz & Stegun approximation
+        assert!((eval_math(b"erf(0)", &env).unwrap() - 0.0).abs() < 1e-6);
+        assert!((eval_math(b"erf(1)", &env).unwrap() - 0.84270079).abs() < 1e-4);
+        // log — natural log single-arg, base-2 two-arg
+        assert!((eval_math(b"log(2.718281828)", &env).unwrap() - 1.0).abs() < 1e-6);
+        assert!((eval_math(b"log(8, 2)", &env).unwrap() - 3.0).abs() < 1e-6);
+        // diff — forward difference (args[1] - args[0]); 0.0 for a single arg
+        assert!((eval_math(b"diff(5, 2)", &env).unwrap() + 3.0).abs() < 1e-9);
+        assert_eq!(eval_math(b"diff(7)", &env), Some(0.0));
+        // factorial — iterative
+        assert_eq!(eval_math(b"factorial(5)", &env), Some(120.0));
+        assert_eq!(eval_math(b"factorial(0)", &env), Some(1.0));
+        // gcd — Euclidean
+        assert_eq!(eval_math(b"gcd(48, 18)", &env), Some(6.0));
+        // gauss_inv — probit (Acklam); gauss_inv(0.5) ≈ 0
+        assert!(eval_math(b"gauss_inv(0.5)", &env).unwrap().abs() < 1e-6);
+        assert!((eval_math(b"gauss_inv(0.9772)", &env).unwrap() - 2.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn test_structural_parse_math() {
+        let mut env = TantoEnv::new();
+        for id in ["a", "b", "w", "x", "y", "z", "unknown_fn"] {
+            env.insert(id.to_string(), 1.0);
+        }
+        // Division by zero is tolerated in structural mode (whole expr valid).
+        assert!(parse_math(b"a / (b - b)", &env).is_some());
+        // Balanced, known operators, every token consumed.
+        assert!(parse_math(b"x * (y + z) / w", &env).is_some());
+        // Trailing garbage is rejected.
+        assert!(parse_math(b"a + b )", &env).is_none());
+        // Unknown function name (treated as ident) leaves trailing call → invalid.
+        assert!(parse_math(b"unknown_fn(x)", &env).is_none());
+        // Empty input rejected.
+        assert!(parse_math(b"", &env).is_none());
     }
 }

@@ -5,8 +5,8 @@ pub mod logic_gate;
 pub mod math_gate;
 pub mod pipeline;
 
-use crate::pachinko::ball::{Ball, GateResult};
-use crate::pachinko::pin::{GateKind, ValidationPin};
+use crate::scoring::ball::{Ball, GateResult};
+use crate::scoring::pin::{GateKind, ValidationPin};
 
 pub trait GateValidator {
     fn validate(&self, ball: &mut Ball, context: &str) -> GateResult;
@@ -33,8 +33,8 @@ pub fn validate_ball(ball: &mut Ball, pins: &[ValidationPin], context: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pachinko::ball::TokenCandidate;
-    use crate::pachinko::pin::{PinField, ValidationPin};
+    use crate::scoring::ball::TokenCandidate;
+    use crate::scoring::pin::{PinField, ValidationPin};
 
     #[test]
     fn test_validate_ball_all_gates() {

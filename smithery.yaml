@@ -1,0 +1,29 @@
+# smithery.yaml — Laverna MCP server listing
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties: {}
+    required: []
+  commandFunction: |-
+    (config) => ({ command: "laverna", args: ["mcp"] })
+
+name: laverna
+displayName: Laverna
+description: >-
+  Offline-first, deterministic, Rust verification sidecar for LLMs. Runs the
+  full reasoning pipeline (solve), validates math/logic (validate), generates
+  deterministic sidereal charts (chart/build), and reverse-routes queries
+  (route) — all against an embedded, content-addressed corpus. Emits
+  machine-checkable proof objects and typed refusals so an LLM loop can verify
+  instead of trust. No network required at runtime.
+metadata:
+  tags:
+    - verification
+    - math
+    - reasoning
+    - deterministic
+    - offline
+    - optimization
+  license: Apache-2.0
+  repository: https://github.com/anomalyco/laverna

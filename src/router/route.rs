@@ -1,8 +1,8 @@
 use crate::astrology::Sign;
-use crate::gyro::dynamics::GyroDynamics;
-use crate::gyro::mapping::PrimitiveMapping;
-use crate::gyro::state::GyroState;
-use crate::wheel::Domain;
+use crate::domain_graph::Domain;
+use crate::router::dynamics::GyroDynamics;
+use crate::router::mapping::PrimitiveMapping;
+use crate::router::state::GyroState;
 
 /// A single fired primitive during routing.
 #[derive(Debug, Clone)]

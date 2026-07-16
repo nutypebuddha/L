@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::wheel::Domain;
+use crate::domain_graph::Domain;
 
 /// Graha is a type alias for `Domain` — the 9 Vedic grahas.
 pub type Graha = Domain;
@@ -654,6 +654,10 @@ impl VedicClassification {
         self
     }
 
+    pub fn set_graha(&mut self, graha: Graha, value: f64) {
+        self.grahas[graha.index()] = value.clamp(0.0, 1.0);
+    }
+
     pub fn with_nakshatra(mut self, nak: Nakshatra, value: f64) -> Self {
         self.nakshatras[nak.index()] = value.clamp(0.0, 1.0);
         self
@@ -712,20 +716,24 @@ impl VedicClassification {
 
     pub fn merge_max(&self, other: &VedicClassification) -> VedicClassification {
         let mut result = self.clone();
+        result.merge_max_into(other);
+        result
+    }
+
+    pub fn merge_max_into(&mut self, other: &VedicClassification) {
         for i in 0..9 {
-            result.grahas[i] = result.grahas[i].max(other.grahas[i]);
+            self.grahas[i] = self.grahas[i].max(other.grahas[i]);
         }
         for i in 0..27 {
-            result.nakshatras[i] = result.nakshatras[i].max(other.nakshatras[i]);
+            self.nakshatras[i] = self.nakshatras[i].max(other.nakshatras[i]);
         }
         for i in 0..3 {
-            result.gunas[i] = result.gunas[i].max(other.gunas[i]);
+            self.gunas[i] = self.gunas[i].max(other.gunas[i]);
         }
         for i in 0..5 {
-            result.vedic_elements[i] = result.vedic_elements[i].max(other.vedic_elements[i]);
+            self.vedic_elements[i] = self.vedic_elements[i].max(other.vedic_elements[i]);
         }
-        result.confidence = result.confidence.max(other.confidence);
-        result
+        self.confidence = self.confidence.max(other.confidence);
     }
 }
 

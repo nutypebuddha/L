@@ -1,0 +1,132 @@
+# Laverna generic 7-pillar allocation domain.
+#
+# Each graha maps 1:1 to its strategic pillar (identity graha_map), so feeding a
+# pillar-weight vector through `build::compute_objective_weights` returns the same
+# vector as objective weights. Use as:
+#   laverna strategize --query "..." --domain domains/pillars.toml --budget 20
+# (or omit --domain entirely — `strategize` builds the same schema inline.)
+#
+# Pillar → capability axis:
+#   Spear   — Vitality, HP, presence, leadership
+#   Olive   — Sustain, resource generation, recovery
+#   Forge   — Offense, damage, craft, action
+#   Owl     — Perception, utility, tech, information
+#   Council — Scaling, growth, range, expansion
+#   Loom    — Synergy, buff, control, weaving
+#   Stone   — Defense, durability, cost, endurance
+
+[meta]
+domain = "generic_pillars"
+description = "Generic 7-pillar resource allocation across Spear/Olive/Forge/Owl/Council/Loom/Stone"
+
+# Identity graha → pillar split (each graha weight flows to its own pillar).
+[[graha_map]]
+graha = "surya"
+splits = { score_spear = 1.0 }
+note = "Sun → Spear"
+
+[[graha_map]]
+graha = "chandra"
+splits = { score_olive = 1.0 }
+note = "Moon → Olive"
+
+[[graha_map]]
+graha = "mangala"
+splits = { score_forge = 1.0 }
+note = "Mars → Forge"
+
+[[graha_map]]
+graha = "budha"
+splits = { score_owl = 1.0 }
+note = "Mercury → Owl"
+
+[[graha_map]]
+graha = "brihaspati"
+splits = { score_council = 1.0 }
+note = "Jupiter → Council"
+
+[[graha_map]]
+graha = "shukra"
+splits = { score_loom = 1.0 }
+note = "Venus → Loom"
+
+[[graha_map]]
+graha = "shani"
+splits = { score_stone = 1.0 }
+note = "Saturn → Stone"
+
+[budget]
+unit = 7
+
+[[items]]
+id = "spear"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_spear = 1.0 }
+
+[[items]]
+id = "olive"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_olive = 1.0 }
+
+[[items]]
+id = "forge"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_forge = 1.0 }
+
+[[items]]
+id = "owl"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_owl = 1.0 }
+
+[[items]]
+id = "council"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_council = 1.0 }
+
+[[items]]
+id = "loom"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_loom = 1.0 }
+
+[[items]]
+id = "stone"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_stone = 1.0 }
+
+[objective]
+maximize = ["score_spear", "score_olive", "score_forge", "score_owl", "score_council", "score_loom", "score_stone"]
+
+[scoring.score_spear]
+terms = { score_spear = 1.0 }
+
+[scoring.score_olive]
+terms = { score_olive = 1.0 }
+
+[scoring.score_forge]
+terms = { score_forge = 1.0 }
+
+[scoring.score_owl]
+terms = { score_owl = 1.0 }
+
+[scoring.score_council]
+terms = { score_council = 1.0 }
+
+[scoring.score_loom]
+terms = { score_loom = 1.0 }
+
+[scoring.score_stone]
+terms = { score_stone = 1.0 }

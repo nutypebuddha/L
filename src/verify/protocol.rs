@@ -7,8 +7,8 @@
 //! - Laverna design principle: the LLM is the untrusted proposer, Laverna
 //!   is the trusted checker. This protocol is the interface between them.
 
-use crate::bankai::diagnostics::DiagnosticReport;
-use crate::bankai::verifier::{LlmProposal, ProposalKind};
+use crate::verify::diagnostics::DiagnosticReport;
+use crate::verify::verifier::{LlmProposal, ProposalKind};
 
 /// A single round in the self-refinement loop.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -60,7 +60,7 @@ impl RefinementSession {
             claimed_confidence: None,
         };
 
-        let verdict = crate::bankai::verifier::verify_proposal(&proposal);
+        let verdict = crate::verify::verifier::verify_proposal(&proposal);
 
         self.rounds.push(RefinementRound {
             round_index,

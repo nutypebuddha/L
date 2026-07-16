@@ -112,7 +112,8 @@ impl WheelGraph {
         domain: Domain,
         aspect_filter: Option<CompositionAspect>,
     ) -> Vec<Domain> {
-        self.adjacency
+        let mut result: Vec<Domain> = self
+            .adjacency
             .get(&domain)
             .map(|edges| {
                 edges
@@ -121,7 +122,9 @@ impl WheelGraph {
                     .map(|(d, _)| *d)
                     .collect()
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        result.sort_by_key(|d| d.index());
+        result
     }
 
     /// Get the relationship between two domains.

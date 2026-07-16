@@ -21,7 +21,7 @@ pub fn is_bridging_formula(formula_id: &str) -> bool {
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::wheel::Domain;
+use crate::domain_graph::Domain;
 
 mod glyph;
 pub mod nonmath;
@@ -143,6 +143,26 @@ pub struct Formula {
     /// Aspect between domains for bridging formulas (parsed from TOML `aspect` field).
     #[serde(default)]
     pub bridge_aspect: Option<String>,
+
+    /// Provenance: where this formula's definition came from (paper, standard,
+    /// textbook, user overlay, …). Optional, surfaced by `corpus` tooling.
+    #[serde(default)]
+    pub source: Option<String>,
+
+    /// Confidence in this formula's correctness/provenance, in `[0.0, 1.0]`.
+    /// Defaults to `1.0` for embedded seed formulas; user overlays may lower it.
+    #[serde(default = "default_confidence")]
+    pub confidence: f64,
+
+    /// Explicit relations to other formula ids (e.g. generalizes, inverse-of,
+    /// special-case-of). Used to enrich the corpus graph. Optional.
+    #[serde(default)]
+    pub relations: Vec<String>,
+}
+
+/// Default confidence for formulas that don't declare one.
+fn default_confidence() -> f64 {
+    1.0
 }
 
 impl Formula {
@@ -170,6 +190,9 @@ impl Formula {
             from_domain: None,
             to_domain: None,
             bridge_aspect: None,
+            source: None,
+            confidence: 1.0,
+            relations: Vec::new(),
         }
     }
 

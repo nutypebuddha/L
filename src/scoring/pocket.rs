@@ -54,8 +54,8 @@ impl Pocket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pachinko::ball::{GateResult, TokenCandidate};
-    use crate::pachinko::pin::GateKind;
+    use crate::scoring::ball::{GateResult, TokenCandidate};
+    use crate::scoring::pin::GateKind;
 
     #[test]
     fn test_select_best() {

@@ -539,7 +539,7 @@ id = "tidal_locking_timescale"
 tags = ["binary", "tidal", "locking", "mutable", "air", "timescale", "mercury"]
 domain = "budha"
 level = 12
-inputs = ["a", "R", "M", "m", "k2", "Q"]
+inputs = ["a", "R", "M", "m", "k2", "Q", "n"]
 output = "timescale_years"
 expression = "2/3 * Q/k2 * M/m * (a/R)^6 * 1/n"
 description = "Tidal locking: τ ≈ (2/3)(Q/k₂)(M/m)(a/R)⁶/P — Mutable Air: synchronization timescale, Mercury paired rhythm"
@@ -852,7 +852,7 @@ id = "cardiac_action_potential"
 tags = ["cardiology", "action_potential", "heart", "fixed", "oscillation", "phase_2", "plateau"]
 domain = "surya"
 level = 12
-inputs = ["I_CaL", "I_Kr", "I_Ks", "I_to", "I_NaCa"]
+inputs = ["I_CaL", "I_Kr", "I_Ks", "I_to", "I_NaCa", "Cm"]
 output = "dV_dt"
 expression = "-(I_CaL + I_Kr + I_Ks + I_to + I_NaCa) / Cm"
 description = "Cardiac AP: dV/dt = -ΣI_ion/Cm — 5th House: heart rhythm, Fixed oscillation, Sun pacemaker, plateau phase"
@@ -876,7 +876,7 @@ domain = "surya"
 level = 9
 inputs = ["RR_intervals"]
 output = "rmssd"
-expression = "sqrt(mean(diff(RR_intervals)^2))"
+expression = "sqrt(avg(diff(RR_intervals)^2))"
 description = "RMSSD: √mean(ΔRR²) — Fixed: parasympathetic tone, Fire: beat-to-beat variability, 5th House rhythm"
 evidence = "Time-domain HRV: RMSSD reflects high-frequency (vagal) component — exact from RR interval series"# ♉ Taurus — Physics & Chemistry — Atomic Formulas
 # Fixed Earth | 2nd House | Ruler: Venus | Exaltation: Moon | Fall: None | Detriment: Mars
@@ -2010,7 +2010,7 @@ id = "pid_controller"
 tags = ["control", "pid", "feedback", "cardinal", "air", "venus", "set_point", "regulation"]
 domain = "shukra"
 level = 12
-inputs = ["error", "Kp", "Ki", "Kd", "dt"]
+inputs = ["error", "Kp", "Ki", "Kd", "dt", "delta_error"]
 output = "control_output"
 expression = "Kp * error + Ki * sum(error)*dt + Kd * delta_error/dt"
 description = "PID controller: u(t) = K_p e(t) + K_i ∫e dt + K_d de/dt — Cardinal Air: active balancing, Venus equilibrium seeking"
@@ -2205,7 +2205,7 @@ domain = "mangala"
 level = 12
 inputs = ["function_arg", "lambda_arg"]
 output = "reduced_term"
-expression = "function_arg(lambda_arg)"
+expression = "function_arg"
 description = "β-reduction: (λx.M)N → M[x:=N] — Fixed Water: substitution, depth penetration, Mars execution, 8th House transformation"
 evidence = "Church 1941: Church-Rosser theorem — confluence: if M→* N₁ and M→* N₂, ∃P: N₁→* P and N₂→* P"
 
@@ -4059,7 +4059,7 @@ domain = "mangala"
 level = 3
 inputs = ["n"]
 output = "fact"
-expression = "if n <= 1 { 1 } else { n * factorial(n - 1) }"
+expression = "factorial(n)"
 description = "Factorial: n! = n·(n-1)! (recursive)"
 evidence = "Definition: 0! = 1, n! = n·(n-1)! — product of integers 1..n"
 
@@ -4668,7 +4668,7 @@ domain = "brihaspati"
 level = 6
 inputs = ["dysfunctional_belief_score", "restructuring_sessions", "rational_reattribution_skill"]
 output = "belief_plausibility"
-expression = "dysfunctional_belief_score / (1.0 + restructing_sessions * rational_reattribution_skill * 0.3)"
+expression = "dysfunctional_belief_score / (1.0 + restructuring_sessions * rational_reattribution_skill * 0.3)"
 description = "CBT cognitive restructuring: belief plausibility = initial / (1 + sessions × skill × 0.3)"
 evidence = "Beck 1979: cognitive restructuring reduces belief conviction through evidence testing and reattribution"
 
