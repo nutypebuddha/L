@@ -169,24 +169,24 @@ fn energy_efficiency_in_code_full_analysis() {
         ));
     }
 
-    let env = tanto::create_env();
-    if let Some(result) = tanto::evaluate_expr("2 + 2", &env) {
+    let env = compute::create_env();
+    if let Some(result) = compute::evaluate_expr("2 + 2", &env) {
         report.push_str(&format!("  Tanto: 2 + 2 = {}\n", result));
     }
-    if let Some(result) = tanto::evaluate_expr("0.85 * 100", &env) {
+    if let Some(result) = compute::evaluate_expr("0.85 * 100", &env) {
         report.push_str(&format!(
             "  Tanto: 0.85 * 100 = {} (efficiency %)\n",
             result
         ));
     }
-    if let Some(result) = tanto::evaluate_expr("1000 / 0.85", &env) {
+    if let Some(result) = compute::evaluate_expr("1000 / 0.85", &env) {
         report.push_str(&format!(
             "  Tanto: 1000 / 0.85 = {:.2} (total input for 1000 useful output)\n",
             result
         ));
     }
 
-    if let Some(result) = tanto::compute_formula(
+    if let Some(result) = compute::compute_formula(
         "conservation_energy",
         "ke_initial=50 pe_initial=30 ke_final=40 pe_final=40",
     ) {
@@ -449,10 +449,10 @@ fn energy_efficiency_in_code_full_analysis() {
 
     // ── Phase 11: Pachinko Validation ─────────────────────────────────────
     report.push_str("─── Phase 11: Pachinko Validation Ball ──────────────────\n");
-    let candidate = pachinko::ball::TokenCandidate::new(1, "energy_efficiency", 0.85);
-    let mut ball = pachinko::ball::Ball::new(candidate);
+    let candidate = scoring::ball::TokenCandidate::new(1, "energy_efficiency", 0.85);
+    let mut ball = scoring::ball::Ball::new(candidate);
 
-    let pin_field = pachinko::pin::PinField::new();
+    let pin_field = scoring::pin::PinField::new();
     let active_pins = pin_field.active_pins();
     let pins: Vec<_> = active_pins.into_iter().cloned().collect();
     let pin_count = pins.len();
@@ -466,7 +466,7 @@ fn energy_efficiency_in_code_full_analysis() {
         ball.all_passed()
     ));
 
-    let pocket = pachinko::pocket::Pocket::new(ball);
+    let pocket = scoring::pocket::Pocket::new(ball);
     report.push_str(&format!(
         "  Pocket kakuhen: {}\n\n",
         pocket.should_trigger_kakuhen()

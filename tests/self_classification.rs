@@ -58,8 +58,8 @@ fn self_classification_all_queries() {
     println!("═══════════════════════════════════════════════════════════════\n");
 
     for (query, expected_intent, expected_domain) in SELF_QUERIES {
-        let intent = laverna::shikai::parse_query_intent(query);
-        let domain = laverna::shikai::determine_query_domain(query);
+        let intent = laverna::query::parse_query_intent(query);
+        let domain = laverna::query::determine_query_domain(query);
         let matrix = descent_engine.descend(query);
 
         let intent_ok = intent == *expected_intent;
