@@ -540,11 +540,8 @@ impl EntityRegistry {
             .map_err(|e| format!("{}: TOML parse error: {}", source.unwrap_or("<str>"), e))?;
 
         if let Some(entities) = parsed.entity {
-            for (i, entity) in entities.into_iter().enumerate() {
-                let tag_count = entity.tags.len();
-                let id = entity.id.clone();
+            for entity in entities {
                 self.register_seed(entity);
-                eprintln!("  seed #{} -> {} ({} tags)", i + 1, id, tag_count);
             }
         }
 
