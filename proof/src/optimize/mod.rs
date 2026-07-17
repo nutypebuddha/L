@@ -167,6 +167,38 @@ pub fn validate_schema(schema: &Schema) -> Result<(), String> {
         if !schema.scoring.contains_key(w) {
             return Err(format!("objective weight '{w}' is not a defined score"));
         }
+        if !schema.objective.maximize.contains(w) {
+            return Err(format!(
+                "objective weight '{w}' is set but '{w}' is not in `maximize` \
+                 (a weight on a non-maximized score is dead config and will make \
+                 that item contribute 0 to the objective — if the item should count, \
+                 add '{w}' to `maximize`; this is the T-LC01 silent-drop trap)"
+            ));
+        }
+    }
+    // T-LC01 guard: a score is "produced" if some `scoring.<score>` term
+    // references a stat that an item's `effects` actually provides. Every
+    // produced score MUST be in `objective.maximize` — otherwise it is computed
+    // and then discarded, so the producing item contributes 0 to the objective
+    // and is silently dropped (the T-LC01 "highest-weight item excluded" trap).
+    // Note: item `effects` keys are *stats*; a stat maps to a *score* via a
+    // `[scoring.<score>]` term, so we resolve through `scoring`, not by comparing
+    // the raw effect key against `maximize` directly.
+    let produced_stats: HashSet<String> = schema
+        .items
+        .iter()
+        .flat_map(|i| i.effects.keys().cloned())
+        .collect();
+    for (score_name, term) in &schema.scoring {
+        let is_produced = term.terms.keys().any(|stat| produced_stats.contains(stat));
+        if is_produced && !schema.objective.maximize.contains(score_name) {
+            return Err(format!(
+                "score '{score_name}' is produced by an item but is not in \
+                 `objective.maximize` — it is computed then discarded, so the item \
+                 contributes 0 to the objective and is silently dropped (T-LC01). Add \
+                 '{score_name}' to `objective.maximize`, or remove the producing effect."
+            ));
+        }
     }
     let mut scored_keys: HashSet<String> = HashSet::new();
     for st in schema.scoring.values() {
@@ -950,6 +982,46 @@ mod tests {
         );
     }
 
+    /// T-LC01 regression: a schema whose highest-weight item feeds a score that
+    /// is absent from `objective.maximize` is self-contradictory — the item
+    /// contributes 0 and gets silently dropped (the reported "highest-weight
+    /// item excluded, budget left unspent" symptom). The validator must reject
+    /// it loudly instead of returning a suboptimal solution.
+    #[test]
+    fn tlc01_rejects_produced_score_absent_from_maximize() {
+        let mut s = base_schema();
+        s.objective = Objective {
+            maximize: vec!["score_b".into(), "score_c".into(), "score_d".into()],
+            weights: {
+                let mut w = HashMap::new();
+                w.insert("score_a".into(), 0.31);
+                w.insert("score_b".into(), 0.26);
+                w.insert("score_c".into(), 0.12);
+                w.insert("score_d".into(), 0.09);
+                w
+            },
+        };
+        // Item `a` feeds `score_a`, but `score_a` is not in `maximize`.
+        s.items.push(attr("a", 1.0, 1, ("score_a", 1.0)));
+        for (id, sc) in [("b", "score_b"), ("c", "score_c"), ("d", "score_d")] {
+            s.items.push(attr(id, 1.0, 1, (sc, 1.0)));
+            let mut t = HashMap::new();
+            t.insert(sc.to_string(), 1.0);
+            s.scoring.insert(sc.to_string(), ScoreTerm { terms: t });
+        }
+        // `score_a` has a scoring term and a weight, but is never maximized.
+        let mut ta = HashMap::new();
+        ta.insert("score_a".into(), 1.0);
+        s.scoring.insert("score_a".into(), ScoreTerm { terms: ta });
+        s.budget.insert("pts".into(), 7.0);
+
+        let err = validate_schema(&s).expect_err("mismatched schema must be rejected");
+        assert!(
+            err.contains("T-LC01"),
+            "expected T-LC01 diagnostic, got: {err}"
+        );
+    }
+
     #[test]
     fn prerequisite_gates_perk() {
         let mut s = base_schema();
@@ -1109,5 +1181,150 @@ terms = { cyberware_stat_mod_pct = 0.2, tech_dmg_pct = 0.1 }
         );
         // Top solution should allocate all budget to highest-weighted pillar (spear=7.0).
         assert_eq!(sols[0].levels.get("spear").copied().unwrap_or(0), 30);
+    }
+}
+
+#[cfg(test)]
+mod fuzz_tlc01 {
+    use super::*;
+
+    /// Truly exhaustive optimum: enumerate every combination of levels
+    /// (0..=max_level per item) and return the max objective_value within budget.
+    fn brute_optimum(schema: &Schema) -> f64 {
+        let attrs: Vec<&Item> = schema.items.iter().filter(|i| i.is_attribute()).collect();
+        let perks: Vec<&Item> = schema.items.iter().filter(|i| !i.is_attribute()).collect();
+        let mut best = f64::NEG_INFINITY;
+        let mut levels: BTreeMap<String, u32> = BTreeMap::new();
+        fn rec(
+            attrs: &[&Item],
+            perks: &[&Item],
+            idx: usize,
+            levels: &mut BTreeMap<String, u32>,
+            schema: &Schema,
+            best: &mut f64,
+        ) {
+            if idx == attrs.len() {
+                // perks: try 0 or 1 (perk cap 1)
+                fn recp(
+                    perks: &[&Item],
+                    pidx: usize,
+                    levels: &mut BTreeMap<String, u32>,
+                    schema: &Schema,
+                    best: &mut f64,
+                ) {
+                    if pidx == perks.len() {
+                        if within_budget(schema, levels) && prereqs_satisfied(schema, levels) {
+                            let stats = compute_stats(schema, levels);
+                            let scores = compute_scores(schema, &stats);
+                            let obj = objective_value(schema, &scores);
+                            if obj > *best {
+                                *best = obj;
+                            }
+                        }
+                        return;
+                    }
+                    let it = perks[pidx];
+                    levels.insert(it.id.clone(), 0);
+                    recp(perks, pidx + 1, levels, schema, best);
+                    levels.insert(it.id.clone(), 1);
+                    recp(perks, pidx + 1, levels, schema, best);
+                    levels.insert(it.id.clone(), 0);
+                }
+                recp(perks, 0, levels, schema, best);
+                return;
+            }
+            let it = attrs[idx];
+            let cap = it.level_cap();
+            for l in 0..=cap {
+                levels.insert(it.id.clone(), l);
+                if within_budget(schema, levels) {
+                    rec(attrs, perks, idx + 1, levels, schema, best);
+                }
+            }
+            levels.insert(it.id.clone(), 0);
+        }
+        rec(&attrs, &perks, 0, &mut levels, schema, &mut best);
+        best
+    }
+
+    fn rand_schema(seed: u64) -> Schema {
+        let mut rng = seed;
+        let rnd = |r: &mut u64| {
+            *r ^= *r << 13;
+            *r ^= *r >> 7;
+            *r ^= *r << 17;
+            *r
+        };
+        let n = 2 + (rnd(&mut rng) % 4) as usize; // 2..5 items
+        let budget = (n as f64) * 2.0 + (rnd(&mut rng) % 6) as f64; // room for multi-level
+        let mut s = Schema {
+            meta: Meta {
+                domain: "fuzz".into(),
+                schema_version: 1,
+                shape: None,
+            },
+            budget: HashMap::new(),
+            items: Vec::new(),
+            objective: Objective {
+                maximize: Vec::new(),
+                weights: HashMap::new(),
+            },
+            scoring: HashMap::new(),
+        };
+        s.budget.insert("pts".into(), budget);
+        let score_names: Vec<String> = (0..n).map(|i| format!("s{i}")).collect();
+        for (i, name) in score_names.iter().enumerate() {
+            let w = ((rnd(&mut rng) % 100) as f64) / 100.0 + 0.01;
+            s.objective.maximize.push(name.clone());
+            s.objective.weights.insert(name.clone(), w);
+            let mut t = HashMap::new();
+            t.insert(name.clone(), 1.0);
+            s.scoring.insert(name.clone(), ScoreTerm { terms: t });
+            s.items.push(Item {
+                id: format!("i{i}"),
+                kind: ItemKind::Attribute,
+                requires: None,
+                cost: {
+                    let mut c = HashMap::new();
+                    c.insert("pts".into(), 1.0);
+                    c
+                },
+                max_level: Some(1 + (rnd(&mut rng) % 8) as u32),
+                effects: {
+                    let mut e = HashMap::new();
+                    e.insert(name.clone(), 1.0);
+                    e
+                },
+            });
+        }
+        s
+    }
+
+    #[test]
+    #[ignore = "differential fuzz vs brute force — run with --ignored"]
+    fn fuzz_solver_matches_bruteforce() {
+        for seed in 0..2000u64 {
+            let s = rand_schema(seed);
+            let _ = validate_schema(&s); // may err; skip invalid
+            let brute = brute_optimum(&s);
+            if brute == f64::NEG_INFINITY {
+                continue;
+            }
+            match solve(&s, 1) {
+                Ok(sols) => {
+                    if sols.is_empty() {
+                        panic!("seed {seed}: solver returned no solution but brute found {brute}");
+                    }
+                    let got = sols[0].objective;
+                    if (got - brute).abs() > 1e-6 {
+                        panic!(
+                            "seed {seed}: solver objective {got} != brute optimum {brute} (diff {})",
+                            got - brute
+                        );
+                    }
+                }
+                Err(_) => { /* validation/guard rejected; skip */ }
+            }
+        }
     }
 }

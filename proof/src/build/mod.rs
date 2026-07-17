@@ -106,6 +106,33 @@ pub fn validate_domain_profile(profile: &DomainProfile) -> Result<(), String> {
         }
     }
 
+    // T-LC01 guard: a score is "produced" if some `scoring.<score>` term
+    // references a stat that an item's `effects` actually provides. Every
+    // produced score MUST be in `objective.maximize` — otherwise it is computed
+    // and then discarded, so the producing item contributes 0 to the objective
+    // and is silently dropped (the T-LC01 "highest-weight item excluded" trap).
+    // This catches hand-assembled domain profiles where a score name drifts
+    // between `[[graha_map]]` / `[[items]]` / `[objective]` / `[scoring.*]`.
+    let produced_stats: std::collections::HashSet<&str> = profile
+        .items
+        .iter()
+        .flat_map(|i| i.effects.keys().map(|s| s.as_str()))
+        .collect();
+    for (score_name, term) in &profile.scoring {
+        let is_produced = term
+            .terms
+            .keys()
+            .any(|stat| produced_stats.contains(stat.as_str()));
+        if is_produced && !profile.objective.maximize.contains(score_name) {
+            return Err(format!(
+                "score '{score_name}' is produced by an item but is not in \
+                 `objective.maximize` — it is computed then discarded, so the item \
+                 contributes 0 to the objective and is silently dropped (T-LC01). Add \
+                 '{score_name}' to `objective.maximize`, or remove the producing effect."
+            ));
+        }
+    }
+
     Ok(())
 }
 
