@@ -324,6 +324,22 @@ enum Commands {
         #[command(subcommand)]
         action: AthenaAction,
     },
+    /// Companion memory: load/save the structured, local, auditable store of
+    /// user-stated facts / preferences / commitments. v0.1 text entry point.
+    Companion {
+        /// Optional single query to process (classify + answer or remember).
+        #[arg(short, long)]
+        query: Option<String>,
+        /// Remember a key=value fact/preference (source: stated). Repeatable.
+        #[arg(long = "remember", value_name = "KEY=VALUE")]
+        remember: Vec<String>,
+        /// Run an interactive read-eval-print loop (type 'exit' to quit).
+        #[arg(long)]
+        repl: bool,
+        /// Override the memory file path (default: <data_dir>/laverna/companion-memory.json).
+        #[arg(long)]
+        path: Option<String>,
+    },
 }
 
 /// Subcommands of `laverna corpus`.
@@ -1251,6 +1267,43 @@ fn main() {
             #[cfg(feature = "budget")]
             AthenaAction::BudgetReset => cmd_athena_budget_reset(),
         },
+        Commands::Companion {
+            query,
+            remember,
+            repl,
+            path,
+        } => {
+            #[cfg(feature = "mcp")]
+            {
+                let mem_path = path
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(laverna::companion::memory::default_path);
+                let formula_reg = load_formula_registry();
+                let entity_reg = load_entity_registry();
+                let forms = load_shikai_forms();
+                let events = load_events();
+                let descent_engine =
+                    DescentEngine::new(formula_reg.clone(), entity_reg.clone(), forms, events);
+                cmd_companion(
+                    &mem_path,
+                    query,
+                    &remember,
+                    repl,
+                    &descent_engine,
+                    &formula_reg,
+                    &entity_reg,
+                );
+            }
+            #[cfg(not(feature = "mcp"))]
+            {
+                let _ = (query, remember, repl, path);
+                eprintln!(
+                    "error: 'companion' requires the 'mcp' feature (it reuses the \
+                     verify-first companion tool surface). Rebuild with --features mcp."
+                );
+                std::process::exit(2);
+            }
+        }
     }
 }
 
@@ -4722,6 +4775,101 @@ fn companion_tool(
         sanitize_answer(&context)
     );
     Ok(ToolOutput::text_only(answer))
+}
+
+/// v0.1 text companion entry point. Loads structured memory, applies any
+/// `--remember key=value` facts, answers an optional `--query` via the same
+/// verify-first classify+ground flow as `companion_tool`, optionally runs an
+/// interactive REPL, then persists memory back to disk. No global state: the
+/// memory file is the sole source of truth.
+#[cfg(feature = "mcp")]
+use laverna::companion::memory::CompanionMemory;
+#[cfg(feature = "mcp")]
+fn cmd_companion(
+    mem_path: &std::path::Path,
+    query: Option<String>,
+    remember: &[String],
+    repl: bool,
+    descent_engine: &DescentEngine,
+    formula_reg: &FormulaRegistry,
+    entity_reg: &EntityRegistry,
+) {
+    use laverna::companion::memory::{CompanionMemory, MemorySource};
+
+    let ts = chrono::Utc::now().to_rfc3339();
+    let mut memory = match CompanionMemory::load_from_path(mem_path) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
+    };
+
+    for kv in remember {
+        match kv.split_once('=') {
+            Some((k, v)) if !k.is_empty() => {
+                memory.set_fact(k.trim(), v, MemorySource::Stated, &ts);
+                println!("remembered: {k} = {v}");
+            }
+            _ => eprintln!("warning: --remember expects KEY=VALUE, ignoring '{kv}'"),
+        }
+    }
+
+    if let Some(q) = query {
+        run_companion_turn(&q, &mut memory, descent_engine, formula_reg, entity_reg);
+    }
+
+    if repl {
+        println!("L.ai companion — type a question, 'remember KEY=VALUE', or 'exit'.");
+        let stdin = std::io::stdin();
+        let mut buf = String::new();
+        loop {
+            print!("> ");
+            use std::io::Write;
+            let _ = std::io::stdout().flush();
+            buf.clear();
+            if stdin.lock().read_line(&mut buf).is_err() {
+                break;
+            }
+            let line = buf.trim();
+            if line.eq_ignore_ascii_case("exit") || line.eq_ignore_ascii_case("quit") {
+                break;
+            }
+            if let Some(rest) = line.strip_prefix("remember ") {
+                if let Some((k, v)) = rest.split_once('=') {
+                    memory.set_fact(k.trim(), v, MemorySource::Stated, &ts);
+                    println!("remembered: {k} = {v}");
+                }
+                continue;
+            }
+            if line.is_empty() {
+                continue;
+            }
+            run_companion_turn(line, &mut memory, descent_engine, formula_reg, entity_reg);
+        }
+    }
+
+    if let Err(e) = memory.save_to_path(mem_path) {
+        eprintln!("error: {e}");
+        std::process::exit(2);
+    }
+}
+
+/// One companion turn: classify → ground via the matching engine tool → print,
+/// reusing the exact verify-first flow of `companion_tool`. The memory is
+/// owned by the caller (reserved for tone personalisation in a later phase).
+#[cfg(feature = "mcp")]
+fn run_companion_turn(
+    query: &str,
+    _memory: &mut CompanionMemory,
+    descent_engine: &DescentEngine,
+    formula_reg: &FormulaRegistry,
+    entity_reg: &EntityRegistry,
+) {
+    match companion_tool(query, descent_engine, formula_reg, entity_reg) {
+        Ok(out) => println!("{}", out.text),
+        Err(e) => println!("I looked into that but couldn't produce a verified answer ({e})."),
+    }
 }
 
 // ─── websearch Command ──────────────────────────────────────────────────────

@@ -548,6 +548,20 @@ const NODE_CAP: usize = 5_000_000;
 /// Solve the allocation problem and return the top-`top_k` distinct Pareto-optimal
 /// allocations, ranked by the weighted objective (descending).
 pub fn solve(schema: &Schema, top_k: usize) -> Result<Vec<Allocation>, String> {
+    // DIAGNOSTIC (T-LC01 investigation): confirm the live binary is exercising
+    // this exact function with the expected schema. stderr only.
+    eprintln!(
+        "[DIAG optimize::solve] domain={:?} maximize={:?} items={}",
+        schema.meta.domain,
+        schema.objective.maximize,
+        schema.items.len()
+    );
+    for it in &schema.items {
+        eprintln!(
+            "[DIAG optimize::solve]   item id={:?} cost={:?} effects={:?}",
+            it.id, it.cost, it.effects
+        );
+    }
     validate_schema(schema)?;
     let top_k = top_k.max(1);
     let attrs: Vec<&Item> = schema.items.iter().filter(|i| i.is_attribute()).collect();

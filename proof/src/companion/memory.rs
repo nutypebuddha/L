@@ -93,6 +93,82 @@ impl CompanionMemory {
         };
         serde_json::to_string_pretty(&ordered)
     }
+
+    /// Upsert a preference (personalises tone); mirrors `set_fact`.
+    pub fn set_preference(&mut self, key: &str, value: &str, source: MemorySource, at: &str) {
+        if let Some(slot) = self.preferences.iter_mut().find(|p| p.key == key) {
+            slot.value = value.to_string();
+            slot.source = source;
+            slot.at = at.to_string();
+            return;
+        }
+        self.preferences.push(MemoryItem {
+            key: key.to_string(),
+            value: value.to_string(),
+            source,
+            at: at.to_string(),
+        });
+    }
+
+    /// Upsert a commitment the user asked the companion to remember.
+    pub fn set_commitment(&mut self, key: &str, value: &str, source: MemorySource, at: &str) {
+        if let Some(slot) = self.commitments.iter_mut().find(|c| c.key == key) {
+            slot.value = value.to_string();
+            slot.source = source;
+            slot.at = at.to_string();
+            return;
+        }
+        self.commitments.push(MemoryItem {
+            key: key.to_string(),
+            value: value.to_string(),
+            source,
+            at: at.to_string(),
+        });
+    }
+
+    /// Look up a preference by key.
+    pub fn get_preference(&self, key: &str) -> Option<&MemoryItem> {
+        self.preferences.iter().find(|p| p.key == key)
+    }
+
+    /// Look up a commitment by key.
+    pub fn get_commitment(&self, key: &str) -> Option<&MemoryItem> {
+        self.commitments.iter().find(|c| c.key == key)
+    }
+
+    /// Persist to `path` as pretty JSON. Explicit IO (no global state); the
+    /// caller owns the path. Creates parent directories if needed.
+    /// Errors are returned, never silently swallowed.
+    pub fn save_to_path(&self, path: &std::path::Path) -> Result<(), String> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("memory dir create error: {e}"))?;
+        }
+        let json = self
+            .to_canonical_json()
+            .map_err(|e| format!("memory serialize error: {e}"))?;
+        std::fs::write(path, json).map_err(|e| format!("memory write error: {e}"))
+    }
+
+    /// Load from `path`. A missing file is NOT an error — it means fresh
+    /// memory (the companion starts with none). Corrupt JSON is an error.
+    pub fn load_from_path(path: &std::path::Path) -> Result<CompanionMemory, String> {
+        if !path.exists() {
+            return Ok(CompanionMemory::new());
+        }
+        let raw = std::fs::read_to_string(path).map_err(|e| format!("memory read error: {e}"))?;
+        serde_json::from_str(&raw).map_err(|e| format!("memory parse error: {e}"))
+    }
+}
+
+/// Default on-disk location: `<data_dir>/laverna/companion-memory.json`,
+/// where `data_dir` is the OS user-data dir (XDG on Linux, the app sandbox
+/// on Android, `~/Library/Application Support` on macOS). Deterministic and
+/// user-scoped; never a hardcoded absolute path.
+pub fn default_path() -> std::path::PathBuf {
+    let mut dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from(".laverna"));
+    dir.push("laverna");
+    dir.push("companion-memory.json");
+    dir
 }
 
 #[cfg(test)]
@@ -129,5 +205,65 @@ mod tests {
         let j = m.to_canonical_json().unwrap();
         // alpha (sorted first) must precede zeta in the serialized form.
         assert!(j.find("alpha").unwrap() < j.find("zeta").unwrap());
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("companion-memory.json");
+
+        let mut m = CompanionMemory::new();
+        m.set_fact("name", "ada", MemorySource::Stated, "2026-07-16T00:00:00Z");
+        m.set_preference(
+            "units",
+            "metric",
+            MemorySource::Stated,
+            "2026-07-16T00:00:00Z",
+        );
+        m.set_commitment(
+            "weekly_review",
+            "sunday",
+            MemorySource::Stated,
+            "2026-07-16T00:00:00Z",
+        );
+        m.save_to_path(&path).expect("save");
+
+        let loaded = CompanionMemory::load_from_path(&path).expect("load");
+        assert_eq!(loaded, m, "round-tripped memory must equal original");
+        assert_eq!(loaded.get_fact("name").unwrap().value, "ada");
+        assert_eq!(loaded.get_preference("units").unwrap().value, "metric");
+        assert_eq!(
+            loaded.get_commitment("weekly_review").unwrap().value,
+            "sunday"
+        );
+    }
+
+    #[test]
+    fn load_missing_file_is_fresh_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does-not-exist.json");
+        let m = CompanionMemory::load_from_path(&path).expect("missing file -> fresh");
+        assert!(m.facts.is_empty());
+        assert!(m.preferences.is_empty());
+        assert!(m.commitments.is_empty());
+    }
+
+    #[test]
+    fn load_corrupt_file_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("corrupt.json");
+        std::fs::write(&path, "{not valid json").unwrap();
+        assert!(CompanionMemory::load_from_path(&path).is_err());
+    }
+
+    #[test]
+    fn default_path_is_user_scoped() {
+        let p = default_path();
+        let parts: Vec<_> = p.iter().map(|c| c.to_string_lossy()).collect();
+        assert!(
+            parts.ends_with(&["laverna".into(), "companion-memory.json".into()]),
+            "default path should end in laverna/companion-memory.json, got {}",
+            p.display()
+        );
     }
 }
