@@ -6,7 +6,7 @@ Public, committed, no euphemism. Documented bugs with scope and status.
 
 ### [T52] `strategize` exponential blowup on large budgets
 
-**Status:** fixed-pending-release
+**Status:** released (v0.4.1)
 **Affects:** `lai strategize --budget <N>` for N > ~20
 **Does not affect:** `strategize --budget ≤15`, `optimize`, `build`, all other subcommands
 **Repro:** `lai strategize --query "build a resilient distributed system" --budget 30`
@@ -16,7 +16,7 @@ Public, committed, no euphemism. Documented bugs with scope and status.
 
 ### [T53] `schema domain` template missing scoring table
 
-**Status:** fixed-pending-release
+**Status:** released (v0.4.1)
 **Affects:** `lai schema domain` output (template)
 **Does not affect:** `schema optimize`, any hand-written domain profiles, `build`, `strategize`
 **Repro:** `lai schema domain > /tmp/domain.toml && lai build --domain /tmp/domain.toml --datetime "2026-07-16" --tz "America/Chicago" --latitude 45.4 --longitude -92.9`
@@ -26,7 +26,7 @@ Public, committed, no euphemism. Documented bugs with scope and status.
 
 ### [MINOR] Corpus entity contains Chinese text in English description
 
-**Status:** fixed-pending-release
+**Status:** released (v0.4.1)
 **Affects:** `proof/entities/chakras.toml` (muladhara description)
 **Does not affect:** any runtime behavior, parsing, or query resolution
 **Repro:** `grep '安全感' proof/entities/chakras.toml`
@@ -46,7 +46,7 @@ Public, committed, no euphemism. Documented bugs with scope and status.
 
 ### [T54] bridge `getCidVersion()` returns success string on failure
 
-**Status:** fixed-pending-release
+**Status:** released (v0.4.1)
 **Affects:** `bridge` `/status` endpoint CID version field
 **Does not affect:** `/validate`, `/fact`, `/health`, any actual validation logic
 **Repro:** Run bridge without `CID_BINARY` set (stale path guarantees failure); `curl localhost:3000/status | jq .cid` returns `"v0.2.0 (binary found)"`
@@ -56,7 +56,7 @@ Public, committed, no euphemism. Documented bugs with scope and status.
 
 ### [T55] bridge `CID_BINARY` path stale post-monorepo refactor
 
-**Status:** fixed-pending-release
+**Status:** released (v0.4.1)
 **Affects:** bridge shell-outs to CID engine (all validation via bridge)
 **Does not affect:** gate CLI directly, proof, any Rust code
 **Repro:** `node bridge/src/index.js` without `CID_BINARY` env; all `/validate` calls fail silently
@@ -76,7 +76,7 @@ Public, committed, no euphemism. Documented bugs with scope and status.
 
 ### [T57] gate README claims 13 MCP tools; actual count is 22
 
-**Status:** fixed-pending-release
+**Status:** released (v0.4.1)
 **Affects:** `gate/README.md` documentation only
 **Does not affect:** runtime behavior, MCP server, tool registration
 **Repro:** `grep "13 tools" gate/README.md`

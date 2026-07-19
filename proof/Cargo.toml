@@ -1,6 +1,6 @@
 [package]
 name = "laverna"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 description = "L.ai — deterministic reasoning engine + per-token validation (NAND-to-verify, CID gates, Tanto compute)"
 authors = ["nutypebuddha <nutypebuddha@proton.me>"]
