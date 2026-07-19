@@ -87,9 +87,43 @@ jobs:
       - name: Install deps
         working-directory: bridge
         run: npm ci || npm install
-      - name: Syntax check
+      - name: Syntax check (bridge)
         working-directory: bridge
-        run: node --check src/cid.js && node -e "require('./src/adapters/grok.js')" || true
+        run: node --check src/cid.js && node -e "require('./src/adapters/grok.js')"
+
+  android-assets:
+    name: Android bundled-asset syntax gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # The frontend that shipped broken three builds running lives under
+      # android-app/.../assets/app.js. A guard that cannot fail is a comment:
+      # no `|| true` here. If app.js fails `node --check`, the build fails.
+      - name: Syntax-check bundled app.js
+        run: |
+          shopt -s globstar nullglob
+          found=0
+          for f in android-app/**/assets/app.js; do
+            found=1
+            echo "checking $f"
+            node --check "$f"
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "no android-app/assets/app.js found — skipping (not an error)"
+          fi
+      - name: Balanced <script> tags in assets
+        run: |
+          shopt -s globstar nullglob
+          for f in android-app/**/assets/*.html; do
+            o=$(grep -o '<script' "$f" | wc -l)
+            c=$(grep -o '</script>' "$f" | wc -l)
+            if [ "$o" -ne "$c" ]; then
+              echo "::error:: $f has $o <script> vs $c </script>"; exit 1
+            fi
+          done
 
   release-assets:
     name: Release assets (x86_64-musl + llama bundle)

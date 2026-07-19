@@ -1,0 +1,31 @@
+#!/bin/sh
+# x86_64-linux-android cross-compile wrapper for aarch64-linux host.
+# Stage 1: qemu-x86_64 runs x86_64 clang to produce x86_64 objects.
+# Stage 2: the aarch64-native multi-arch ld.lld links them into x86_64 ELF.
+# We intercept the linker call by replacing -fuse-ld=bfd with a direct path
+# to ld.lld, then let ld.lld pick up the target from the object files.
+
+# Strip -fuse-ld=bfd and replace with -fuse-ld=lld so clang calls lld,
+# then override ld.lld search path to the host's multi-arch lld.
+export PATH="/tmp/android-sdk/ndk/25.0.8775105/toolchains/llvm/prebuilt/linux-x86_64/bin:/home/laverna/bin:$PATH"
+
+# Find the NDK's clang (x86_64 binary) — run it directly without qemu for
+# the link step, since the linker invocation just needs to find our ld.lld.
+NDK_BIN=/tmp/android-sdk/ndk/25.0.8775105/toolchains/llvm/prebuilt/linux-x86_64/bin
+
+# Rewrite args: drop -fuse-ld=bfd, replace with direct lld path
+ARGS=""
+for a in "$@"; do
+  case "$a" in
+    -fuse-ld=bfd) ARGS="$ARGS -fuse-ld=lld" ;;
+    *) ARGS="$ARGS $a" ;;
+  esac
+done
+
+# ld.lld from the host toolchain is multi-arch and can produce x86_64 ELF.
+# Make it available as "ld.lld" in the search path by symlinking in a temp dir.
+TMPLINK=$(mktemp -d)
+ln -sf /home/laverna/bin/ld.lld "$TMPLINK/ld.lld"
+export PATH="$TMPLINK:$PATH"
+
+exec $NDK_BIN/clang-14 --target=x86_64-linux-android24 $ARGS

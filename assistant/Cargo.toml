@@ -1,0 +1,33 @@
+[package]
+name = "assistant"
+version = "0.1.0"
+edition = "2021"
+description = "L.ai · Assistant — voice-first phone assistant with intent routing and system actions"
+authors = ["nutypebuddha <nutypebuddha@proton.me>"]
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time", "sync", "fs", "io-util", "process", "net"] }
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+urlencoding = "2"
+ureq = { version = "3", default-features = false, features = ["json"] }
+
+[features]
+default = []
+# Enables the Termux-backed system actions (SMS, calls, camera, location,
+# clipboard, battery) that shell out to termux-api. Off by default: a normal
+# Android app can't grant those permissions, so advertising them as tools
+# makes the engine's capability list disagree with what the device can do and
+# leads to runtime failures. Build with `--features termux` only when the
+# daemon actually runs under Termux.
+termux = []
+# Enables `assistant --mcp`: a stdio JSON-RPC server (no localhost socket) the
+# Android app drives directly. Required for the on-device transport.
+mcp = []

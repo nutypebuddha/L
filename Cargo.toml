@@ -6,6 +6,7 @@ members = [
     "athena",
     "proof/laverna-wasm",
     "gate/cid-wasm",
+    "assistant",
 ]
 
 [workspace.package]

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#04060a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>L.ai // CYBERDECK</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+
+<!-- SPLASH — cyberdeck boot sequence -->
+<div id="splash" class="screen active">
+  <div class="splash-content">
+    <div class="crt-grid"></div>
+    <div class="splash-logo">
+      <div class="l-mark">L</div>
+      <div class="scanline"></div>
+    </div>
+    <div class="splash-tagline">verify, don't trust</div>
+    <div class="boot-log" id="boot-log"></div>
+    <div class="splash-bar"><span id="boot-bar-fill"></span></div>
+  </div>
+</div>
+
+<!-- MAIN CHAT -->
+<div id="chat-screen" class="screen">
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-logo">L</div>
+      <div class="topbar-info">
+        <span class="topbar-title">L.AI://DECK</span>
+        <span class="topbar-status" id="status-text">ready</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button class="icon-btn" onclick="showScreen('settings-screen')" title="Settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+      <button class="icon-btn" onclick="clearChat()" title="Clear">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="messages-container" id="messages">
+    <div class="messages-inner" id="messages-inner"></div>
+  </div>
+
+  <div class="quick-actions" id="quick-actions">
+    <button class="qa-btn" onclick="sendQuick('solve')">./solve</button>
+    <button class="qa-btn" onclick="sendQuick('validate')">./validate</button>
+    <button class="qa-btn" onclick="sendQuick('search')">./search</button>
+    <button class="qa-btn" onclick="sendQuick('formula')">./formula</button>
+    <button class="qa-btn" onclick="sendQuick('convert')">./convert</button>
+    <button class="qa-btn" onclick="sendQuick('traverse')">./traverse</button>
+    <button class="qa-btn" onclick="sendQuick('score')">./score</button>
+    <button class="qa-btn" onclick="sendQuick('wheel')">./wheel</button>
+  </div>
+
+  <div class="input-area">
+    <div class="input-row">
+      <button class="mic-btn" id="mic-btn" onclick="toggleVoice()">
+        <svg id="mic-icon" width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z"/><path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+        <div class="mic-pulse" id="mic-pulse"></div>
+      </button>
+      <input type="text" id="user-input" placeholder="root@lai:~$ " autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+      <button class="send-btn" id="send-btn" onclick="sendText()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- SETTINGS -->
+<div id="settings-screen" class="screen">
+    <header class="topbar">
+      <button class="icon-btn" onclick="showScreen('chat-screen')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+      </button>
+      <span class="topbar-title">// CONFIG</span>
+      <div style="width:36px"></div>
+    </header>
+  <div class="settings-content">
+    <div class="settings-group">
+      <h3>Identity</h3>
+      <div class="setting-item">
+        <label>Name</label>
+        <input type="text" id="setting-name" value="" placeholder="your name" />
+      </div>
+    </div>
+    <div class="settings-group">
+      <h3>Voice</h3>
+      <div class="setting-item">
+        <label>Wake word</label>
+        <select id="setting-wake">
+          <option value="lai" selected>L.ai</option>
+          <option value="hey lai">Hey L.ai</option>
+          <option value="none">Disabled</option>
+        </select>
+      </div>
+      <div class="setting-item">
+        <label>TTS Speed</label>
+        <input type="range" id="setting-speed" min="50" max="200" value="100" />
+      </div>
+    </div>
+    <div class="settings-group">
+      <h3>System</h3>
+      <div class="setting-item" onclick="showDeviceInfo()">
+        <label>Device Info</label>
+        <span class="setting-value" id="device-info">tap to view</span>
+      </div>
+      <div class="setting-item" onclick="showDaemonStatus()">
+        <label>Backend Daemon</label>
+        <span class="setting-value" id="daemon-status">tap to check</span>
+      </div>
+      <div class="setting-item">
+        <label>Restart Backend</label>
+        <button class="danger-btn" onclick="restartDaemon()">Restart</button>
+      </div>
+      <div class="setting-item">
+        <label>History</label>
+        <button class="danger-btn" onclick="clearHistory()">Clear All</button>
+      </div>
+    </div>
+    <div class="settings-group">
+      <h3>About</h3>
+      <div class="about-card">
+        <div class="l-mark small">L</div>
+        <p>L.AI :: CYBERDECK v1.0.0</p>
+        <p class="dim">528 formulas &middot; 214 entities &middot; 5-gate verification</p>
+        <p class="dim">verify, don't trust</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

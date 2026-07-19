@@ -1,6 +1,8 @@
 // Copyright 2026 nutypebuddha
 // SPDX-License-Identifier: Apache-2.0
 
+#![recursion_limit = "256"]
+
 use clap::{Parser, Subcommand, ValueEnum};
 use laverna::prelude::*;
 use laverna::strategy::{
@@ -339,6 +341,38 @@ enum Commands {
         /// Override the memory file path (default: <data_dir>/laverna/companion-memory.json).
         #[arg(long)]
         path: Option<String>,
+    },
+    /// Voice-first phone assistant (requires `assistant` feature)
+    #[cfg(feature = "assistant")]
+    Assistant {
+        /// Run in interactive voice mode (requires microphone)
+        #[arg(long)]
+        voice: bool,
+        /// Run as background daemon with wake word detection
+        #[arg(long)]
+        daemon: bool,
+        /// Stop a running daemon
+        #[arg(long)]
+        stop: bool,
+        /// Custom wake word (default: "lai")
+        #[arg(long, default_value = "lai")]
+        wake_word: String,
+        /// Process a single text input and exit
+        #[arg(short, long)]
+        text: Option<String>,
+        /// Output format: "text" (default) or "json" (structured response)
+        #[arg(long, default_value = "text")]
+        format: String,
+        /// Start an HTTP server on localhost for the Android app to connect to
+        #[arg(long)]
+        http: bool,
+        /// Start a stdio JSON-RPC (MCP) server for the Android app to drive
+        /// directly — no localhost socket, no port, no auth surface.
+        #[arg(long)]
+        mcp: bool,
+        /// Port for --http server (default: 7878)
+        #[arg(long, default_value = "7878")]
+        port: u16,
     },
 }
 
@@ -1304,6 +1338,215 @@ fn main() {
                 std::process::exit(2);
             }
         }
+        #[cfg(feature = "assistant")]
+        Commands::Assistant { voice, daemon, stop, wake_word, text, format, http, mcp, port } => {
+            // Handle --stop: kill the running daemon
+            if stop {
+                let pid_file = std::env::var("HOME")
+                    .map(|h| std::path::PathBuf::from(h).join(".lai").join("assistant.pid"))
+                    .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/lai-assistant.pid"));
+                if let Ok(contents) = std::fs::read_to_string(&pid_file) {
+                    if let Ok(pid) = contents.trim().parse::<u32>() {
+                        eprintln!("[assistant] stopping daemon (pid {pid})...");
+                        unsafe {
+                            libc::kill(pid as i32, libc::SIGTERM);
+                        }
+                        let _ = std::fs::remove_file(&pid_file);
+                        eprintln!("[assistant] daemon stopped");
+                    } else {
+                        eprintln!("[assistant] invalid PID file");
+                    }
+                } else {
+                    eprintln!("[assistant] no daemon running (no PID file)");
+                }
+                return;
+            }
+
+                let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+                rt.block_on(async {
+                    let engines = build_assistant_engines();
+                    let assist = assistant::Assistant::with_config(engines, &wake_word)
+                        .await
+                        .expect("failed to initialize assistant");
+
+                    if http {
+                        let port = port.max(1);
+
+                        // Write a PID file so a later `--stop` (and a stale
+                        // instance guard) can find us. If a live daemon already
+                        // holds the port, fail loudly instead of aborting mid-
+                        // bind with an opaque "Address already in use".
+                        let pid_file = std::env::var("HOME")
+                            .map(|h| std::path::PathBuf::from(h).join(".lai").join("assistant.pid"))
+                            .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/lai-assistant.pid"));
+                        if let Ok(contents) = std::fs::read_to_string(&pid_file) {
+                            if let Ok(old_pid) = contents.trim().parse::<i32>() {
+                                let alive = unsafe { libc::kill(old_pid, 0) } == 0;
+                                if alive {
+                                    eprintln!(
+                                        "[assistant] refusing to start: another daemon is already running (pid {old_pid}). Stop it with `lai assistant --stop`."
+                                    );
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                        if let Some(parent) = pid_file.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        let _ = std::fs::write(&pid_file, std::process::id().to_string());
+
+                        eprintln!("L.ai Assistant — HTTP server on http://127.0.0.1:{port}");
+                        std::sync::Arc::new(assist)
+                            .serve_http(port)
+                            .await
+                            .expect("http server failed");
+                        let _ = std::fs::remove_file(&pid_file);
+                        return;
+                    }
+
+                    if mcp {
+                        #[cfg(feature = "mcp")]
+                        {
+                            // stdio JSON-RPC: the Android app owns our stdin/stdout
+                            // pipes, so there is no localhost socket to secure.
+                            assistant::mcp_server::serve_stdio(std::sync::Arc::new(assist));
+                            return;
+                        }
+                        #[cfg(not(feature = "mcp"))]
+                        {
+                            eprintln!(
+                                "[assistant] --mcp requires the `mcp` feature. Rebuild with --features assistant,mcp."
+                            );
+                            std::process::exit(2);
+                        }
+                    }
+
+                    if let Some(input) = text {
+                    if format == "json" {
+                        let resp = assist
+                            .process_text_json(&input)
+                            .await
+                            .expect("failed to process text");
+                        println!("{}", resp.to_json());
+                    } else {
+                        let response = assist
+                            .process_text(&input)
+                            .await
+                            .expect("failed to process text");
+                        println!("{response}");
+                    }
+                } else if daemon {
+                    eprintln!("L.ai Assistant — daemon mode (Ctrl+C to stop)");
+                    assist.run_daemon().await.expect("daemon failed");
+                } else if voice {
+                    eprintln!("L.ai Assistant — listening... (Ctrl+C to stop)");
+                    assist.run_voice_loop().await.expect("voice loop failed");
+                } else {
+                    eprintln!("L.ai Assistant");
+                    eprintln!("Usage:");
+                    eprintln!("  lai assistant --text \"what's my battery\"");
+                    eprintln!("  lai assistant --voice        (interactive voice)");
+                    eprintln!("  lai assistant --daemon       (background + wake word)");
+                    eprintln!("  lai assistant --stop         (stop daemon)");
+                    eprintln!("  lai assistant --wake-word \"hey lai\" --daemon");
+                }
+            });
+        }
+    }
+}
+
+// ─── Assistant Engines ─────────────────────────────────────────────────────
+
+/// Run a `lai` subcommand as a subprocess and capture its stdout.
+#[cfg(feature = "assistant")]
+fn run_lai(args: &[&str]) -> String {
+    let exe = std::env::current_exe().expect("failed to get current exe path");
+    let output = std::process::Command::new(exe)
+        .args(args)
+        .output()
+        .expect("failed to run lai subprocess");
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+/// Build the `Engines` handle for the assistant, wiring every L.ai subsystem
+/// through subprocess calls to the unified `lai` binary.
+#[cfg(feature = "assistant")]
+fn build_assistant_engines() -> assistant::engines::Engines {
+    assistant::engines::Engines {
+        // ── Proof (reasoning) ───────────────────────────────
+        solve: Box::new(|q| run_lai(&["solve", "--query", &q])),
+
+        // ── Gate (validation) ──────────────────────────────
+        validate: Box::new(|(text, context)| {
+            run_lai(&["gate", "validate", &text, &context])
+        }),
+        score: Box::new(|text| run_lai(&["gate", "score", &text])),
+        fix: Box::new(|(text, context)| run_lai(&["gate", "fix", &text, &context])),
+
+        // ── Tanto (compute) ────────────────────────────────
+        eval: Box::new(|expr| run_lai(&["tanto", "eval", &expr])),
+        convert: Box::new(|(value, from, to)| {
+            run_lai(&["tanto", "convert", &value.to_string(), &from, &to])
+        }),
+        formula: Box::new(|(name, args)| {
+            let mut cmd_args = vec!["tanto", "formula", &name];
+            for arg in &args {
+                cmd_args.push(arg);
+            }
+            run_lai(&cmd_args)
+        }),
+
+        // ── Athena (relational) ────────────────────────────
+        search_formulas: Box::new(|keyword| run_lai(&["athena", "search", &keyword])),
+        traverse: Box::new(|(domain, depth)| {
+            run_lai(&["athena", "traverse", &domain, "--depth", &depth.to_string()])
+        }),
+        classify: Box::new(|token| run_lai(&["athena", "classify", &token])),
+        wheel: Box::new(|domain| {
+            let mut cmd_args = vec!["athena", "wheel"];
+            if let Some(ref d) = domain {
+                cmd_args.push("--domain");
+                cmd_args.push(d);
+            }
+            run_lai(&cmd_args)
+        }),
+        reason: Box::new(|(have, want, max_depth)| {
+            run_lai(&[
+                "athena",
+                "reason",
+                "--have",
+                &have,
+                "--want",
+                &want,
+                "--max-depth",
+                &max_depth.to_string(),
+                "--execute",
+            ])
+        }),
+        shikai: Box::new(|query| run_lai(&["athena", "shikai", &query])),
+        bankai_solve: Box::new(|query| run_lai(&["athena", "solve", &query])),
+        eval_formula: Box::new(|(formula_id, args_csv)| {
+            let mut cmd_args = vec!["athena", "eval", "--formula", &formula_id];
+            for arg in args_csv.split(',') {
+                let arg = arg.trim();
+                if !arg.is_empty() {
+                    cmd_args.push("--args");
+                    cmd_args.push(arg);
+                }
+            }
+            run_lai(&cmd_args)
+        }),
+        chain_formulas: Box::new(|(formulas_csv, args_csv)| {
+            let mut cmd_args = vec!["athena", "chain", "--formulas", &formulas_csv];
+            for arg in args_csv.split(',') {
+                let arg = arg.trim();
+                if !arg.is_empty() {
+                    cmd_args.push("--args");
+                    cmd_args.push(arg);
+                }
+            }
+            run_lai(&cmd_args)
+        }),
     }
 }
 
@@ -4150,6 +4393,98 @@ fn handle_jsonrpc(
                             "required": ["query"]
                         },
                         "annotations": {"readOnlyHint": false, "openWorldHint": false, "title": "L.ai Assistant"}
+                    },
+                    {
+                        "name": "set_timer",
+                        "title": "Set Timer",
+                        "description": "Set a countdown timer for N seconds. Shells out to the platform timer/notification service; on non-Android hosts this reports the requested duration.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "seconds": {"type": "integer", "description": "Duration in seconds"},
+                                "label": {"type": "string", "description": "Optional label"}
+                            },
+                            "required": ["seconds"]
+                        },
+                        "annotations": {"readOnlyHint": false, "openWorldHint": false, "title": "Set Timer"}
+                    },
+                    {
+                        "name": "set_reminder",
+                        "title": "Set Reminder",
+                        "description": "Set a reminder with text and a natural-language time. Returns a confirmation.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "text": {"type": "string", "description": "What to remind about"},
+                                "when": {"type": "string", "description": "When, in natural language"}
+                            },
+                            "required": ["text"]
+                        },
+                        "annotations": {"readOnlyHint": false, "openWorldHint": false, "title": "Set Reminder"}
+                    },
+                    {
+                        "name": "battery_status",
+                        "title": "Battery Status",
+                        "description": "Read the device battery level and charging state.",
+                        "inputSchema": {"type": "object", "properties": {}},
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Battery Status"}
+                    },
+                    {
+                        "name": "get_location",
+                        "title": "Get Location",
+                        "description": "Get the device's current location. Returns a short location string.",
+                        "inputSchema": {"type": "object", "properties": {}},
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Get Location"}
+                    },
+                    {
+                        "name": "take_photo",
+                        "title": "Take Photo",
+                        "description": "Capture a photo using the device camera.",
+                        "inputSchema": {"type": "object", "properties": {}},
+                        "annotations": {"readOnlyHint": false, "openWorldHint": false, "title": "Take Photo"}
+                    },
+                    {
+                        "name": "set_clipboard",
+                        "title": "Set Clipboard",
+                        "description": "Copy text to the system clipboard.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {"text": {"type": "string", "description": "Text to copy"}},
+                            "required": ["text"]
+                        },
+                        "annotations": {"readOnlyHint": false, "openWorldHint": false, "title": "Set Clipboard"}
+                    },
+                    {
+                        "name": "get_clipboard",
+                        "title": "Get Clipboard",
+                        "description": "Read the current system clipboard contents.",
+                        "inputSchema": {"type": "object", "properties": {}},
+                        "annotations": {"readOnlyHint": true, "openWorldHint": false, "title": "Get Clipboard"}
+                    },
+                    {
+                        "name": "send_message",
+                        "title": "Send Message",
+                        "description": "Send an SMS/text to a contact.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "contact": {"type": "string", "description": "Contact name or number"},
+                                "message": {"type": "string", "description": "Message body"}
+                            },
+                            "required": ["contact", "message"]
+                        },
+                        "annotations": {"readOnlyHint": false, "openWorldHint": false, "title": "Send Message"}
+                    },
+                    {
+                        "name": "call_contact",
+                        "title": "Call Contact",
+                        "description": "Place a phone call to a contact.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {"contact": {"type": "string", "description": "Contact name or number"}},
+                            "required": ["contact"]
+                        },
+                        "annotations": {"readOnlyHint": false, "openWorldHint": false, "title": "Call Contact"}
                     }
                 ]
             },
@@ -4233,6 +4568,33 @@ fn handle_jsonrpc(
                 "laverna_companion" => {
                     let query = args["query"].as_str().unwrap_or("");
                     companion_tool(query, descent_engine, formula_reg, entity_reg)
+                }
+                "set_timer" => {
+                    let seconds = args["seconds"].as_i64().unwrap_or(0);
+                    let label = args["label"].as_str().unwrap_or("");
+                    Ok(ToolOutput::text_only(action_tool_timer(seconds, label)))
+                }
+                "set_reminder" => {
+                    let text = args["text"].as_str().unwrap_or("");
+                    let when = args["when"].as_str().unwrap_or("");
+                    Ok(ToolOutput::text_only(action_tool_reminder(text, when)))
+                }
+                "battery_status" => Ok(ToolOutput::text_only(action_tool_battery())),
+                "get_location" => Ok(ToolOutput::text_only(action_tool_location())),
+                "take_photo" => Ok(ToolOutput::text_only(action_tool_photo())),
+                "set_clipboard" => {
+                    let text = args["text"].as_str().unwrap_or("");
+                    Ok(ToolOutput::text_only(action_tool_clipboard_set(text)))
+                }
+                "get_clipboard" => Ok(ToolOutput::text_only(action_tool_clipboard_get())),
+                "send_message" => {
+                    let contact = args["contact"].as_str().unwrap_or("");
+                    let message = args["message"].as_str().unwrap_or("");
+                    Ok(ToolOutput::text_only(action_tool_send_message(contact, message)))
+                }
+                "call_contact" => {
+                    let contact = args["contact"].as_str().unwrap_or("");
+                    Ok(ToolOutput::text_only(action_tool_call(contact)))
                 }
                 _ => Err(format!("unknown tool: {tool_name}")),
             };
@@ -4782,6 +5144,137 @@ fn companion_tool(
         r
     );
     Ok(ToolOutput::text_only(answer))
+}
+
+/// Run a shell command and return its trimmed stdout, or an error string.
+#[cfg(feature = "mcp")]
+fn shell_out(cmd: &str, args: &[&str]) -> String {
+    use std::process::Command;
+    match Command::new(cmd).args(args).output() {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        }
+        Ok(out) => {
+            let err = String::from_utf8_lossy(&out.stderr);
+            format!("command failed: {err}")
+        }
+        Err(e) => format!("failed to run {cmd}: {e}"),
+    }
+}
+
+#[cfg(feature = "mcp")]
+fn action_tool_timer(seconds: i64, label: &str) -> String {
+    if seconds <= 0 {
+        return "timer needs a positive duration (seconds)".to_string();
+    }
+    // Best-effort: schedule a notification after `seconds` via termux.
+    let content = if label.is_empty() {
+        format!("Timer finished ({seconds}s)")
+    } else {
+        format!("{label}: timer finished ({seconds}s)")
+    };
+    let _ = shell_out(
+        "termux-notification",
+        &[
+            "--id", "lai-timer",
+            "--title", "Timer",
+            "--content", &content,
+        ],
+    );
+    format!("Timer set for {seconds} seconds{}", if label.is_empty() { String::new() } else { format!(" ({label})") })
+}
+
+#[cfg(feature = "mcp")]
+fn action_tool_reminder(text: &str, when: &str) -> String {
+    let _ = shell_out(
+        "termux-notification",
+        &[
+            "--id", "lai-reminder",
+            "--title", "Reminder",
+            "--content", text,
+            "--sound",
+            "--vibrate", "200,400,200",
+        ],
+    );
+    format!("Reminder set: \"{text}\" for {when}")
+}
+
+#[cfg(feature = "mcp")]
+fn action_tool_battery() -> String {
+    let out = shell_out("termux-battery-status", &[]);
+    if out.starts_with("command failed") || out.contains("failed to run") {
+        return "Battery status unavailable on this device.".to_string();
+    }
+    out
+}
+
+#[cfg(feature = "mcp")]
+fn action_tool_location() -> String {
+    let out = shell_out("termux-location", &["-p", "gps", "-r", "once"]);
+    if out.starts_with("command failed") || out.contains("failed to run") {
+        return "Location unavailable on this device.".to_string();
+    }
+    out
+}
+
+#[cfg(feature = "mcp")]
+fn action_tool_photo() -> String {
+    let out = shell_out("termux-camera-photo", &["-c", "0", "/sdcard/DCIM/lai-photo.jpg"]);
+    if out.starts_with("command failed") || out.contains("failed to run") {
+        return "Camera unavailable on this device.".to_string();
+    }
+    "Photo captured to /sdcard/DCIM/lai-photo.jpg".to_string()
+}
+
+#[cfg(feature = "mcp")]
+fn action_tool_clipboard_set(text: &str) -> String {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    match Command::new("termux-clipboard-set")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(mut child) => {
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            let _ = child.wait();
+            format!("Copied to clipboard: {text}")
+        }
+        Err(e) => format!("failed to copy: {e}"),
+    }
+}
+
+#[cfg(feature = "mcp")]
+fn action_tool_clipboard_get() -> String {
+    let out = shell_out("termux-clipboard-get", &[]);
+    if out.starts_with("command failed") || out.contains("failed to run") {
+        return "Clipboard unavailable on this device.".to_string();
+    }
+    format!("Clipboard: {out}")
+}
+
+#[cfg(feature = "mcp")]
+fn action_tool_send_message(contact: &str, message: &str) -> String {
+    let out = shell_out(
+        "termux-sms-send",
+        &["-n", contact, message],
+    );
+    if out.starts_with("command failed") || out.contains("failed to run") {
+        return format!("Could not send message to {contact} on this device.");
+    }
+    format!("Sent to {contact}: {message}")
+}
+
+#[cfg(feature = "mcp")]
+fn action_tool_call(contact: &str) -> String {
+    let out = shell_out("termux-telephony-call", &[contact]);
+    if out.starts_with("command failed") || out.contains("failed to run") {
+        return format!("Could not call {contact} on this device.");
+    }
+    format!("Calling {contact}")
 }
 
 /// v0.1 text companion entry point. Loads structured memory, applies any

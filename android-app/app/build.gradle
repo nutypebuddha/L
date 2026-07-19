@@ -1,0 +1,73 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'ai.lai.assistant'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "ai.lai.assistant"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+
+    sourceSets {
+        main {
+            assets.srcDirs = ['src/main/assets']
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.webkit:webkit:1.10.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+    implementation 'androidx.activity:activity-ktx:1.8.2'
+}
+
+// Guard: a frontend that cannot parse is a build failure, not a runtime
+// surprise. Blocks every assemble if a bundled .js fails `node --check` or an
+// HTML's <script> tags are unbalanced. (regression guard for the stray-`}`
+// app.js that shipped a non-booting APK twice.)
+tasks.register('checkAssets', Exec) {
+    group = 'verification'
+    description = 'Parse-check bundled JS/HTML assets'
+    workingDir = rootDir
+    environment('PATH', '/home/laverna/bin:/usr/bin:/bin')
+    commandLine('/usr/bin/bash', 'app/check-assets.sh', 'app/src/main/assets')
+}
+tasks.matching { it.name == 'preBuild' }.configureEach { dependsOn('checkAssets') }
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('Assets') }
+    .configureEach { dependsOn('checkAssets') }

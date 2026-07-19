@@ -73,16 +73,20 @@ llama-gguf = { version = "0.10", features = ["cpu"], optional = true }
 dirs = "5"
 sha2 = { version = "0.10", optional = true }
 
+# Assistant — voice-first phone assistant (optional)
+assistant = { path = "../assistant", optional = true }
+
 [dev-dependencies]
 tempfile = "3"
 pprof = { version = "0.14", features = ["criterion", "flamegraph"] }
 
 [features]
-default = []  # minimal: no heavy deps, fast builds
-mcp = ["websearch", "dep:rmcp", "dep:tokio", "athena/mcp"]
+default = ["assistant", "mcp", "websearch", "budget", "milp", "graph"]
+mcp = ["websearch", "dep:rmcp", "dep:tokio", "athena/mcp", "assistant/mcp"]
 websearch = ["dep:ureq"]
 budget = ["athena/budget"]
 bench = ["dep:criterion"]
 llm = ["athena/llm", "dep:llama-gguf", "dep:tokio", "dep:sha2"]
 milp = ["dep:good_lp"]
 graph = ["dep:petgraph"]
+assistant = ["dep:assistant", "dep:tokio"]

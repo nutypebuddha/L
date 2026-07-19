@@ -1,0 +1,2 @@
+#!/bin/sh
+exec qemu-x86_64 -L /tmp/x86_64-sysroot /tmp/android-sdk/ndk/25.0.8775105/toolchains/llvm/prebuilt/linux-x86_64/bin/clang-14 --target=armv7a-linux-androideabi24 -fuse-ld=bfd "$@"
