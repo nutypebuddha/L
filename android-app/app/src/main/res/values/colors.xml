@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="lai_bg">#FF06060C</color>
+    <color name="lai_surface">#FF111122</color>
+    <color name="lai_card">#FF181830</color>
+    <color name="lai_accent">#FF7C6AFF</color>
+    <color name="lai_accent_dim">#FF6C5CE7</color>
+    <color name="lai_text">#FFF0F0F8</color>
+    <color name="lai_text_dim">#FF9595B8</color>
+    <color name="lai_green">#FF34D399</color>
+    <color name="lai_orange">#FFFB923C</color>
+    <color name="lai_red">#FFF87171</color>
+    <color name="lai_blue">#FF60A5FA</color>
+    <color name="lai_purple">#FFA78BFA</color>
+    <color name="lai_cyan">#FF22D3EE</color>
+</resources>

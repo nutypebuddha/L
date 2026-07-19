@@ -30,6 +30,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.*
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity() {
@@ -39,13 +42,18 @@ class MainActivity : AppCompatActivity() {
     private var pendingPhotoCallback: ((String) -> Unit)? = null
     private var daemonLog: String = ""
     private var daemonStarted: Boolean = false
-    // The running `lai assistant --mcp` child process. executeCommand reads/writes
-    // its stdin/stdout directly — no localhost socket, no port, no auth surface.
     private var daemonProcess: java.lang.Process? = null
     private var daemonStdin: java.io.OutputStream? = null
     private var daemonStdout: java.io.BufferedReader? = null
     private val daemonLock = java.util.concurrent.locks.ReentrantLock()
     private var rpcId: Int = 0
+
+    companion object {
+        private const val TAG = "LaiMain"
+        private const val MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
+        private const val MODEL_NAME = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
+        private const val MODEL_EXPECTED_BYTES = 491400032L
+    }
 
     private val cameraLauncher = registerForActivityResult(
         ActivityResultContracts.TakePicturePreview()
@@ -65,7 +73,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Edge-to-edge display
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.isAppearanceLightStatusBars = false
@@ -74,24 +81,18 @@ class MainActivity : AppCompatActivity() {
         webView = WebView(this).apply {
             setContentView(this)
 
-            // Performance optimizations
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.allowFileAccess = true
             settings.mediaPlaybackRequiresUserGesture = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-
-            // Smooth scrolling and rendering
             settings.setSupportZoom(false)
             settings.builtInZoomControls = false
             settings.displayZoomControls = false
             settings.loadWithOverviewMode = true
             settings.useWideViewPort = true
-
-            // Hardware acceleration
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
-            // WebView client
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
                     return false
@@ -99,7 +100,6 @@ class MainActivity : AppCompatActivity() {
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
-                    // Inject CSS for smoother scrolling
                     view?.evaluateJavascript("""
                         (function() {
                             var style = document.createElement('style');
@@ -110,44 +110,120 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // WebChromeClient for console and permissions
             webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: PermissionRequest?) {
                     request?.grant(request.resources)
                 }
             }
 
-            // JavaScript interface
             addJavascriptInterface(LaiBridge(this@MainActivity), "LaiBridge")
-
-            // Load the app
             loadUrl("file:///android_asset/index.html")
-
-            // Enable overscroll glow effect
             overScrollMode = View.OVER_SCROLL_NEVER
         }
 
-        // Start LaiService foreground service
+        installLogcatFile()
         startLaiService()
 
-        // Start the bundled lai backend daemon (native lib, talks over localhost)
-        startLaiDaemon()
+        lifecycleScope.launch(Dispatchers.IO) {
+            ensureModelReady()
+            withContext(Dispatchers.Main) {
+                startLaiDaemon()
+            }
+        }
     }
+
+    // ── Model download ──────────────────────────────────────────
+
+    private fun modelFile(): File = File(filesDir, "models/$MODEL_NAME")
+
+    private fun modelReady(): Boolean {
+        val f = modelFile()
+        return f.exists() && f.length() >= MODEL_EXPECTED_BYTES - 1000
+    }
+
+    private suspend fun ensureModelReady() {
+        if (modelReady()) {
+            Log.i(TAG, "Model already present: ${modelFile().absolutePath}")
+            return
+        }
+        val dir = File(filesDir, "models"); dir.mkdirs()
+        val tmp = File(dir, "$MODEL_NAME.tmp")
+        notifyJs("model-progress", 0)
+
+        try {
+            val conn = URL(MODEL_URL).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 60_000
+            conn.connect()
+
+            val total = conn.contentLength.toLong().coerceAtLeast(1)
+            var downloaded = 0L
+            conn.inputStream.use { input ->
+                FileOutputStream(tmp).use { output ->
+                    val buf = ByteArray(64 * 1024)
+                    var read: Int
+                    while (input.read(buf).also { read = it } != -1) {
+                        output.write(buf, 0, read)
+                        downloaded += read
+                        val pct = ((downloaded * 100) / total).toInt().coerceIn(0, 99)
+                        if (pct % 5 == 0) {
+                            notifyJs("model-progress", pct)
+                            Log.d(TAG, "Model download: $pct% ($downloaded/$total)")
+                        }
+                    }
+                }
+            }
+
+            if (tmp.length() < 1_000_000) {
+                Log.e(TAG, "Download too small (${tmp.length()} bytes) — likely error page")
+                tmp.delete()
+                notifyJs("model-error", 0)
+                return
+            }
+
+            tmp.renameTo(modelFile())
+            Log.i(TAG, "Model ready: ${modelFile().absolutePath} (${modelFile().length()} bytes)")
+            notifyJs("model-progress", 100)
+        } catch (e: Exception) {
+            Log.e(TAG, "Model download failed: ${e.message}")
+            tmp.delete()
+            notifyJs("model-error", 0)
+        }
+    }
+
+    private fun notifyJs(event: String, value: Int) {
+        Handler(Looper.getMainLooper()).post {
+            webView.evaluateJavascript(
+                "window.dispatchEvent(new CustomEvent('lai-model', {detail:{event:'$event',value:$value}}))",
+                null
+            )
+        }
+    }
+
+    // ── Logcat to file ──────────────────────────────────────────
+
+    private fun installLogcatFile() {
+        try {
+            val logFile = File(filesDir, "lai.log")
+            Runtime.getRuntime().exec(arrayOf("logcat", "-f", logFile.absolutePath, "-s", "LaiDaemon:LaiMain:*"))
+            Log.i(TAG, "Logcat writing to ${logFile.absolutePath}")
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not start logcat file capture: ${e.message}")
+        }
+    }
+
+    // ── Daemon ──────────────────────────────────────────────────
 
     private fun startLaiDaemon() {
         val libDir = File(applicationInfo.nativeLibraryDir)
         val src = File(libDir, "liblai.so")
         if (!src.exists()) {
-            Log.e("LaiDaemon", "liblai.so not found in $libDir")
+            Log.e(TAG, "liblai.so not found in $libDir")
             daemonStarted = false
-            daemonLog = "liblai.so not found in $libDir (extractNativeLibs missing?)"
+            daemonLog = "liblai.so not found in $libDir"
             return
         }
 
-        // Prefer exec'ing the extracted lib in place. Because
-        // extractNativeLibs="true", nativeLibraryDir/liblai.so is a real on-disk
-        // file that keeps its exec bit from the APK — and nativeLibraryDir is the
-        // one path Android actually allows an app to exec from.
         val candidates = listOf(src.absolutePath, run {
             val execDir = File(filesDir, "bin"); execDir.mkdirs()
             val bin = File(execDir, "lai")
@@ -166,21 +242,17 @@ class MainActivity : AppCompatActivity() {
                         val env = environment()
                         env["HOME"] = filesDir.absolutePath
                         env["TMPDIR"] = cacheDir.absolutePath
-                        // Point the assistant's local-LLM client at the on-device
-                        // model server (ollama serves OpenAI-compatible /v1 at
-                        // 11434). When the server is up, conversational replies
-                        // go through it; when it's down, the daemon silently
-                        // falls back to the deterministic reasoning engine.
+                        if (modelReady()) {
+                            env["LAVERNA_LLAMA_MODEL"] = modelFile().absolutePath
+                        }
                         env["LAI_LLM_BASE_URL"] = "http://127.0.0.1:11434/v1"
-                        // ollama rejects unknown model names, so this MUST match
-                        // a pulled model. Change to whatever you `ollama pull`.
                         env["LAI_LLM_MODEL"] = "qwen2.5:0.5b"
                     }
                     .start()
                 launchedFrom = path
                 break
             } catch (e: Exception) {
-                Log.e("LaiDaemon", "exec failed for $path: ${e.message}")
+                Log.e(TAG, "exec failed for $path: ${e.message}")
                 sb.appendLine("exec failed: $path -> ${e.javaClass.simpleName}: ${e.message}")
             }
         }
@@ -191,8 +263,6 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // Stderr goes to logcat for diagnostics; stdout is the MCP JSON-RPC
-        // channel — do NOT merge them.
         Thread {
             process.errorStream.bufferedReader().forEachLine { line ->
                 Log.d("LaiDaemon", line)
@@ -203,16 +273,13 @@ class MainActivity : AppCompatActivity() {
         daemonStdin = process.outputStream
         daemonStdout = process.inputStream.bufferedReader()
 
-        // MCP handshake: initialize → notifications/initialized. The server
-        // writes its capabilities; we discard them — the first tools/call will
-        // prove the channel is live.
         try {
             rpcId = 1
-            val initResp = sendRpcSync("initialize", """{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"lai-android","version":"1"}}""")
-            Log.d("LaiDaemon", "initialize: $initResp")
+            val initResp = sendRpcSync("initialize", """{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"lai-android","version":"1.1.0"}}""")
+            Log.d(TAG, "MCP initialize: $initResp")
             sendRpcSync(null, """{"method":"notifications/initialized"}""")
         } catch (e: Exception) {
-            Log.e("LaiDaemon", "MCP handshake failed: ${e.message}")
+            Log.e(TAG, "MCP handshake failed: ${e.message}")
             sb.appendLine("MCP handshake failed: ${e.message}")
             daemonStarted = false
             daemonLog = "launch from $launchedFrom failed handshake:\n$sb"
@@ -221,13 +288,9 @@ class MainActivity : AppCompatActivity() {
 
         daemonStarted = true
         daemonLog = "launched from $launchedFrom (stdio MCP)"
+        Log.i(TAG, "Daemon ready: $daemonLog")
     }
 
-    /**
-     * Send a JSON-RPC request over the daemon's stdin and read one response
-     * line from stdout.  If [method] is null the request is treated as a
-     * notification (no response expected).
-     */
     private fun sendRpcSync(method: String?, params: String): String {
         daemonLock.lock()
         try {
@@ -256,6 +319,7 @@ class MainActivity : AppCompatActivity() {
             append("log=$daemonLog\n")
             val alive = try { daemonProcess?.exitValue(); false } catch (_: IllegalThreadStateException) { true }
             append("alive=$alive\n")
+            append("model=${if (modelReady()) modelFile().absolutePath else "none"}\n")
         }
     }
 
@@ -268,7 +332,6 @@ class MainActivity : AppCompatActivity() {
                 startService(serviceIntent)
             }
         } catch (e: Exception) {
-            // Service start can fail on some devices — don't crash
             e.printStackTrace()
         }
     }
@@ -296,10 +359,8 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun executeCommand(command: String): String {
-            // Drive the daemon over its stdin/stdout MCP pipe — no localhost
-            // socket, no port, no auth surface.
             if (!daemonStarted) {
-                return "Error: daemon not started"
+                return "Error: daemon not started — model may still be downloading"
             }
             return try {
                 val raw = command
@@ -313,16 +374,13 @@ class MainActivity : AppCompatActivity() {
                     .replace("\\\\\"", "\"")
                 val params = """{"name":"chat","arguments":{"text":"${text.replace("\\", "\\\\").replace("\"", "\\\"")}"}}"""
                 val rpcResp = sendRpcSync("tools/call", params)
-                // Extract the AssistantResponse JSON from the MCP content array.
-                // MCP response shape:
-                //   {"jsonrpc":"2.0","id":N,"result":{"content":[{"type":"text","text":"..."}],"isError":false}}
                 val contentText = try {
                     val root = org.json.JSONObject(rpcResp)
                     val result = root.getJSONObject("result")
                     val content = result.getJSONArray("content")
                     content.getJSONObject(0).getString("text")
                 } catch (_: Exception) {
-                    rpcResp // fallback: return raw
+                    rpcResp
                 }
                 contentText
             } catch (e: Exception) {
@@ -338,7 +396,9 @@ class MainActivity : AppCompatActivity() {
                 append("abi=${Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"}\n")
                 append("android=${Build.VERSION.RELEASE}\n")
                 append("cores=${Runtime.getRuntime().availableProcessors()}\n")
-                append("mem=${(Runtime.getRuntime().maxMemory() / 1024 / 1024).toInt()}MB")
+                append("mem=${(Runtime.getRuntime().maxMemory() / 1024 / 1024).toInt()}MB\n")
+                append("modelReady=${modelReady()}\n")
+                append("modelPath=${if (modelReady()) modelFile().absolutePath else "downloading..."}")
             }
         }
 
@@ -372,11 +432,9 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun requestPermission(permission: String): Boolean {
-            // Check first
             val result = ContextCompat.checkSelfPermission(ctx, permission)
             if (result == PackageManager.PERMISSION_GRANTED) return true
 
-            // Request on main thread
             val granted = CompletableDeferred<Boolean>()
             Handler(Looper.getMainLooper()).post {
                 pendingPermissionCallback = { granted.complete(it) }
@@ -426,12 +484,10 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun getHistory(): String {
             return try {
-                // Read from Rust assistant data dir (unified history)
-                val rustDir = File(System.getenv("HOME") ?: "/home/laverna", ".lai/assistant")
+                val rustDir = File(filesDir, ".lai/assistant")
                 val file = File(rustDir, "history.json")
                 if (file.exists()) file.readText() else "[]"
             } catch (e: Exception) {
-                // Fallback to local storage
                 try {
                     val file = File(ctx.filesDir, "lai_history.json")
                     if (file.exists()) file.readText() else "[]"
@@ -442,14 +498,12 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface
         fun saveHistory(json: String) {
             try {
-                // Write to Rust assistant data dir (unified history)
-                val rustDir = File(System.getenv("HOME") ?: "/home/laverna", ".lai/assistant")
+                val rustDir = File(filesDir, ".lai/assistant")
                 rustDir.mkdirs()
                 val file = File(rustDir, "history.json")
                 file.writeText(json)
             } catch (_: Exception) {}
             try {
-                // Also keep local backup
                 val file = File(ctx.filesDir, "lai_history.json")
                 file.writeText(json)
             } catch (_: Exception) {}

@@ -6,3 +6,6 @@ bridge/node_modules
 bin/models/*.gguf
 .DS_Store
 android-app/app/src/main/jniLibs/
+android-app/lai-release.keystore
+android-app/app/build/
+android-app/.gradle/
