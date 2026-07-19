@@ -17,6 +17,12 @@ pub struct Registry {
     handlers: HashMap<String, String>,
 }
 
+impl Default for Registry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Registry {
     pub fn new() -> Self {
         let mut handlers = HashMap::new();

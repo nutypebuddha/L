@@ -3,11 +3,11 @@ pub mod agent;
 pub mod apps;
 pub mod engines;
 pub mod http;
-#[cfg(feature = "mcp")]
-pub mod mcp_server;
 pub mod intent;
 pub mod llm;
 pub mod mcp_client;
+#[cfg(feature = "mcp")]
+pub mod mcp_server;
 pub mod memory;
 pub mod multimodal;
 pub mod personality;
@@ -137,7 +137,7 @@ impl Assistant {
                 if let Some(cmd) = text_lower.strip_prefix(&wake_lower) {
                     let cmd = cmd
                         .trim()
-                        .trim_start_matches(|c: char| c == ',' || c == ':')
+                        .trim_start_matches([',', ':'])
                         .trim();
                     if cmd.is_empty() {
                         toast(personality::WAKE_YES).await;
@@ -377,8 +377,7 @@ impl Assistant {
                 if let Some(answer) = llm::Llm.answer(text, "") {
                     return answer;
                 }
-                let result = (self.engines.solve)(text.clone());
-                format!("{result}")
+                (self.engines.solve)(text.clone())
             }
             Intent::Conversational { text } => {
                 let lowered = text.to_lowercase();
@@ -407,9 +406,9 @@ impl Assistant {
                 let result = (self.engines.solve)(text.clone());
                 let trimmed = result.trim();
                 if trimmed.is_empty() {
-                    format!("I don't have a verified answer for that yet. Try: \"solve 2+2\", \"validate water is H2O\", \"search formulas for gravity\", or \"what's my battery\".")
+                    "I don't have a verified answer for that yet. Try: \"solve 2+2\", \"validate water is H2O\", \"search formulas for gravity\", or \"what's my battery\".".to_string()
                 } else {
-                    format!("{trimmed}")
+                    trimmed.to_string()
                 }
             }
             Intent::Goodbye => {

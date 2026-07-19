@@ -308,10 +308,7 @@ async fn verify_before_answer(
 
 /// Convenience: run the agent and swallow errors into `None`.
 pub async fn run_opt(goal: &str, memory_block: &str) -> Option<String> {
-    match run(goal, memory_block).await {
-        Some(a) => Some(a),
-        None => None,
-    }
+    run(goal, memory_block).await
 }
 
 #[allow(dead_code)]

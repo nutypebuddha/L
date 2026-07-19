@@ -48,7 +48,9 @@ impl From<AthenaInferenceError> for LaiError {
             AthenaInferenceError::ConfigError(msg) => InferenceError::Failed(msg),
             AthenaInferenceError::HealthCheckFailed(msg) => InferenceError::Failed(msg),
             AthenaInferenceError::NotSupported(msg) => InferenceError::Failed(msg),
-            AthenaInferenceError::Other(_) => InferenceError::Failed("inference backend error".into()),
+            AthenaInferenceError::Other(_) => {
+                InferenceError::Failed("inference backend error".into())
+            }
         })
     }
 }

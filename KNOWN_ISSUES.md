@@ -107,4 +107,24 @@ lai validate "5 >= 3"        → passed: true (was: false — "Equation does not
 ```
 **Detail:** Two independent gaps in `proof/src/compute/parser.rs` and `proof/src/validation/math_gate.rs`: (1) Tanto lexer had no relational token variants — `<`/`>` caused early termination, returning a truncated prefix as the full result. (2) `math_gate.rs`/`verifier.rs` split on the first `=` to check equation balance, which matched the `=` inside `<=`/`>=`/`!=`. Fixed by adding `Lt`/`Gt`/`Le`/`Ge`/`Ne` tokens with two-char lookahead, a comparison precedence level with epsilon tolerance, full-consumption checks in `eval_math`/`parse_math`, and routing relational expressions through Tanto before the `=` split in both `math_gate.rs` and `verify_arithmetic`. 625/625 tests pass, 0 regressions.
 
+---
+
+### [T56] assistant tests reference `termux`-gated `Intent` variants without gating
+
+**Status:** released (v0.4.2)
+**Affects:** `cargo test --workspace` (default features), `cargo fmt --check`, `cargo clippy --all-targets`
+**Does not affect:** runtime behavior, the `termux` build, or any shipped binary
+**Repro:** `cargo test --workspace` → `error[E0599]` ×3 in `assistant/src/intent/nlp.rs:909,922,930` (`SendMessage`, `Call`, `BatteryStatus` not found).
+**Detail:** The `termux` feature gate was applied to the `Intent` enum variants and classifier branches (with a capability-honesty doc comment) but the `sms_basic`, `call_basic`, and `battery` unit tests were not gated to match. Consequence: all three dev-cycle gates (fmt, clippy, test) went red on default features — the last assistant batch landed without the gates running. Fix: added `#[cfg(feature = "termux")]` to the three tests and ran `cargo fmt --all`. Process fix: AGENTS.md now lists `assistant` in the workspace table and adds a `--features termux` CI leg so both configurations stay compile-clean. Also pinned the corpus size (214 entities / 528 formulas) with assert-eq tests so README stats cannot drift.
+
+---
+
+### [MINOR] Corpus size stat drift
+
+**Status:** released (v0.4.2)
+**Affects:** README "Embedded corpus" line (claimed 1,606+ facts)
+**Does not affect:** runtime, parsing, or query resolution
+**Repro:** `grep -c '\[\[entity\]\]' proof/entities/` → 214; `grep -c '\[\[formula\]\]' proof/formulas/` → 528.
+**Detail:** The "1,606+ facts" figure was unsupported (the corpus is 214 entities + 528 formulas). Corrected the README and added `assert_eq!(len, 214)` / `assert_eq!(len, 528)` to the existing load-all tests in `proof/src/entity/mod.rs` and `proof/src/formula/registry.rs` so the documented counts are enforced.
+
 

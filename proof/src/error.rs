@@ -20,9 +20,7 @@ impl From<TimezoneError> for LaiError {
 
 impl From<HouseSystemError> for LaiError {
     fn from(e: HouseSystemError) -> Self {
-        let lat = match e {
-            HouseSystemError::PlacidusUnsupportedAtLatitude(lat) => lat,
-        };
+        let HouseSystemError::PlacidusUnsupportedAtLatitude(lat) = e;
         LaiError::Validation(ValidationError::OutOfRange {
             field: "latitude".to_string(),
             value: lat,

@@ -11,10 +11,16 @@ pub async fn serve(assistant: Arc<Assistant>, port: u16) -> anyhow::Result<()> {
     // it gets 401. This closes the unauthenticated localhost listener: any
     // other app holding INTERNET could otherwise POST to it. When unset, the
     // daemon stays open (dev/host use).
-    let token: Option<String> = std::env::var("LAI_DAEMON_TOKEN").ok().filter(|s| !s.is_empty());
+    let token: Option<String> = std::env::var("LAI_DAEMON_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty());
     eprintln!(
         "[assistant] HTTP server listening on http://{addr}{}",
-        if token.is_some() { " (token required)" } else { "" }
+        if token.is_some() {
+            " (token required)"
+        } else {
+            ""
+        }
     );
     eprintln!("[assistant] POST /chat with JSON body: {{\"text\":\"hello\"}}");
 
@@ -41,7 +47,7 @@ async fn handle_connection(
     // Read HTTP request line
     let mut request_line = String::new();
     reader.read_line(&mut request_line).await?;
-    let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+    let parts: Vec<&str> = request_line.split_whitespace().collect();
     let method = parts.first().copied().unwrap_or("");
     let path = parts.get(1).copied().unwrap_or("/");
 

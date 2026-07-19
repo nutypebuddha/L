@@ -48,7 +48,7 @@ That is a more robust long-term direction than `LLM → Truth`.
 
 - **Deterministic reasoning** — NAND-to-verify cascade; no stochastic generation.
 - **Per-token validation (Gate)** — 7 gates: math, logic, fact, fallacy, bias, confidence, structure.
-- **Embedded corpus** — 1,606+ facts / 528 formulas, content-addressed, compiled in.
+- **Embedded corpus** — 214 entities and 528 formulas (proof corpus), content-addressed, compiled in. Athena adds 350 more formulas across its wheel.
 - **Machine-checkable proofs** — every answer carries a proof object or a refusal.
 - **Universal bridge** — one MCP endpoint validates any chatbot's output.
 - **Offline-first** — zero network at runtime. No model? It answers from the verified corpus and tells you it did.

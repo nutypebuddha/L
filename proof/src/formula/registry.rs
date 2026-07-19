@@ -1094,6 +1094,12 @@ mod tests {
             "Should have loaded many formulas, got {}",
             r.len()
         );
+        // Pin the corpus size so README/docs stats cannot silently drift.
+        assert_eq!(
+            r.len(),
+            528,
+            "formula corpus size changed — update README/docs if intentional"
+        );
         // Spot-check a few known formulas
         assert!(r.get("add").is_some(), "Missing 'add' formula");
         assert!(r.get("nand").is_some(), "Missing 'nand' formula");

@@ -132,9 +132,9 @@ fn tokenize(input: &str) -> Result<Vec<Token>, NandExprError> {
                     break;
                 }
             }
-            let value: f64 = num.parse().map_err(|e| {
-                NandExprError::ParseError(format!("invalid number '{num}': {e}"))
-            })?;
+            let value: f64 = num
+                .parse()
+                .map_err(|e| NandExprError::ParseError(format!("invalid number '{num}': {e}")))?;
             tokens.push(Token::Number(value));
         } else if c == '(' {
             tokens.push(Token::LParen);
@@ -233,26 +233,17 @@ impl Parser {
                             Ok(ExprNode::Nand(Box::new(nand.clone()), Box::new(nand)))
                         }
                         "or" => {
-                            let na =
-                                ExprNode::Nand(Box::new(left.clone()), Box::new(left.clone()));
-                            let nb = ExprNode::Nand(
-                                Box::new(right.clone()),
-                                Box::new(right.clone()),
-                            );
+                            let na = ExprNode::Nand(Box::new(left.clone()), Box::new(left.clone()));
+                            let nb =
+                                ExprNode::Nand(Box::new(right.clone()), Box::new(right.clone()));
                             Ok(ExprNode::Nand(Box::new(na), Box::new(nb)))
                         }
                         "nor" => {
-                            let na =
-                                ExprNode::Nand(Box::new(left.clone()), Box::new(left.clone()));
-                            let nb = ExprNode::Nand(
-                                Box::new(right.clone()),
-                                Box::new(right.clone()),
-                            );
+                            let na = ExprNode::Nand(Box::new(left.clone()), Box::new(left.clone()));
+                            let nb =
+                                ExprNode::Nand(Box::new(right.clone()), Box::new(right.clone()));
                             let or_node = ExprNode::Nand(Box::new(na), Box::new(nb));
-                            Ok(ExprNode::Nand(
-                                Box::new(or_node.clone()),
-                                Box::new(or_node),
-                            ))
+                            Ok(ExprNode::Nand(Box::new(or_node.clone()), Box::new(or_node)))
                         }
                         "xor" => Self::build_xor(left, right),
                         "xnor" => {
@@ -263,16 +254,10 @@ impl Parser {
                             ))
                         }
                         "implies" => {
-                            let na = ExprNode::Nand(
-                                Box::new(left.clone()),
-                                Box::new(left.clone()),
-                            );
-                            let nna =
-                                ExprNode::Nand(Box::new(na.clone()), Box::new(na));
-                            let nb = ExprNode::Nand(
-                                Box::new(right.clone()),
-                                Box::new(right.clone()),
-                            );
+                            let na = ExprNode::Nand(Box::new(left.clone()), Box::new(left.clone()));
+                            let nna = ExprNode::Nand(Box::new(na.clone()), Box::new(na));
+                            let nb =
+                                ExprNode::Nand(Box::new(right.clone()), Box::new(right.clone()));
                             Ok(ExprNode::Nand(Box::new(nna), Box::new(nb)))
                         }
                         _ => Err(NandExprError::ParseError(format!("unknown gate: {ident}"))),
@@ -308,10 +293,7 @@ impl Parser {
 
         let not_anb_not = ExprNode::Nand(Box::new(anb_not.clone()), Box::new(anb_not));
         let not_nab_not = ExprNode::Nand(Box::new(nab_not.clone()), Box::new(nab_not));
-        Ok(ExprNode::Nand(
-            Box::new(not_anb_not),
-            Box::new(not_nab_not),
-        ))
+        Ok(ExprNode::Nand(Box::new(not_anb_not), Box::new(not_nab_not)))
     }
 }
 

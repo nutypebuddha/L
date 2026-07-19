@@ -1339,11 +1339,25 @@ fn main() {
             }
         }
         #[cfg(feature = "assistant")]
-        Commands::Assistant { voice, daemon, stop, wake_word, text, format, http, mcp, port } => {
+        Commands::Assistant {
+            voice,
+            daemon,
+            stop,
+            wake_word,
+            text,
+            format,
+            http,
+            mcp,
+            port,
+        } => {
             // Handle --stop: kill the running daemon
             if stop {
                 let pid_file = std::env::var("HOME")
-                    .map(|h| std::path::PathBuf::from(h).join(".lai").join("assistant.pid"))
+                    .map(|h| {
+                        std::path::PathBuf::from(h)
+                            .join(".lai")
+                            .join("assistant.pid")
+                    })
                     .unwrap_or_else(|_| std::path::PathBuf::from("/tmp/lai-assistant.pid"));
                 if let Ok(contents) = std::fs::read_to_string(&pid_file) {
                     if let Ok(pid) = contents.trim().parse::<u32>() {
@@ -1362,8 +1376,8 @@ fn main() {
                 return;
             }
 
-                let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
-                rt.block_on(async {
+            let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+            rt.block_on(async {
                     let engines = build_assistant_engines();
                     let assist = assistant::Assistant::with_config(engines, &wake_word)
                         .await
@@ -1477,9 +1491,7 @@ fn build_assistant_engines() -> assistant::engines::Engines {
         solve: Box::new(|q| run_lai(&["solve", "--query", &q])),
 
         // ── Gate (validation) ──────────────────────────────
-        validate: Box::new(|(text, context)| {
-            run_lai(&["gate", "validate", &text, &context])
-        }),
+        validate: Box::new(|(text, context)| run_lai(&["gate", "validate", &text, &context])),
         score: Box::new(|text| run_lai(&["gate", "score", &text])),
         fix: Box::new(|(text, context)| run_lai(&["gate", "fix", &text, &context])),
 
@@ -4590,7 +4602,9 @@ fn handle_jsonrpc(
                 "send_message" => {
                     let contact = args["contact"].as_str().unwrap_or("");
                     let message = args["message"].as_str().unwrap_or("");
-                    Ok(ToolOutput::text_only(action_tool_send_message(contact, message)))
+                    Ok(ToolOutput::text_only(action_tool_send_message(
+                        contact, message,
+                    )))
                 }
                 "call_contact" => {
                     let contact = args["contact"].as_str().unwrap_or("");
@@ -5151,9 +5165,7 @@ fn companion_tool(
 fn shell_out(cmd: &str, args: &[&str]) -> String {
     use std::process::Command;
     match Command::new(cmd).args(args).output() {
-        Ok(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout).trim().to_string()
-        }
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         Ok(out) => {
             let err = String::from_utf8_lossy(&out.stderr);
             format!("command failed: {err}")
@@ -5176,12 +5188,22 @@ fn action_tool_timer(seconds: i64, label: &str) -> String {
     let _ = shell_out(
         "termux-notification",
         &[
-            "--id", "lai-timer",
-            "--title", "Timer",
-            "--content", &content,
+            "--id",
+            "lai-timer",
+            "--title",
+            "Timer",
+            "--content",
+            &content,
         ],
     );
-    format!("Timer set for {seconds} seconds{}", if label.is_empty() { String::new() } else { format!(" ({label})") })
+    format!(
+        "Timer set for {seconds} seconds{}",
+        if label.is_empty() {
+            String::new()
+        } else {
+            format!(" ({label})")
+        }
+    )
 }
 
 #[cfg(feature = "mcp")]
@@ -5189,11 +5211,15 @@ fn action_tool_reminder(text: &str, when: &str) -> String {
     let _ = shell_out(
         "termux-notification",
         &[
-            "--id", "lai-reminder",
-            "--title", "Reminder",
-            "--content", text,
+            "--id",
+            "lai-reminder",
+            "--title",
+            "Reminder",
+            "--content",
+            text,
             "--sound",
-            "--vibrate", "200,400,200",
+            "--vibrate",
+            "200,400,200",
         ],
     );
     format!("Reminder set: \"{text}\" for {when}")
@@ -5219,7 +5245,10 @@ fn action_tool_location() -> String {
 
 #[cfg(feature = "mcp")]
 fn action_tool_photo() -> String {
-    let out = shell_out("termux-camera-photo", &["-c", "0", "/sdcard/DCIM/lai-photo.jpg"]);
+    let out = shell_out(
+        "termux-camera-photo",
+        &["-c", "0", "/sdcard/DCIM/lai-photo.jpg"],
+    );
     if out.starts_with("command failed") || out.contains("failed to run") {
         return "Camera unavailable on this device.".to_string();
     }
@@ -5258,10 +5287,7 @@ fn action_tool_clipboard_get() -> String {
 
 #[cfg(feature = "mcp")]
 fn action_tool_send_message(contact: &str, message: &str) -> String {
-    let out = shell_out(
-        "termux-sms-send",
-        &["-n", contact, message],
-    );
+    let out = shell_out("termux-sms-send", &["-n", contact, message]);
     if out.starts_with("command failed") || out.contains("failed to run") {
         return format!("Could not send message to {contact} on this device.");
     }

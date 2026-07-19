@@ -11,8 +11,9 @@ functions. Public mark: **L.ai** (tagline: *Verify, don't trust*).
 | L.ai · Gate | `gate/` | `lai-gate` (lib: `cid`) | — | Per-token validation. WASM target in `gate/cid-wasm/`. |
 | L.ai · Athena | `athena/` | `athena` | `lai athena` | Relational intelligence. Merged into unified binary. |
 | L.ai · Bridge | `bridge/` | — | — | Node/TypeScript. Not a Cargo member. |
+| L.ai · Assistant | `assistant/` | `assistant` | — | Voice-first on-device assistant; Termux actions behind `termux` feature. Optional dep of `laverna`. |
 
-Root `Cargo.toml` is a virtual workspace: `[proof, gate, athena, proof/laverna-wasm, gate/cid-wasm]`.
+Root `Cargo.toml` is a virtual workspace: `[lai-core, proof, gate, athena, proof/laverna-wasm, gate/cid-wasm, assistant]`.
 
 ## Unified binary
 
@@ -30,7 +31,17 @@ is `athena/src/main.rs.standalone` (not compiled by default).
 ```bash
 cargo fmt -- --check                                          # 1. formatting
 cargo clippy --workspace --all-targets -- -D warnings         # 2. lints (must pass)
-cargo test --workspace                                        # 3. tests
+cargo test --workspace                                        # 3. tests (default features)
+```
+
+The `assistant` crate's SMS/call/battery intents and their tests are gated
+behind the `termux` feature. Both configurations must stay compile-clean, so
+CI also runs:
+
+```bash
+cargo clippy -p assistant --features termux --all-targets -- -D warnings
+cargo test  -p assistant --features termux
+cargo fmt   -p assistant -- --check
 ```
 
 **Proof-specific CI gate** (feature-gated, stricter):

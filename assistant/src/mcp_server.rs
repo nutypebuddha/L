@@ -37,7 +37,9 @@ pub fn serve_stdio(assist: std::sync::Arc<Assistant>) {
                 if line.is_empty() {
                     continue;
                 }
-                if let Some(resp) = tokio::task::block_in_place(|| handle.block_on(handle_jsonrpc(line, &assist))) {
+                if let Some(resp) =
+                    tokio::task::block_in_place(|| handle.block_on(handle_jsonrpc(line, &assist)))
+                {
                     let resp_str = serde_json::to_string(&resp).unwrap_or_default();
                     let _ = writeln!(writer, "{resp_str}");
                     let _ = writer.flush();
@@ -107,7 +109,10 @@ async fn handle_jsonrpc(line: &str, assist: &std::sync::Arc<Assistant>) -> Optio
                     "error": { "code": -32601, "message": format!("unknown tool: {name}") }
                 }));
             }
-            let text = params["arguments"]["text"].as_str().unwrap_or("").to_string();
+            let text = params["arguments"]["text"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
             let result = assist.process_text_json(&text).await;
             match result {
                 Ok(resp) => Some(serde_json::json!({

@@ -242,7 +242,7 @@ fn verify_arithmetic(input: &str, context: &str, report: &mut DiagnosticReport) 
     // the '=' inside <=, >= and misparse the operator).
     if input.contains('<') || input.contains('>') || input.contains("!=") {
         match crate::compute::evaluate_pipeline(input, &env) {
-            Some(val) if val == 0.0 => {
+            Some(0.0) => {
                 report.push(
                     Diagnostic::error(
                         DiagnosticGate::Math,

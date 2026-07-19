@@ -109,19 +109,17 @@ fn mcp_validate_agrees_with_cli_validate() {
     }
 
     let exprs: Vec<&str> = MUST_FAIL.iter().chain(MUST_PASS.iter()).copied().collect();
-    let mut id = 2;
-    for expr in &exprs {
+    for (id, expr) in (2..).zip(exprs.iter()) {
         let text = responses
             .get(&id)
             .unwrap_or_else(|| panic!("no MCP response for validate({expr:?})"));
         let passed = extract_passed(text)
             .unwrap_or_else(|| panic!("no 'passed:' in MCP response for {expr:?}: {text}"));
-        let expected = MUST_FAIL.contains(expr) == false; // false for MUST_FAIL, true for MUST_PASS
+        let expected = !MUST_FAIL.contains(expr); // false for MUST_FAIL, true for MUST_PASS
         assert_eq!(
             passed, expected,
             "MCP validate diverged from CLI on {expr:?}: got passed={passed}, expected {expected}"
         );
-        id += 1;
     }
 }
 

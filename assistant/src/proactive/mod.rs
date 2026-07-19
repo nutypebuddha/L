@@ -8,6 +8,7 @@
 /// - Device state: low battery warnings, charging state
 use chrono::{Local, Timelike};
 
+#[derive(Default)]
 pub struct ProactiveEngine {
     last_suggestion: Option<chrono::DateTime<Local>>,
     cooldown_minutes: i64,

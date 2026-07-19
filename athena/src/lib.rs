@@ -23,12 +23,12 @@
 pub mod asauchi;
 pub mod astrology;
 pub mod bankai;
-pub mod error;
 #[cfg(feature = "budget")]
 pub mod budget;
 pub mod descent;
 pub mod entity;
 pub mod ephemeris;
+pub mod error;
 pub mod formula;
 pub mod gates;
 pub mod gyro;

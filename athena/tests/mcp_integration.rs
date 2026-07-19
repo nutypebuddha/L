@@ -46,7 +46,7 @@ fn setup_mcp() -> AthenaMCP {
     #[cfg(feature = "budget")]
     {
         let budget = TokenBudget::new(2000, 1000, 3000);
-        return AthenaMCP::with_context(registry, entities, budget);
+        AthenaMCP::with_context(registry, entities, budget)
     }
     #[cfg(not(feature = "budget"))]
     {

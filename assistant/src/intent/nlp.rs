@@ -269,7 +269,7 @@ fn parse_eval(lower: &str, original: &str) -> Option<Intent> {
         if let Some(rest) = lower.strip_prefix(trigger) {
             let expr = rest
                 .trim()
-                .trim_start_matches(|c: char| c == ':' || c == ' ');
+                .trim_start_matches([':', ' ']);
             if !expr.is_empty() && looks_like_math(expr) {
                 return Some(Intent::Eval {
                     expression: expr.to_string(),
@@ -902,6 +902,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "termux")]
     #[test]
     fn sms_basic() {
         let intent = classify("text John hello");
@@ -914,6 +915,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "termux")]
     #[test]
     fn call_basic() {
         let intent = classify("call Sarah");
@@ -925,6 +927,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "termux")]
     #[test]
     fn battery() {
         assert_eq!(classify("what's my battery"), Intent::BatteryStatus);

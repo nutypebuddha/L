@@ -28,10 +28,8 @@ struct EvalCacheKey {
 #[cfg(feature = "memo")]
 fn build_cache_key(formula: &Formula, args: &HashMap<String, f64>) -> EvalCacheKey {
     // Encode f64 bits (deterministic, no NaN/inf keys since eval rejects them).
-    let mut pairs: Vec<(String, u64)> = args
-        .iter()
-        .map(|(k, v)| (k.clone(), v.to_bits()))
-        .collect();
+    let mut pairs: Vec<(String, u64)> =
+        args.iter().map(|(k, v)| (k.clone(), v.to_bits())).collect();
     pairs.sort();
     EvalCacheKey {
         formula_id: formula.id.clone(),

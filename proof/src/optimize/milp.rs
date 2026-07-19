@@ -26,11 +26,8 @@ pub fn solve_milp(schema: &Schema) -> Result<Allocation, String> {
     validate_milp_feasible(schema)?;
 
     // Precompute id → &Item lookup to avoid O(items) linear scans in hot loops.
-    let item_by_id: HashMap<&str, &Item> = schema
-        .items
-        .iter()
-        .map(|i| (i.id.as_str(), i))
-        .collect();
+    let item_by_id: HashMap<&str, &Item> =
+        schema.items.iter().map(|i| (i.id.as_str(), i)).collect();
 
     let mut vars = variables! {};
 

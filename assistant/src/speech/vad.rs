@@ -1,5 +1,6 @@
 /// Simple energy-based Voice Activity Detector.
 /// No external model needed — just checks audio RMS energy.
+#[derive(Default)]
 pub struct VadEngine {
     threshold: f64,
     silence_count: usize,

@@ -54,7 +54,7 @@ pub async fn cancel_timer(label: Option<&str>) -> String {
 
     // Cancel all
     let count = timers.len();
-    for (_, handle) in timers.iter() {
+    for handle in timers.values() {
         handle.abort();
     }
     format!("Cancelled {count} timer(s)")

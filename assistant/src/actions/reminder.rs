@@ -14,7 +14,7 @@ pub async fn set_reminder(text: &str, when: &str) -> String {
             "--vibrate",
             "200,400,200",
             "--on-delete",
-            &format!("termux-notification-remove lai-reminder"),
+            "termux-notification-remove lai-reminder",
         ],
     )
     .await;

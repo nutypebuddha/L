@@ -1755,6 +1755,12 @@ tags = ["anime", "gundam"]
             "Should have loaded many seed entities, got {}",
             seeds.len()
         );
+        // Pin the corpus size so README/docs stats cannot silently drift.
+        assert_eq!(
+            seeds.len(),
+            214,
+            "entity corpus size changed — update README/docs if intentional"
+        );
         // Spot-check a few known entities
         assert!(
             reg.get_seed("cognitive_flexibility").is_some(),
