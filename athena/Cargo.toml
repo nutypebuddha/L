@@ -65,3 +65,7 @@ default = ["mcp"]
 mcp = ["dep:rmcp", "dep:tokio"]
 budget = []
 llm = ["dep:llama-gguf", "dep:ureq", "dep:tokio", "dep:dirs", "dep:sha2"]
+# Memoize Tanto formula evaluations: identical (formula, args) pairs reuse
+# their cached result instead of re-evaluating. Off by default — opt in when
+# the same formulas are evaluated repeatedly (e.g. bankai solve hot loops).
+memo = []

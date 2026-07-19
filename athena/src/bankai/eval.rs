@@ -7,10 +7,37 @@
 
 use std::collections::HashMap;
 
+#[cfg(feature = "memo")]
+use std::sync::{Arc, Mutex};
+
 use crate::formula::Formula;
 use crate::tanto::{evaluate as tanto_eval, TantoEnv};
 
 use super::BankaiError;
+
+/// Cache key for memoized evaluations: a formula id plus its (sorted) named
+/// arguments. Sorting makes the key order-independent so `evaluate` is
+/// deterministic regardless of `HashMap` iteration order.
+#[cfg(feature = "memo")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct EvalCacheKey {
+    formula_id: String,
+    args: Vec<(String, u64)>,
+}
+
+#[cfg(feature = "memo")]
+fn build_cache_key(formula: &Formula, args: &HashMap<String, f64>) -> EvalCacheKey {
+    // Encode f64 bits (deterministic, no NaN/inf keys since eval rejects them).
+    let mut pairs: Vec<(String, u64)> = args
+        .iter()
+        .map(|(k, v)| (k.clone(), v.to_bits()))
+        .collect();
+    pairs.sort();
+    EvalCacheKey {
+        formula_id: formula.id.clone(),
+        args: pairs,
+    }
+}
 
 /// The evaluation engine using Tanto (pure Rust, zero allocation per eval).
 ///
@@ -19,8 +46,14 @@ use super::BankaiError;
 /// - Exact rational arithmetic for fraction expressions
 /// - Sandboxed — no filesystem, no network, no unsafe
 /// - Built-in physical constants and unit conversions
+///
+/// With the `memo` feature, identical `(formula, args)` evaluations are
+/// cached so repeated evaluations in a solve loop avoid re-running Tanto.
 #[derive(Debug, Clone)]
-pub struct EvalEngine;
+pub struct EvalEngine {
+    #[cfg(feature = "memo")]
+    cache: Arc<Mutex<HashMap<EvalCacheKey, f64>>>,
+}
 
 impl Default for EvalEngine {
     fn default() -> Self {
@@ -31,7 +64,10 @@ impl Default for EvalEngine {
 impl EvalEngine {
     /// Create a new evaluation engine.
     pub fn new() -> Self {
-        EvalEngine
+        EvalEngine {
+            #[cfg(feature = "memo")]
+            cache: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     /// Evaluate a formula with the given named arguments.
@@ -47,6 +83,17 @@ impl EvalEngine {
                     "missing argument: '{}' for formula '{}'",
                     input, formula.id
                 )));
+            }
+        }
+
+        // Fast path: reuse a previously computed result for this exact input.
+        #[cfg(feature = "memo")]
+        {
+            let key = build_cache_key(formula, args);
+            if let Ok(guard) = self.cache.lock() {
+                if let Some(&hit) = guard.get(&key) {
+                    return Ok(hit);
+                }
             }
         }
 
@@ -68,6 +115,14 @@ impl EvalEngine {
                 formula.id,
                 if result.is_nan() { "NaN" } else { "inf" }
             )));
+        }
+
+        // Store the result for future identical evaluations.
+        #[cfg(feature = "memo")]
+        {
+            if let Ok(mut guard) = self.cache.lock() {
+                guard.insert(build_cache_key(formula, args), result);
+            }
         }
 
         Ok(result)
@@ -206,5 +261,31 @@ mod tests {
         );
         let result = engine.evaluate(&formula, &args).unwrap();
         assert!((result - 1.0).abs() < 1e-10);
+    }
+
+    #[cfg(feature = "memo")]
+    #[test]
+    fn test_eval_memoization_returns_cached_result() {
+        // With the `memo` feature, evaluating the same formula+args twice must
+        // return identical results (deterministic, and the second hit reads the
+        // cache rather than re-running Tanto). This guards the cache key against
+        // order-dependence.
+        let engine = EvalEngine::new();
+        let formula = Formula::atomic("test", Domain::Mangala, vec!["a", "b"], "c", "a + b", "sum");
+
+        let mut args_a = HashMap::new();
+        args_a.insert("a".to_string(), 3.0);
+        args_a.insert("b".to_string(), 4.0);
+
+        let mut args_b = HashMap::new();
+        args_b.insert("b".to_string(), 4.0);
+        args_b.insert("a".to_string(), 3.0);
+
+        let r1 = engine.evaluate(&formula, &args_a).unwrap();
+        let r2 = engine.evaluate(&formula, &args_b).unwrap();
+        let r3 = engine.evaluate(&formula, &args_a).unwrap();
+        assert!((r1 - 7.0).abs() < 1e-10);
+        assert!((r2 - r1).abs() < 1e-10, "order-independent cache key");
+        assert!((r3 - r1).abs() < 1e-10, "cached hit matches fresh eval");
     }
 }
