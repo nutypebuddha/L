@@ -136,11 +136,14 @@ cd android-app && ./gradlew assembleDebug
             │
      ┌──────┴──────┐
      │             │
-  Athena         Mana Core
+  Athena [archived]   Mana Core [archived]
      │             │
      ├─────────────┤
            LAI  (offline verification substrate)
 ```
+
+> **Athena** and **Mana Core** are archived reference projects in the ecosystem.
+> Active development continues in **LAI** (this repo).
 
 <img src="docs/ecosystem.svg" width="480" alt="L.ai ecosystem map"/>
 

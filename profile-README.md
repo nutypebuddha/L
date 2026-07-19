@@ -35,9 +35,9 @@ One creator, one mark, one contract: **verify, don't trust.**
 
 | Project | What it is |
 |---------|-----------|
-| **[L.ai](https://github.com/nutypebuddha/L)** | Offline-first verification for AI — Proof · Gate · Bridge · Compute in one binary. The flagship. |
-| **Athena** | Relational reasoning engine — cross-domain formula graph, the AI companion. |
-| **Mana Core** | The interactive world — simulation / runtime. |
+| **[L.ai](https://github.com/nutypebuddha/L)** | Offline-first verification for AI — Proof · Gate · Bridge · Compute in one binary. The flagship, actively developed. |
+| **Athena** *(archived)* | Relational reasoning engine — cross-domain formula graph, the AI companion. Reference project. |
+| **Mana Core** *(archived)* | The interactive world — simulation / runtime. Reference project. |
 | **LAI** | The intelligence framework underpinning the above — deterministic proof + per-token validation. |
 
 ## Latest
