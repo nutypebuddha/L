@@ -398,6 +398,10 @@ fn prereqs_satisfied(schema: &Schema, levels: &BTreeMap<String, u32>) -> bool {
 struct SolverState<'a> {
     schema: &'a Schema,
     perks: &'a [&'a Item],
+    /// Items that cost nothing and are therefore always taken once prerequisites
+    /// are met. Precomputed once so `objective_upper_bound` doesn't re-filter
+    /// the whole item list at every DFS node.
+    zero_cost_perks: Vec<&'a Item>,
     candidates: Vec<Allocation>,
     node_count: usize,
     /// Top-k best weighted objectives found so far (for branch-and-bound pruning).
@@ -407,9 +411,15 @@ struct SolverState<'a> {
 
 impl<'a> SolverState<'a> {
     fn new(schema: &'a Schema, perks: &'a [&'a Item], top_k: usize) -> Self {
+        let zero_cost_perks: Vec<&Item> = schema
+            .items
+            .iter()
+            .filter(|i| !i.is_attribute() && i.cost.values().sum::<f64>() == 0.0)
+            .collect();
         Self {
             schema,
             perks,
+            zero_cost_perks,
             candidates: Vec::new(),
             node_count: 0,
             top_k_objs: Vec::with_capacity(top_k),
@@ -426,6 +436,7 @@ impl<'a> SolverState<'a> {
 fn objective_upper_bound(
     schema: &Schema,
     levels: &BTreeMap<String, u32>,
+    zero_cost_perks: &[&Item],
     remaining_attrs: &[&Item],
 ) -> f64 {
     // Current objective from the partial assignment.
@@ -437,16 +448,11 @@ fn objective_upper_bound(
     // This is a correct over-approximation: perks are free, so if prereqs
     // are met at the current levels, the perk will definitely be taken.
     let perk_bonus = {
-        let perks: Vec<&Item> = schema
-            .items
-            .iter()
-            .filter(|i| !i.is_attribute() && i.cost.values().sum::<f64>() == 0.0)
-            .collect();
-        if perks.is_empty() {
+        if zero_cost_perks.is_empty() {
             0.0
         } else {
             let mut bonus = 0.0;
-            for item in perks {
+            for item in zero_cost_perks {
                 let mut met = true;
                 if let Some(reqs) = &item.requires {
                     for r in reqs {
@@ -548,20 +554,6 @@ const NODE_CAP: usize = 5_000_000;
 /// Solve the allocation problem and return the top-`top_k` distinct Pareto-optimal
 /// allocations, ranked by the weighted objective (descending).
 pub fn solve(schema: &Schema, top_k: usize) -> Result<Vec<Allocation>, String> {
-    // DIAGNOSTIC (T-LC01 investigation): confirm the live binary is exercising
-    // this exact function with the expected schema. stderr only.
-    eprintln!(
-        "[DIAG optimize::solve] domain={:?} maximize={:?} items={}",
-        schema.meta.domain,
-        schema.objective.maximize,
-        schema.items.len()
-    );
-    for it in &schema.items {
-        eprintln!(
-            "[DIAG optimize::solve]   item id={:?} cost={:?} effects={:?}",
-            it.id, it.cost, it.effects
-        );
-    }
     validate_schema(schema)?;
     let top_k = top_k.max(1);
     let attrs: Vec<&Item> = schema.items.iter().filter(|i| i.is_attribute()).collect();
@@ -634,7 +626,7 @@ fn enumerate_attributes(
             .iter()
             .cloned()
             .fold(f64::INFINITY, f64::min);
-        let ub = objective_upper_bound(state.schema, levels, &attrs[idx..]);
+        let ub = objective_upper_bound(state.schema, levels, &state.zero_cost_perks, &attrs[idx..]);
         if ub <= min_obj + 1e-9 {
             return;
         }

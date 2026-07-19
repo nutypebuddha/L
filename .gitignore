@@ -2,10 +2,19 @@
 **/target
 node_modules
 bridge/node_modules
-*.so
+**/*.so
 bin/models/*.gguf
 .DS_Store
+
+# Android build artifacts
 android-app/app/src/main/jniLibs/
 android-app/lai-release.keystore
 android-app/app/build/
 android-app/.gradle/
+android-app/lib/
+android-app/local.properties
+
+# Prebuilt binaries (should not be in source repo)
+proof/bin/llama/
+athena/athena-bin-release
+athena/athena-static

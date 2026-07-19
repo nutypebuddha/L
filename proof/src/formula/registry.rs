@@ -269,7 +269,7 @@ struct FormulaEntry {
     #[serde(default)]
     source: Option<String>,
     /// Confidence in `[0,1]`; defaults to 1.0 when omitted.
-    #[serde(default = "super::default_confidence")]
+    #[serde(default = "lai_core::formula::default_confidence")]
     confidence: f64,
     /// Explicit relations to other formula ids.
     #[serde(default)]

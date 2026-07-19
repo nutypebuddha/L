@@ -54,6 +54,9 @@ cid = { package = "lai-gate", path = "../gate" }
 # Athena — relational intelligence engine (formulas, wheel, entity system)
 athena = { path = "../athena", default-features = false }
 
+# Shared core types (domain, formula, primitive, errors)
+lai-core = { path = "../lai-core" }
+
 # Web search / World Bank stats (optional)
 ureq = { version = "3", default-features = false, features = ["json"], optional = true }
 

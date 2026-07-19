@@ -29,6 +29,9 @@ thiserror = "2"
 # TOML parsing for formula files
 toml = "0.8"
 
+# Shared core types (domain, formula, primitive, errors)
+lai-core = { path = "../lai-core" }
+
 # MCP Server (optional) — pinned to 2.x for Host header validation fix
 rmcp = { version = "1.4", features = ["server", "transport-io"], optional = true }
 tokio = { version = "1", features = ["io-util", "rt", "rt-multi-thread", "macros"], optional = true }

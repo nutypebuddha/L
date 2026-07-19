@@ -12,10 +12,13 @@ pub mod thinking;
 pub mod verify;
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 pub type TantoEnv = HashMap<String, f64>;
 
-pub fn create_env() -> TantoEnv {
+/// Pre-built constant environment. Built once on first access, then cloned
+/// cheaply by `create_env()`.
+static TANTO_ENV: LazyLock<TantoEnv> = LazyLock::new(|| {
     let mut env = TantoEnv::new();
     env.insert("pi".to_string(), std::f64::consts::PI);
     env.insert("e".to_string(), std::f64::consts::E);
@@ -29,6 +32,10 @@ pub fn create_env() -> TantoEnv {
     env.insert("c_squared".to_string(), 89875517873681764.0);
     env.insert("avogadro".to_string(), 6.022e23);
     env
+});
+
+pub fn create_env() -> TantoEnv {
+    TANTO_ENV.clone()
 }
 
 pub fn evaluate_expr(expr: &str, env: &TantoEnv) -> Option<f64> {
@@ -76,56 +83,7 @@ pub fn is_expression_valid(expr: &str) -> bool {
 /// so the validity check observes the same identifiers the evaluator would look
 /// up in the environment.
 pub fn extract_identifiers(expr: &str) -> Vec<String> {
-    const FUNCS: &[&str] = &[
-        "sqrt",
-        "sin",
-        "cos",
-        "tan",
-        "asin",
-        "acos",
-        "atan",
-        "atan2",
-        "abs",
-        "exp",
-        "ln",
-        "log10",
-        "log2",
-        "log",
-        "hypot",
-        "pow",
-        "round",
-        "floor",
-        "ceil",
-        "min",
-        "max",
-        "clamp",
-        "sum",
-        "avg",
-        "erf",
-        "diff",
-        "factorial",
-        "gcd",
-        "gauss_inv",
-        "rad2deg",
-        "deg2rad",
-        "norm",
-        "f_to_c",
-        "c_to_f",
-        "c_to_k",
-        "f_to_k",
-        "k_to_c",
-        "k_to_f",
-        "mi_to_km",
-        "km_to_mi",
-        "mph_to_kmh",
-        "kmh_to_mph",
-        "lb_to_kg",
-        "kg_to_lb",
-        "ft_to_m",
-        "in_to_cm",
-        "mph_to_ms",
-        "ms_to_mph",
-    ];
+    let funcs = parser::FUNC_NAMES;
     let bytes = expr.as_bytes();
     let mut idents = Vec::new();
     let mut i = 0;
@@ -137,7 +95,7 @@ pub fn extract_identifiers(expr: &str) -> Vec<String> {
                 i += 1;
             }
             let s = &expr[start..i];
-            if !FUNCS.contains(&s) {
+            if !funcs.contains(&s) {
                 idents.push(s.to_string());
             }
         } else if b.is_ascii_digit() || b == b'.' {

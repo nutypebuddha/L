@@ -1,36 +1,55 @@
-//! # Formula — pure primitive operations
-//!
-//! Formulas are pure primitive operations — math gates and logic gates only.
-//! No domain-specific formulas, no bridging, no vortex spirals.
-//! All domain knowledge lives in entities and the wheel graph.
-//!
-//! ## Math Gates (15)
-//!
-//! add, sub, mul, div, mod, pow, sqrt, neg, abs, log10, ln, floor, ceil, min, max
-//!
-//! All provable via Peano arithmetic or real field axioms.
-//!
-//! ## Logic Gates (7)
-//!
-//! nand, and, or, not, xor, nor, xnor
-//!
-//! All derivable from NAND (Sheffer stroke — functionally complete).
-//! Provable by truth table.
-
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-use crate::wheel::Domain;
+use crate::domain::Domain;
 
-mod glyph;
-mod registry;
+/// Errors from formula operations.
+#[derive(Error, Debug)]
+pub enum FormulaError {
+    #[error("formula not found: {0}")]
+    NotFound(String),
 
-pub use glyph::{
-    apply_operator, binding_power, decompose_bound, is_bound, Glyph, GlyphOperator, GlyphResult,
-    NamedGlyph, GLYPH_COUNT, MAX_GLYPH, OPERATOR_TABLE,
-};
-pub use registry::FormulaRegistry;
+    #[error("argument error: {0}")]
+    ArgError(String),
 
-pub use lai_core::formula::{FormulaError, FormulaType};
+    #[error("evaluation error: {0}")]
+    EvalError(String),
+
+    #[error("serialization error: {0}")]
+    SerdeError(String),
+}
+
+/// The type of a formula — determines how it's evaluated and verified.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FormulaType {
+    /// Math gate: evaluable arithmetic expression over f64.
+    /// Example: `a + b`, `sqrt(x)`
+    /// Proven by: Peano arithmetic / real field axioms
+    Math,
+
+    /// Logic gate: boolean operation over {0, 1}.
+    /// Example: `1 - a*b` (NAND), `a*b` (AND)
+    /// Proven by: truth table
+    Logic,
+
+    /// LLM gate: the capstone model estimates the output from a prompt
+    /// template; deterministic gates validate the raw generation before a
+    /// value is admitted. `expression` holds the prompt with `{input}`
+    /// placeholders, not evaluable arithmetic.
+    /// Proven by: nothing — gated, never trusted, confidence-penalized.
+    Llm,
+}
+
+impl FormulaType {
+    /// Human-readable description.
+    pub fn description(self) -> &'static str {
+        match self {
+            FormulaType::Math => "Math gate — arithmetic operation",
+            FormulaType::Logic => "Logic gate — boolean operation",
+            FormulaType::Llm => "LLM gate — capstone estimation, gated",
+        }
+    }
+}
 
 /// A single primitive formula definition.
 ///
@@ -55,7 +74,7 @@ pub struct Formula {
     /// Output parameter name.
     pub output: String,
 
-    /// The evaluable expression using meval-compatible syntax.
+    /// The evaluable expression using Azauchi syntax (src/asauchi).
     /// For math: arithmetic expression like "a + b", "sqrt(x)"
     /// For logic: boolean expression like "1 - a*b" (NAND)
     pub expression: String,
@@ -73,14 +92,41 @@ pub struct Formula {
     pub evidence: Option<String>,
 
     /// Additional domains this formula is also registered under.
-    ///
-    /// Populated when a later-loaded formula file declares the same `id`
-    /// with a different `domain` (e.g. `aries_math.toml`'s "add" vs.
-    /// `mangala_math.toml`'s "add" — same content, dual Western/Vedic
-    /// cosmology). Without this, `FormulaRegistry::register` used to
-    /// silently overwrite the earlier domain tag on collision.
     #[serde(default)]
     pub also_domains: Vec<Domain>,
+
+    /// Source domain for bridging formulas (parsed from TOML `from` field).
+    /// Bridging formulas connect `from_domain` → `domain`.
+    #[serde(default)]
+    pub from_domain: Option<Domain>,
+
+    /// Target domain for bridging formulas (parsed from TOML `to` field).
+    #[serde(default)]
+    pub to_domain: Option<Domain>,
+
+    /// Aspect between domains for bridging formulas (parsed from TOML `aspect` field).
+    #[serde(default)]
+    pub bridge_aspect: Option<String>,
+
+    /// Provenance: where this formula's definition came from (paper, standard,
+    /// textbook, user overlay, …). Optional, surfaced by `corpus` tooling.
+    #[serde(default)]
+    pub source: Option<String>,
+
+    /// Confidence in this formula's correctness/provenance, in `[0.0, 1.0]`.
+    /// Defaults to `1.0` for embedded seed formulas; user overlays may lower it.
+    #[serde(default = "default_confidence")]
+    pub confidence: f64,
+
+    /// Explicit relations to other formula ids (e.g. generalizes, inverse-of,
+    /// special-case-of). Used to enrich the corpus graph. Optional.
+    #[serde(default)]
+    pub relations: Vec<String>,
+}
+
+/// Default confidence for formulas that don't declare one.
+pub fn default_confidence() -> f64 {
+    1.0
 }
 
 impl Formula {
@@ -105,6 +151,12 @@ impl Formula {
             zodiac: Vec::new(),
             evidence: None,
             also_domains: Vec::new(),
+            from_domain: None,
+            to_domain: None,
+            bridge_aspect: None,
+            source: None,
+            confidence: 1.0,
+            relations: Vec::new(),
         }
     }
 
@@ -147,7 +199,6 @@ impl Formula {
     }
 
     /// Create an atomic formula (convenience, equivalent to `math` with explicit domain).
-    /// This preserves the API used throughout the codebase and tests.
     pub fn atomic(
         id: &str,
         domain: Domain,
@@ -180,9 +231,55 @@ impl Formula {
     }
 }
 
+/// Validate a formula ID string.
+pub fn validate_formula_id(formula_id: &str) -> bool {
+    !formula_id.is_empty() && formula_id.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// Extract domain from a formula ID.
+pub fn extract_formula_domain(formula_id: &str) -> &str {
+    formula_id.split('_').next().unwrap_or("")
+}
+
+/// Check if formula ID is atomic type.
+pub fn is_atomic_formula(formula_id: &str) -> bool {
+    extract_formula_domain(formula_id) == "atomic"
+}
+
+/// Check if formula ID is bridging type.
+pub fn is_bridging_formula(formula_id: &str) -> bool {
+    extract_formula_domain(formula_id) == "bridging"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_formula_id_basic() {
+        assert!(validate_formula_id("atomic_graha"));
+        assert!(validate_formula_id("bridging_001"));
+        assert!(!validate_formula_id(""));
+        assert!(!validate_formula_id("has space"));
+    }
+
+    #[test]
+    fn extract_formula_domain_basic() {
+        assert_eq!(extract_formula_domain("atomic_graha"), "atomic");
+        assert_eq!(extract_formula_domain("bridging_001"), "bridging");
+    }
+
+    #[test]
+    fn is_atomic_formula_basic() {
+        assert!(is_atomic_formula("atomic_graha"));
+        assert!(!is_atomic_formula("bridging_001"));
+    }
+
+    #[test]
+    fn is_bridging_formula_basic() {
+        assert!(is_bridging_formula("bridging_001"));
+        assert!(!is_bridging_formula("atomic_graha"));
+    }
 
     #[test]
     fn test_create_math_formula() {

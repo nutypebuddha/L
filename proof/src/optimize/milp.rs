@@ -9,8 +9,9 @@
 //! use the default `knapsack` shape instead.
 
 use good_lp::{variable, variables, Solution, SolverModel};
+use std::collections::HashMap;
 
-use super::{Allocation, Schema};
+use super::{Allocation, Item, Schema};
 
 /// Solve the schema as a MILP problem.
 ///
@@ -23,6 +24,13 @@ use super::{Allocation, Schema};
 /// Returns the single best allocation found by the solver, or an error.
 pub fn solve_milp(schema: &Schema) -> Result<Allocation, String> {
     validate_milp_feasible(schema)?;
+
+    // Precompute id → &Item lookup to avoid O(items) linear scans in hot loops.
+    let item_by_id: HashMap<&str, &Item> = schema
+        .items
+        .iter()
+        .map(|i| (i.id.as_str(), i))
+        .collect();
 
     let mut vars = variables! {};
 
@@ -39,7 +47,7 @@ pub fn solve_milp(schema: &Schema) -> Result<Allocation, String> {
     // Precompute linear coefficient of each item's variable in the objective.
     let mut objective = good_lp::Expression::from(0.0);
     for (item_id, var) in &vars_and_ids {
-        let item = schema.items.iter().find(|i| i.id == *item_id).unwrap();
+        let item = item_by_id.get(item_id.as_str()).unwrap();
         let mut total_coeff = 0.0f64;
 
         for (score_name, score_term) in &schema.scoring {
@@ -69,7 +77,7 @@ pub fn solve_milp(schema: &Schema) -> Result<Allocation, String> {
     for (resource, budget_limit) in &schema.budget {
         let mut total_cost = good_lp::Expression::from(0.0);
         for (item_id, var) in &vars_and_ids {
-            let item = schema.items.iter().find(|i| i.id == *item_id).unwrap();
+            let item = item_by_id.get(item_id.as_str()).unwrap();
             let cost = item.cost.get(resource).copied().unwrap_or(0.0);
             if cost > 0.0 {
                 total_cost += *var * cost;
@@ -81,7 +89,7 @@ pub fn solve_milp(schema: &Schema) -> Result<Allocation, String> {
     // Prerequisite constraints: if item A requires item B >= threshold,
     // then x_A <= x_B (for threshold=1, the most common case)
     for (item_id_a, var_a) in &vars_and_ids {
-        let item = schema.items.iter().find(|i| i.id == *item_id_a).unwrap();
+        let item = item_by_id.get(item_id_a.as_str()).unwrap();
         if let Some(reqs) = &item.requires {
             for req in reqs {
                 if let Ok((target_id, _op, _threshold)) = super::parse_prereq(req) {

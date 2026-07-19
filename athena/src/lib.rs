@@ -23,6 +23,7 @@
 pub mod asauchi;
 pub mod astrology;
 pub mod bankai;
+pub mod error;
 #[cfg(feature = "budget")]
 pub mod budget;
 pub mod descent;
@@ -76,6 +77,8 @@ pub mod prelude {
     pub use crate::zanpakuto::{
         guest_identity, AccessTier, Capability, Identity, Stage, Zanpakuto,
     };
+
+    pub use crate::error::{LaiError, ReasoningError, ValidationError};
 }
 
 /// Current version.

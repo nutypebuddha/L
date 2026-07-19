@@ -1,5 +1,15 @@
 use super::TantoEnv;
 
+/// Built-in function names recognized by the Tanto parser. Hoisted to a
+/// `static` so `read_ident` doesn't rebuild the list on every token.
+pub(crate) static FUNC_NAMES: &[&str] = &[
+    "sqrt", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "abs", "exp", "ln", "log10",
+    "log2", "hypot", "pow", "round", "floor", "ceil", "min", "max", "clamp", "sum", "avg", "erf",
+    "log", "diff", "factorial", "gcd", "gauss_inv", "rad2deg", "deg2rad", "norm", "f_to_c",
+    "c_to_f", "c_to_k", "f_to_k", "k_to_c", "k_to_f", "mi_to_km", "km_to_mi", "mph_to_kmh",
+    "kmh_to_mph", "lb_to_kg", "kg_to_lb", "ft_to_m", "in_to_cm", "mph_to_ms", "ms_to_mph",
+];
+
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
     Num(f64),
@@ -163,57 +173,7 @@ impl<'a> Lexer<'a> {
             self.pos += 1;
         }
         let s = std::str::from_utf8(&self.input[start..self.pos]).ok()?;
-        let funcs: &[&str] = &[
-            "sqrt",
-            "sin",
-            "cos",
-            "tan",
-            "asin",
-            "acos",
-            "atan",
-            "atan2",
-            "abs",
-            "exp",
-            "ln",
-            "log10",
-            "log2",
-            "hypot",
-            "pow",
-            "round",
-            "floor",
-            "ceil",
-            "min",
-            "max",
-            "clamp",
-            "sum",
-            "avg",
-            "erf",
-            "log",
-            "diff",
-            "factorial",
-            "gcd",
-            "gauss_inv",
-            "rad2deg",
-            "deg2rad",
-            "norm",
-            "f_to_c",
-            "c_to_f",
-            "c_to_k",
-            "f_to_k",
-            "k_to_c",
-            "k_to_f",
-            "mi_to_km",
-            "km_to_mi",
-            "mph_to_kmh",
-            "kmh_to_mph",
-            "lb_to_kg",
-            "kg_to_lb",
-            "ft_to_m",
-            "in_to_cm",
-            "mph_to_ms",
-            "ms_to_mph",
-        ];
-        if funcs.contains(&s) {
+        if FUNC_NAMES.contains(&s) {
             Some(Token::Func(s.to_string()))
         } else {
             Some(Token::Ident(s.to_string()))

@@ -1713,7 +1713,7 @@ impl DescentEngine {
             if let Some(graha) = de.vedic_classification.dominant_graha() {
                 let sign = Sign::from_index(graha.index());
                 st.western_classification.set_sign(sign, 0.9);
-                let domain = crate::domain_graph::Domain::from_sign(sign);
+                let domain = crate::domain_graph::from_sign(sign);
                 st.domains.push(domain);
             }
             st.settled_layer = DescentLayer::Entity;
@@ -1811,7 +1811,7 @@ impl DescentEngine {
         if !de.forms.is_empty() || !de.events.is_empty() {
             if let Some(graha) = de.vedic_classification.dominant_graha() {
                 let sign = Sign::from_index(graha.index());
-                let domain = Domain::from_sign(sign);
+                let domain = crate::domain_graph::from_sign(sign);
                 st.domains.push(domain);
                 st.western_classification.set_sign(sign, 0.7);
                 st.vedic_classification
@@ -1940,7 +1940,7 @@ impl DescentEngine {
             };
             st.vedic_classification = st.vedic_classification.clone().with_vedic_element(ve, 0.6);
             // Set guna from graha
-            let guna = graha.guna();
+            let guna = crate::astrology::graha_guna(graha);
             st.vedic_classification = st.vedic_classification.clone().with_guna(guna, 0.6);
         }
     }

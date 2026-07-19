@@ -166,6 +166,7 @@ dependencies = [
  "clap",
  "criterion",
  "dirs",
+ "lai-core",
  "llama-gguf",
  "rmcp",
  "serde",
@@ -1318,6 +1319,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lai-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "lai-gate"
 version = "0.1.0"
 dependencies = [
@@ -1351,6 +1361,7 @@ dependencies = [
  "criterion",
  "dirs",
  "good_lp",
+ "lai-core",
  "lai-gate",
  "libc",
  "llama-gguf",

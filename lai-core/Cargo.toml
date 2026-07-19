@@ -1,0 +1,14 @@
+[package]
+name = "lai-core"
+version = "0.1.0"
+edition = "2021"
+description = "L.ai — shared domain types, primitives, and error hierarchy for the workspace"
+authors = ["nutypebuddha <nutypebuddha@proton.me>"]
+license = "Apache-2.0"
+repository = "https://github.com/nutypebuddha/lai"
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

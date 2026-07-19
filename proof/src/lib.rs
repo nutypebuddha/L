@@ -38,6 +38,7 @@ pub mod inference;
 
 pub mod cli;
 pub mod companion;
+pub mod error;
 
 pub mod prelude {
     pub use crate::aspect::{compute_aspect, is_adjacent, is_conjunction, validate_graha_index};
@@ -96,4 +97,6 @@ pub mod prelude {
         verify_expression, verify_proposal, LlmProposal, ProposalKind,
     };
     pub use crate::verify::{aggregate_confidence_scores, compute_confidence_score};
+
+    pub use crate::error::{LaiError, ReasoningError, ValidationError};
 }
