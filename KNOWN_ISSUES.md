@@ -92,4 +92,19 @@ Public, committed, no euphemism. Documented bugs with scope and status.
 **Repro:** `POST /validate {"text":"2+2=4","context":"math"}` always returned `confidence: 0.5, passed: false`
 **Detail:** `adapters/cid.js` did `JSON.parse(stdout)` on `gate validate`'s plaintext output (`Validated: ... Confidence: ...`). This always threw, landing in the catch block and returning the hardcoded fallback. Masked by T55 (wrong path) and the CLI contract bug — once both were fixed, the parse failure surfaced. Fixed by adding `--format json` to `gate validate`, `gate fix`, and `gate score` in `proof/src/main.rs` (matching the pattern used by proof-side subcommands), and wiring `adapters/cid.js` to pass `--format json`.
 
+---
+
+### [T59] Relational operators (<, >, <=, >=, !=) silently dropped or misread as `=`
+
+**Status:** fixed
+**Affects:** `lai validate` and `lai tanto eval` on relational expressions
+**Does not affect:** `=` equations, plain arithmetic, `verify` (T52), `optimize`/`build`/`strategize`
+**Repro:**
+```
+lai validate "9.11 < 9.9"    → passed: true (was true both directions before fix)
+lai validate "9.11 > 9.9"    → passed: false (was: true)
+lai validate "5 >= 3"        → passed: true (was: false — "Equation does not balance: 5 != 3")
+```
+**Detail:** Two independent gaps in `proof/src/compute/parser.rs` and `proof/src/validation/math_gate.rs`: (1) Tanto lexer had no relational token variants — `<`/`>` caused early termination, returning a truncated prefix as the full result. (2) `math_gate.rs`/`verifier.rs` split on the first `=` to check equation balance, which matched the `=` inside `<=`/`>=`/`!=`. Fixed by adding `Lt`/`Gt`/`Le`/`Ge`/`Ne` tokens with two-char lookahead, a comparison precedence level with epsilon tolerance, full-consumption checks in `eval_math`/`parse_math`, and routing relational expressions through Tanto before the `=` split in both `math_gate.rs` and `verify_arithmetic`. 625/625 tests pass, 0 regressions.
+
 
