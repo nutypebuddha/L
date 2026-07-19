@@ -237,6 +237,36 @@ fn is_numeric_literal(s: &str) -> bool {
 fn verify_arithmetic(input: &str, context: &str, report: &mut DiagnosticReport) {
     let env = crate::compute::create_env();
 
+    // T59: relational operators (<, >, <=, >=, !=) are first-class Tanto tokens.
+    // Evaluate as ONE expression instead of splitting on '=' (which would match
+    // the '=' inside <=, >= and misparse the operator).
+    if input.contains('<') || input.contains('>') || input.contains("!=") {
+        match crate::compute::evaluate_pipeline(input, &env) {
+            Some(val) if val == 0.0 => {
+                report.push(
+                    Diagnostic::error(
+                        DiagnosticGate::Math,
+                        format!("Comparison is false: {}", input),
+                    )
+                    .with_constraint_id("math.comparison_false")
+                    .with_fix_suggestion("Verify the comparison values"),
+                );
+            }
+            None => {
+                report.push(
+                    Diagnostic::error(
+                        DiagnosticGate::Math,
+                        format!("Expression '{}' could not be evaluated", input),
+                    )
+                    .with_constraint_id("math.evaluable_expression")
+                    .with_fix_suggestion("Ensure the expression is valid"),
+                );
+            }
+            _ => {} // true (1.0) — no error
+        }
+        return;
+    }
+
     // If input contains '=', verify both sides evaluate.
     if let Some(eq_pos) = input.find('=') {
         let left_operand = input[..eq_pos].trim();

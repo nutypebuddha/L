@@ -14,6 +14,17 @@ enum Token {
     Comma,
     Func(String),
     Ident(String),
+    // T59: relational operators. Deliberately not `Eq` — a bare `=` is not
+    // part of the Tanto grammar and stays handled at the string level in
+    // math_gate.rs (equation-balance checking), which already works
+    // correctly. Adding these five closes the gap where `<`/`>` silently
+    // dropped everything after them and `<=`/`>=`/`!=` were misread as `=`
+    // by math_gate.rs's `token.find('=')` (see check_equation_correctness).
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    Ne,
 }
 
 struct Lexer<'a> {
@@ -79,6 +90,39 @@ impl<'a> Lexer<'a> {
             b',' => {
                 self.pos += 1;
                 Some(Token::Comma)
+            }
+            b'<' => {
+                self.pos += 1;
+                if self.pos < self.input.len() && self.input[self.pos] == b'=' {
+                    self.pos += 1;
+                    Some(Token::Le)
+                } else {
+                    Some(Token::Lt)
+                }
+            }
+            b'>' => {
+                self.pos += 1;
+                if self.pos < self.input.len() && self.input[self.pos] == b'=' {
+                    self.pos += 1;
+                    Some(Token::Ge)
+                } else {
+                    Some(Token::Gt)
+                }
+            }
+            b'!' => {
+                if self.pos + 1 < self.input.len() && self.input[self.pos + 1] == b'=' {
+                    self.pos += 2;
+                    Some(Token::Ne)
+                } else {
+                    // Lone `!` (no boolean-not in this grammar): do NOT
+                    // advance past it. Leaving `pos` pointing at the
+                    // unconsumed byte — rather than past it — means the
+                    // end-of-input check in eval_math/parse_math correctly
+                    // reads this as "stopped early," not "reached EOF
+                    // cleanly," even when the `!` is the last byte in the
+                    // string (e.g. "5!" with nothing after it).
+                    None
+                }
             }
             b'0'..=b'9' | b'.' => self.read_number(),
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.read_ident(),
@@ -177,6 +221,36 @@ impl<'a> Lexer<'a> {
     }
 }
 
+/// Epsilon for float "close enough to equal" comparisons — matches the
+/// 1e-10 tight threshold `check_equation_correctness` (math_gate.rs) already
+/// uses for `=`. Used here so `<=`/`>=`/`!=` agree with `=` at the boundary
+/// instead of being tripped by ordinary float representation noise, e.g.
+/// `0.1 + 0.2 <= 0.3` should read as true, not false because 0.1+0.2 comes
+/// out as 0.30000000000000004 in raw IEEE-754.
+const CMP_EPS: f64 = 1e-10;
+
+#[derive(Clone, Copy)]
+enum CmpOp {
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    Ne,
+}
+
+impl CmpOp {
+    fn eval(self, l: f64, r: f64) -> bool {
+        let close = (l - r).abs() < CMP_EPS;
+        match self {
+            CmpOp::Lt => l < r && !close,
+            CmpOp::Gt => l > r && !close,
+            CmpOp::Le => l < r || close,
+            CmpOp::Ge => l > r || close,
+            CmpOp::Ne => !close,
+        }
+    }
+}
+
 struct Parser<'a> {
     tokens: Vec<Token>,
     pos: usize,
@@ -217,7 +291,29 @@ impl<'a> Parser<'a> {
         tok
     }
 
+    /// T59: comparisons bind loosest, one level above +/-, matching the
+    /// convention in every C-family/Python-family grammar (arithmetic is
+    /// evaluated on both sides, then compared). Deliberately non-chaining —
+    /// "1 < 2 < 3" parses `1 < 2` (=1.0) and then stops, leaving `< 3`
+    /// unconsumed, which the full-consumption check in eval_math/parse_math
+    /// correctly rejects as malformed rather than silently accepting a
+    /// Python-style chained comparison this grammar was never designed for.
     fn parse_expr(&mut self) -> Option<f64> {
+        let left = self.parse_additive()?;
+        let op = match self.peek() {
+            Some(Token::Lt) => CmpOp::Lt,
+            Some(Token::Gt) => CmpOp::Gt,
+            Some(Token::Le) => CmpOp::Le,
+            Some(Token::Ge) => CmpOp::Ge,
+            Some(Token::Ne) => CmpOp::Ne,
+            _ => return Some(left),
+        };
+        self.advance();
+        let right = self.parse_additive()?;
+        Some(if op.eval(left, right) { 1.0 } else { 0.0 })
+    }
+
+    fn parse_additive(&mut self) -> Option<f64> {
         let mut left = self.parse_term()?;
         while let Some(tok) = self.peek() {
             match tok {
@@ -469,17 +565,40 @@ fn eval_func(name: &str, args: &[f64]) -> Option<f64> {
     }
 }
 
+/// T59: previously returned whatever `parse_expr` produced from a prefix of
+/// the tokens, even when tokens remained unconsumed — so `"9.11 < 9.9"`
+/// (where `<` wasn't yet a recognized token) silently evaluated as `9.11`
+/// with the rest of the string discarded. Now mirrors the full-consumption
+/// check `parse_math` already used below for corpus validation: every token
+/// must be consumed or the whole expression is rejected. Every call site
+/// (verify.rs, pipeline.rs, mod.rs, math_gate.rs) already falls back to an
+/// alternate parser (`eval_op_format` or a tokenizer) on `None`, so this
+/// does not regress any of them — it just stops a truncated prefix from
+/// masquerading as a complete answer.
 pub fn eval_math(input: &[u8], env: &TantoEnv) -> Option<f64> {
     let mut lexer = Lexer::new(input);
     let mut tokens = Vec::new();
     while let Some(tok) = lexer.next_token() {
         tokens.push(tok);
     }
+    // Two different ways this loop can stop early, both indistinguishable
+    // from a clean EOF unless checked explicitly: next_token() returns None
+    // both when input is exhausted AND when it hits a byte it doesn't
+    // recognize (e.g. '@') or an incomplete operator (a lone trailing '!').
+    // Comparing the lexer's final position against the input length tells
+    // them apart — a genuine EOF always leaves pos == input.len().
+    if lexer.pos != input.len() {
+        return None;
+    }
     if tokens.is_empty() {
         return None;
     }
     let mut parser = Parser::new(tokens, env);
-    parser.parse_expr()
+    let val = parser.parse_expr()?;
+    if parser.pos != parser.tokens.len() {
+        return None;
+    }
+    Some(val)
 }
 
 /// Structural-only parse: returns `Some(())` iff the entire input is
@@ -493,6 +612,9 @@ pub fn parse_math(input: &[u8], env: &TantoEnv) -> Option<()> {
     let mut tokens = Vec::new();
     while let Some(tok) = lexer.next_token() {
         tokens.push(tok);
+    }
+    if lexer.pos != input.len() {
+        return None;
     }
     if tokens.is_empty() {
         return None;
@@ -758,5 +880,73 @@ mod tests {
         assert!(parse_math(b"unknown_fn(x)", &env).is_none());
         // Empty input rejected.
         assert!(parse_math(b"", &env).is_none());
+    }
+
+    // ── T59: relational operators ──
+    //
+    // Before this fix, `<` and `>` weren't tokens at all: the lexer stopped
+    // at the unrecognized byte and the parser happily returned whatever it
+    // had parsed so far, silently discarding everything after the operator.
+    // `eval_math(b"9.11 < 9.9", ..)` returned `Some(9.11)`. Every case below
+    // is a direct repro from that session, kept as the regression guard.
+
+    #[test]
+    fn t59_relational_operators_evaluate_correctly() {
+        let env = TantoEnv::new();
+        // The original repro: both directions of the same decimal pair.
+        assert_eq!(eval_math(b"9.11 < 9.9", &env), Some(1.0));
+        assert_eq!(eval_math(b"9.11 > 9.9", &env), Some(0.0));
+        // >=, <=, != were being silently rewritten as `=` by math_gate.rs's
+        // `token.find('=')` (it matches the `=` *inside* those operators).
+        // At the parser level they weren't tokens at all until now.
+        assert_eq!(eval_math(b"5 >= 3", &env), Some(1.0));
+        assert_eq!(eval_math(b"3 >= 5", &env), Some(0.0));
+        assert_eq!(eval_math(b"3 <= 5", &env), Some(1.0));
+        assert_eq!(eval_math(b"5 <= 3", &env), Some(0.0));
+        assert_eq!(eval_math(b"5 != 3", &env), Some(1.0));
+        assert_eq!(eval_math(b"5 != 5", &env), Some(0.0));
+        // Boundary: <=/>= must accept exact equality.
+        assert_eq!(eval_math(b"5 <= 5", &env), Some(1.0));
+        assert_eq!(eval_math(b"5 >= 5", &env), Some(1.0));
+    }
+
+    #[test]
+    fn t59_comparison_uses_same_epsilon_as_equation_balance() {
+        let env = TantoEnv::new();
+        // 0.1 + 0.2 is 0.30000000000000004 in raw IEEE-754. A strict `<=`
+        // would read this as false. check_equation_correctness already
+        // treats 0.1+0.2 = 0.3 as true via a 1e-10 tolerance (verified
+        // against the shipped binary in the same session); comparisons use
+        // the same tolerance so they don't disagree with `=` at the boundary.
+        assert_eq!(eval_math(b"0.1 + 0.2 <= 0.3", &env), Some(1.0));
+        assert_eq!(eval_math(b"0.1 + 0.2 != 0.3", &env), Some(0.0));
+    }
+
+    #[test]
+    fn t59_comparisons_nest_inside_parens_and_calls() {
+        let env = TantoEnv::new();
+        // parse_expr is the entry point used for parenthesized sub-expressions
+        // and function arguments too, so comparisons fall out as first-class
+        // sub-expressions for free — not part of the bug, but worth locking in.
+        assert_eq!(eval_math(b"(5 > 3) + (2 > 9)", &env), Some(1.0));
+        assert_eq!(eval_math(b"max(5 > 3, 0.2)", &env), Some(1.0));
+    }
+
+    #[test]
+    fn t59_full_consumption_rejects_trailing_garbage() {
+        let env = TantoEnv::new();
+        // The root cause behind the relational-operator bug was more general
+        // than relational operators: eval_math never checked it had consumed
+        // every token, so ANY trailing unparseable suffix was silently
+        // dropped instead of failing the whole expression. `<`/`>`/`<=`/`>=`
+        // are fixed by being real tokens now; this guards the underlying
+        // mechanism directly so the same shape of bug can't reappear behind
+        // some other future unrecognized character.
+        assert_eq!(eval_math(b"5 @ 3", &env), None);
+        assert_eq!(eval_math(b"5 3", &env), None); // two numbers, no operator
+        assert_eq!(eval_math(b"9.11 <", &env), None); // operator, no RHS
+        // Sanity: complete, well-formed input still works exactly as before.
+        assert_eq!(eval_math(b"2+3", &env), Some(5.0));
+        assert_eq!(eval_math(b"(2+3)*4", &env), Some(20.0));
     }
 }
