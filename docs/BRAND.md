@@ -87,15 +87,16 @@ Every README opens with the same branded block, then `L.ai · <Function>`:
 
 ## The ecosystem map
 
+L is presented as a platform, not a pile of repos:
+
 ```
-        Ł  (creator identity / umbrella)
-            │
-     ┌──────┴──────┐
-     │             │
-  Athena         Mana Core
-     │             │
-     ├─────────────┤
-           LAI  (offline verification substrate: Proof · Gate · Bridge · Compute)
+L
+├── Core        L.ai · Proof / Gate / Bridge / Compute  (verification substrate)
+├── Athena      relational reasoning engine  [archived reference]
+├── CLI         lai — one binary, four functions
+├── SDK         lai-core — shared domain types + error hierarchy
+├── Plugins     MCP tools, LLM adapters, validators
+└── Examples    WASM playground, Android daemon, demos
 ```
 
 Projects that belong to the ecosystem carry the witch-hat Ł and the palette so

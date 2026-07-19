@@ -129,21 +129,23 @@ cd android-app && ./gradlew assembleDebug
 # Output: android-app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## The L.ai ecosystem
+## The L ecosystem
+
+L is a growing platform — one mark, one contract: **deterministic verification
+instead of probabilistic trust.**
 
 ```
-        Ł  (creator identity / umbrella)
-            │
-     ┌──────┴──────┐
-     │             │
-  Athena [archived]   Mana Core [archived]
-     │             │
-     ├─────────────┤
-           LAI  (offline verification substrate)
+L
+├── Core        L.ai · Proof / Gate / Bridge / Compute  (verification substrate)
+├── Athena      relational reasoning engine  [archived reference]
+├── CLI         lai — one binary, four functions
+├── SDK         lai-core — shared domain types + error hierarchy
+├── Plugins     MCP tools, LLM adapters, validators
+└── Examples    WASM playground, Android daemon, demos
 ```
 
 > **Athena** and **Mana Core** are archived reference projects in the ecosystem.
-> Active development continues in **LAI** (this repo).
+> Active development continues in **L.ai** (this repo).
 
 <img src="docs/ecosystem.svg" width="480" alt="L.ai ecosystem map"/>
 

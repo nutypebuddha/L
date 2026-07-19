@@ -1,63 +1,90 @@
 <!--
   Publish this file as the README of the `nutypebuddha/nutypebuddha` repo
-  (your GitHub profile). It is kept here in the L.ai repo so the brand stays
-  in sync. Swap the logo image URL for the raw asset once L.ai is pushed.
+  (your GitHub profile). Kept here in the L.ai repo so the brand stays in sync.
+
+  GitHub UI settings (not file-based) to complete the look:
+  - Profile picture: the witch-hat Ł glyph (docs/brand-LAI.svg).
+  - Banner: a wide crop of docs/brand-LAI.svg or docs/ecosystem.svg.
+  - Pinned repos (Settings → Profile → Pinned): 1) L  2) Athena (archived)
+    3) best Rust lib  4) a CLI/tool  5) experimental AI  6) a demo/showcase.
+  - First thing visitors see is this README's header block below.
 -->
 
 <div align="center">
 
+<img src="https://raw.githubusercontent.com/nutypebuddha/L/main/docs/brand-LAI.svg" width="110" height="146" alt="L — Old English L with witch hat"/>
+
 # Ł  L
 
-**Rust • AI • Systems • Games**
+**Building L — a Rust-native AI ecosystem focused on autonomous tooling, developer workflows, and local-first intelligence.**
 
-*Building an ecosystem around L — offline, deterministic, fail-loud software.*
+[![L.ai](https://img.shields.io/badge/Flagship-L.ai-7df9ff)](https://github.com/nutypebuddha/L)
+[![Rust](https://img.shields.io/badge/Rust-2021-c2410c)](https://rust-lang.org)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue)](https://github.com/nutypebuddha/L/blob/main/LICENSE)
 
-<img src="https://raw.githubusercontent.com/nutypebuddha/L/main/docs/brand-LAI.svg" width="96" height="128" alt="L.ai witch-hat Ł glyph"/>
+**Verify, don't trust.** — offline-first, deterministic, fail-loud.
 
 </div>
 
 ---
 
-## The ecosystem
+## The platform
 
-One creator, one mark, one contract: **verify, don't trust.**
+L is not a single repo — it's a growing platform. One mark, one contract:
+**deterministic verification instead of probabilistic trust.**
 
 ```
-        Ł  (creator identity / umbrella)
-            │
-     ┌──────┴──────┐
-     │             │
-  Athena         Mana Core
-     │             │
-     ├─────────────┤
-           LAI  (offline verification substrate)
+L
+├── Core        L.ai · Proof / Gate / Bridge / Compute  (the verification substrate)
+├── Athena      relational reasoning engine  [archived reference]
+├── CLI         lai — one binary, four functions
+├── SDK         lai-core — shared domain types + error hierarchy
+├── Plugins     MCP tools, LLM adapters, validators
+└── Examples    WASM playground, Android daemon, demos
 ```
 
-| Project | What it is |
-|---------|-----------|
-| **[L.ai](https://github.com/nutypebuddha/L)** | Offline-first verification for AI — Proof · Gate · Bridge · Compute in one binary. The flagship, actively developed. |
-| **Athena** *(archived)* | Relational reasoning engine — cross-domain formula graph, the AI companion. Reference project. |
-| **Mana Core** *(archived)* | The interactive world — simulation / runtime. Reference project. |
-| **LAI** | The intelligence framework underpinning the above — deterministic proof + per-token validation. |
+### How it connects
+
+```
+            Ł  L  (identity / umbrella)
+                 │
+          ┌──────┴──────┐
+          │             │
+    Athena [archived]   Mana Core [archived]
+          │             │
+          ├─────────────┤
+        L.ai Core  (offline verification substrate)
+          │
+   ┌──────┼──────────────┐
+ CLI      SDK            Plugins
+(lai)   (lai-core)     (MCP / adapters / validators)
+```
+
+## Pinned repositories
+
+| # | Repository | Why it's pinned |
+|---|------------|-----------------|
+| 1 | **[L](https://github.com/nutypebuddha/L)** | Flagship — the whole ecosystem in one repo. |
+| 2 | **Athena** | The relational reasoning engine that started it. *(archived)* |
+| 3 | **best Rust library** | Demonstrates engineering quality (e.g. `lai-core`). |
+| 4 | **CLI / tooling** | `lai` — one binary, four functions. |
+| 5 | **Experimental AI** | Cutting-edge local-first intelligence work. |
+| 6 | **Showcase / demo** | A runnable demo or WASM playground. |
+
+## Mission
+
+> Building L — a Rust-native AI ecosystem focused on autonomous tooling,
+> developer workflows, and local-first intelligence.
 
 ## Latest
 
 - 🚀 **L.ai v0.4.1** — `lai-core` consolidation, repo hygiene, Athena eval memoization. [Release](https://github.com/nutypebuddha/L/releases/tag/v0.4.1)
-- 📓 Dev logs & benchmarks land in each repo's README and `docs/`.
-- 🧪 Every repo ships `cargo test` + clippy under `-D warnings`.
-
-## What I build
-
-> *"L builds ambitious Rust software and AI systems."*
-
-- Deterministic verification instead of probabilistic trust.
-- Offline-first: no network at runtime, no hallucination, fail loud.
-- Multi-platform: Linux, Android, WASM.
+- 🧪 Every crate ships `cargo test` + clippy under `-D warnings`.
 
 ## Contact
 
 - GitHub: [@nutypebuddha](https://github.com/nutypebuddha)
-- Discussions & issues: open one on any ecosystem repo.
+- Issues & discussions: open one on any ecosystem repo.
 
 ---
 
