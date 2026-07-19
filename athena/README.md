@@ -1,6 +1,16 @@
-# Athena
+<div align="center">
 
-> Part of the **[L.ai](https://github.com/nutypebuddha/lai)** umbrella — *verify, don't trust.*
+# Ł L.ai · *Athena*
+
+**Relational intelligence — formulas, not facts.**
+
+> Part of the **[L.ai](https://github.com/nutypebuddha/lai)** ecosystem — *verify, don't trust.*
+
+<img src="../docs/brand-LAI.svg" width="72" height="96" alt="L.ai witch-hat Ł glyph"/>
+
+</div>
+
+---
 
 **Relational intelligence — formulas, not facts.**
 

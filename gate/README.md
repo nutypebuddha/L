@@ -1,13 +1,24 @@
-# CID - Calibrated Inference Device
+<div align="center">
 
-> **L.ai · Gate** — part of the [L.ai](https://github.com/nutypebuddha/lai) umbrella. *Verify, don't trust.*
+# Ł L.ai · *Gate*
 
-[![Crates.io](https://img.shields.io/crates/v/cid.svg)](https://crates.io/crates/cid)
-[![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://docs.rs/cid)
-[![License](https://img.shields.io/badge/license-unlicense-blue.svg)](LICENSE)
-[![Rust Version](https://img.shields.io/badge/rust-1.70%2B-orange.svg)](https://rustup.rs)
+**Per-token validation for LLM output — verify, don't trust.**
+
+> Part of the **[L.ai](https://github.com/nutypebuddha/lai)** ecosystem.
+
+<img src="../docs/brand-LAI.svg" width="72" height="96" alt="L.ai witch-hat Ł glyph"/>
+
+</div>
+
+---
+
+# CID — Calibrated Inference Device
+
+> **L.ai · Gate** — part of the [L.ai](https://github.com/nutypebuddha/lai) ecosystem. *Verify, don't trust.*
 
 **A per-token validation layer for LLMs using pachinko mechanics to enforce mathematical, logical, and factual constraints at inference time.**
+
+> In the unified `lai` binary, Gate is invoked as `lai gate <subcommand>`. The standalone `cid` crate is the same engine, lib name `cid`.
 
 [Features](#features) • [Installation](#installation) • [Quick Start](#quick-start) • [Documentation](#documentation) • [Contributing](#contributing)
 

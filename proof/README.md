@@ -1,15 +1,25 @@
-# L.ai · Proof — *Laverna*
+<div align="center">
 
-> **Verify, don't trust.**
+# Ł L.ai · *Proof*
 
-**L.ai** is an offline, deterministic verification engine. It answers factual,
+**Offline, deterministic verification for AI. *Verify, don't trust.***
+
+> Part of the **[L.ai](https://github.com/nutypebuddha/lai)** ecosystem.
+
+<img src="../docs/brand-LAI.svg" width="72" height="96" alt="L.ai witch-hat Ł glyph"/>
+
+</div>
+
+---
+
+**L.ai · Proof** is an offline, deterministic verification engine. It answers factual,
 numeric, and computable questions by running them through a NAND-to-verify
 compute cascade and an embedded, content-addressed corpus — then hands back a
 machine-checkable **proof object** or a typed **refusal**. No guessing, no
 hallucination, no network required at runtime.
 
 *Laverna* is the internal code name for **L.ai · Proof** (see
-[`docs/brand.md`](docs/brand.md)). The sibling L.ai functions are **L.ai · Gate**
+[`docs/BRAND.md`](docs/BRAND.md)). The sibling L.ai functions are **L.ai · Gate**
 (CID, per-token validation) and **L.ai · Bridge** (CID-Bridge, chatbot fan-out).
 
 L.ai · Proof never guesses and fails loud: every result either carries a
@@ -145,7 +155,7 @@ same outputs and the same proof object.
 
 Part of the **L.ai** umbrella (offline, WASM-native, fail-loud verification
 substrate). *Laverna* is the code name for **L.ai · Proof**. See
-[`docs/brand.md`](docs/brand.md). Commercial mark: **L.ai** (DBA "Wintermore
+[`docs/BRAND.md`](docs/BRAND.md). Commercial mark: **L.ai** (DBA "Wintermore
 Housekeeping"); "Laverna" is not filed as a trademark.
 
 ## License
