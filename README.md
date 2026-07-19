@@ -1,101 +1,119 @@
+<div align="center">
+
 # L.ai
 
-> **Verify, don't trust.**
+**Offline-first verification for AI. Verify, don't trust.**
 
-**L.ai** is a single, offline-first verification umbrella for AI. One project,
-four functions — all deterministic, all fail-loud, none requiring a network at
-runtime:
+[![CI](https://github.com/nutypebuddha/L/actions/workflows/ci.yml/badge.svg)](https://github.com/nutypebuddha/L/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue)](LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-2021-orange)](https://rust-lang.org)
+[![WASM](https://img.shields.io/badge/WASM-supported-purple)](#webassembly)
+[![Offline](https://img.shields.io/badge/Offline-First-brightgreen)](#offline-first)
 
-| Function | Crate / dir | What it does |
-|----------|-------------|--------------|
-| **L.ai · Proof** | `proof/` (`laverna`) → `lai` | Deterministic reasoning engine: 9-graha wheel, NAND-to-verify proof cascade, embedded corpus, machine-checkable proof objects, local LLM assistant. |
-| **L.ai · Gate** | `gate/` (`lai-gate`) → `lai gate` | Per-token validation layer for LLM output — math, logic, fact, fallacy, bias. ~630KB pure Rust + WASM. |
-| **L.ai · Bridge** | `bridge/` (Node/TS) | Universal MCP bridge — any chatbot (Grok, Claude, GPT, Mistral) hooks into Gate validation through one endpoint. |
-| **L.ai · Athena** | `athena/` (`athena`) → `lai athena` | Relational reasoning engine — 30 subcommands for formulas, entities, Shikai NLP, Bankai solve, zodiac wheel, gyro descent. |
+</div>
 
-This repository is the **sole L.ai project**. Previously separate repos
-(`Laverna`, `CID`, `CID-Bridge`, `Athena-`) are now archived and merged here.
+---
 
-## Persona
+**L.ai** is a single binary that does four things — all deterministic, all fail-loud, no network required at runtime:
 
-The work has a throughline you can read in a chart, cast for **14 April 1994,
-20:09 CDT, Saint Croix Falls, WI** (Lahiri sidereal):
+| | Component | What it does |
+|---|-----------|--------------|
+| 🔍 | **Proof** | Deterministic reasoning engine: NAND-to-verify cascade, embedded corpus, machine-checkable proof objects, local LLM assistant (MCP) |
+| 🛡️ | **Gate** | Per-token validation for LLM output — math, logic, fact, fallacy, bias. ~630KB pure Rust + WASM |
+| 🔗 | **Bridge** | Universal MCP bridge — any chatbot (Claude, GPT, Grok, Mistral) hooks into Gate validation through one endpoint |
+| 🌐 | **Athena** | Relational reasoning engine — cross-domain formula graph, 30+ subcommands |
 
-- **Libra ascending, Jupiter in the ascendant** — the measured counselor; weigh
-  every claim on a balance.
-- **Saturn in Aquarius** — the systems architect; deterministic structure over hype.
-- **Sun in Aries (Ashwini)** — the first-mover.
-- **Moon in Taurus (Rohini)** — plain-spoken, no drama.
+## Quick start
 
-So L.ai speaks plainly, builds on structure, and refuses to guess.
+```bash
+# Build the unified binary
+cargo build --release -p laverna
 
-## Workspace layout
+# Validate an expression
+./target/release/lai validate "9.11 < 9.9"
+
+# Run the deterministic engine
+./target/release/lai tanto eval "2 + 3 * 4"
+
+# Start the MCP assistant (stdio transport)
+./target/release/lai assistant --mcp
+
+# Gate: validate LLM output tokens
+./target/release/lai gate validate "The earth is flat"
+```
+
+No model? The engine still answers from the verified corpus and tells you it did — **it never fabricates.**
+
+## Features
+
+```toml
+[dependencies]
+laverna = { version = "0.4", features = [
+    "assistant",    # Local LLM assistant (ollama/OpenAI-compatible)
+    "mcp",          # MCP stdio transport
+    "websearch",    # Deterministic web search
+    "budget",       # Budget-constrained strategizer
+    "llm",          # LLM integration
+    "milp",         # Mixed-integer linear programming
+    "graph",        # Graph-based reasoning
+]}
+```
+
+## Architecture
 
 ```
 lai/
-  proof/      L.ai · Proof  (Rust, crate laverna → unified `lai` binary)
-  gate/       L.ai · Gate   (Rust, crate lai-gate + cid-wasm)
-  athena/     L.ai · Athena (Rust, crate athena — lib only, merged into `lai`)
-  bridge/     L.ai · Bridge (Node/TypeScript)
-  bin/        vendored llama.cpp engine + model drop-in
+├── proof/      L.ai · Proof  → unified `lai` binary
+├── gate/       L.ai · Gate   → per-token validation (Rust + WASM)
+├── athena/     L.ai · Athena → relational reasoning (30 subcommands)
+├── bridge/     L.ai · Bridge → MCP bridge (Node.js/TypeScript)
+└── android-app/              → Android APK (stdio MCP daemon)
 ```
 
-## Build
+### NAND-to-verify cascade
+
+Every answer goes through the same path:
+
+```
+Input → Tokenize → Gate (per-token) → Proof (NAND core) → Corpus (1,606 facts) → Output
+                                         ↓
+                                    Refuse if unverifiable
+```
+
+No network. No stochastic generation. No confidence scores — just pass/fail with diagnostics.
+
+## WebAssembly
 
 ```bash
-# Whole workspace
-cargo build --workspace
-
-# Unified binary (Proof + Gate + Athena)
-cargo build -p laverna                      # default features
-cargo build --release -p laverna            # release
-
-# Individual crates (library only)
-cargo build -p lai-gate                     # Gate
-cargo build -p athena --no-default-features # Athena (lib check only)
-
-# WebAssembly (Proof + Gate)
+# Proof + Gate as WASM (~630KB)
 cargo build --release --target wasm32-unknown-unknown -p laverna-wasm
 cargo build --release --target wasm32-unknown-unknown -p lai-gate-wasm
-
-# Bridge (Node)
-cd bridge && npm install
 ```
 
-## Quick start — offline assistant (Proof + local LLM)
+## Android
+
+The Android APK runs L.ai as an MCP daemon over stdio — zero network, zero localhost sockets:
 
 ```bash
-cargo build --release --features "mcp websearch budget llm milp graph"
-./scripts/get-model.sh          # fetch a small model (one command)
-./target/release/lai mcp        # talk to it over MCP
+# Build for Android (requires NDK)
+cd android-app && ./gradlew assembleDebug
+# Output: android-app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-## Athena — relational reasoning (30 subcommands)
+## Testing
 
 ```bash
-cargo build --release -p laverna
-./target/release/lai athena info                    # system info
-./target/release/lai athena wheel --domain aries    # zodiac wheel
-./target/release/lai athena classify mercury        # token classification
-./target/release/lai athena descent "add two nums"  # 7-layer descent
-./target/release/lai athena solve "add 2 3"         # full Bankai pipeline
+cargo test --workspace           # 625+ tests
+cargo clippy --all-targets       # Lint
+cargo fmt -- --check             # Format check
 ```
-
-No model? Proof still answers from the verified engine and tells you it did —
-it never fabricates.
-
-## Tests & CI
-
-```bash
-cargo fmt -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
-
-CI builds the workspace, both WASM crates, and the Bridge, and attaches static
-release binaries to tagged releases.
 
 ## License
 
-Apache-2.0 for the whole umbrella. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
-Copyright 2026 nutypebuddha.
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+<div align="center">
+
+*Verify, don't trust.* — [L.ai](https://github.com/nutypebuddha/L)
+
+</div>
