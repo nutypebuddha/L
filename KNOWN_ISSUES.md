@@ -127,4 +127,55 @@ lai validate "5 >= 3"        → passed: true (was: false — "Equation does not
 **Repro:** `grep -c '\[\[entity\]\]' proof/entities/` → 214; `grep -c '\[\[formula\]\]' proof/formulas/` → 528.
 **Detail:** The "1,606+ facts" figure was unsupported (the corpus is 214 entities + 528 formulas). Corrected the README and added `assert_eq!(len, 214)` / `assert_eq!(len, 528)` to the existing load-all tests in `proof/src/entity/mod.rs` and `proof/src/formula/registry.rs` so the documented counts are enforced.
 
+---
+
+<!-- Findings from the external black-box review LAI-0.4.2-review.md. Namespaced
+     REVIEW-Txx to avoid colliding with the internal ticket numbers above. -->
+
+### [REVIEW-T52] `entities` output non-deterministic (HashMap key order)
+
+**Status:** fixed
+**Affects:** `lai entities` (`--format json` and text), `entities` MCP tool
+**Does not affect:** any other subcommand; the corpus content itself is unchanged
+**Repro:** `for i in 1 2 3; do lai entities --format json | sha256sum; done` → 3 different hashes (pre-fix)
+**Detail:** Entity property keys are stored in a `HashMap`, whose iteration order is unstable, so the `properties` array/list serialized in a different order each run — a determinism-rule violation. Sorted the keys before serialization in all three emit paths (JSON, text, MCP tool). Now 1 hash across N runs. Tests: `entities_determinism_tests`. Commit `efa5d45`.
+
+---
+
+### [REVIEW-T53] `route` sends metacognitive queries OutOfScope
+
+**Status:** fixed
+**Affects:** `lai route --query` for reasoning/metacognition queries and inflected word forms
+**Does not affect:** the refusal path for genuinely out-of-corpus queries (still refuses)
+**Repro:** `lai route --query "how do I reason about my own reasoning?"` → `OutOfScope` (pre-fix)
+**Detail:** The headline "reason about reasoning" query refused because (a) core reasoning vocabulary and inflected forms were missing from the routing lexicon, and (b) any query where a majority of content tokens missed was hard-nulled to OutOfScope. Three deterministic fixes: a static dependency-free light stemmer (`nlp::stem_token`) + morphological fallback in `domain_for_keyword` so `reasoning`→`reason`, `thinking`→`think`, `databases`→`database`; extended the graha lexicon with reasoning/metacognition/data terms; and split the low-confidence gate so that when *something* resolves but most tokens miss, the route returns a flagged best-guess (`StrategyReport.low_confidence`) instead of refusing. Verified the dangerous failure mode (weakening refusal) did NOT occur — gibberish still refuses. Commit `2cf8f9e`.
+
+---
+
+### [REVIEW-T55] stale `--help` example for `chart` (docs)
+
+**Status:** fixed
+**Affects:** top-level `lai --help` EXAMPLES block (docs only)
+**Does not affect:** runtime behavior — `chart`/`build` correctly reject bare local time
+**Repro:** copy-paste the `chart` EXAMPLES line → `MissingTimezone` refusal (pre-fix)
+**Detail:** The EXAMPLES entries for `chart` and `build` omitted `--tz`, so running them verbatim refused (correctly — a silent UTC assumption corrupts the sidereal computation). Added `--tz "America/Chicago"` to both examples. Commit `efa5d45`.
+
+---
+
+### [REVIEW-T60] inconsistent refusal contract for zero-force `route` queries
+
+**Status:** fixed
+**Affects:** `lai route --query` on queries that resolve zero grahas (all-stopword or single-token)
+**Does not affect:** unknown-word queries (already refused correctly), resolving/low-confidence queries
+**Repro:** `lai route --query "the of and to a in"; echo $?` → `rc=0`, `primary:null` (pre-fix); `lai route --query "asdfgh qwerty"; echo $?` → `rc=1` OutOfScope
+**Detail:** The route refusal keyed off `!unresolved.is_empty()`. An all-stopword query leaves `unresolved` empty (stopwords land in `stopwords`), so it slipped past the refusal → quiet `rc=0` with `primary:null` — a success-shaped result for a failed route (null-deref hazard for consumers, false success signal for shells/CI). The contract leaked *how* tokens failed (stopword vs unknown) into the API. Fixed by refusing whenever no graha resolved — keyed off `report.ranked.is_empty()` (zero resolved weight). Every zero-force query now refuses identically: `rc=1`, typed `OutOfScope`. Confirmed `low_confidence` is wired (fires on ≥1 resolved + majority-unresolved, e.g. `"energy asdfgh qwerty zxcvb"`). Tests: `route_purity::{zero_force_queries_share_one_refusal_contract, resolving_query_succeeds_with_zero_exit, low_confidence_flag_fires_on_partial_resolution}`. Commit `d4a79f4`.
+
+---
+
+### [REVIEW-NOTE] binaries shipped UPX-packed (per-exec latency)
+
+**Status:** addressed
+**Affects:** exported static binaries (distribution)
+**Does not affect:** correctness — a packaging/latency concern only
+**Detail:** UPX self-decompresses the whole image into RAM on every exec, adding a fixed ~220 ms per-invocation tax — a heavy regression for a per-query CLI / MCP / assistant loop. `export-static.sh` now ships both `lai-<arch>-static` (unpacked, fast, default execution path) and `lai-<arch>-static-slim` (UPX-packed, distribution/transport only). `NO_UPX=1` skips the slim build; `SLIM_ONLY=1` emits only the packed one. Commit `7d81092`.
 
