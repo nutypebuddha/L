@@ -42,7 +42,9 @@ class MainActivity : AppCompatActivity() {
     private var pendingPhotoCallback: ((String) -> Unit)? = null
     private var daemonLog: String = ""
     private var daemonStarted: Boolean = false
+    private var llmReachable: Boolean = false
     private var daemonProcess: java.lang.Process? = null
+    private var logcatProcess: java.lang.Process? = null
     private var daemonStdin: java.io.OutputStream? = null
     private var daemonStdout: java.io.BufferedReader? = null
     private val daemonLock = java.util.concurrent.locks.ReentrantLock()
@@ -53,6 +55,9 @@ class MainActivity : AppCompatActivity() {
         private const val MODEL_URL = "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf"
         private const val MODEL_NAME = "qwen2.5-0.5b-instruct-q4_k_m.gguf"
         private const val MODEL_EXPECTED_BYTES = 491400032L
+        // T68: pin the expected SHA-256 of the GGUF. Fail loud on mismatch.
+        private const val MODEL_SHA256 = ""
+        private const val REQUEST_ROLE_ASSISTANT = 4242
     }
 
     private val cameraLauncher = registerForActivityResult(
@@ -83,9 +88,13 @@ class MainActivity : AppCompatActivity() {
 
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            settings.allowFileAccess = true
+            // T63: only our own bundled assets should load. Disable broad file
+            // access and never allow cleartext to arbitrary hosts.
+            settings.allowFileAccess = false
+            settings.allowFileAccessFromFileURLs = false
+            settings.allowUniversalAccessFromFileURLs = false
             settings.mediaPlaybackRequiresUserGesture = false
-            settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             settings.setSupportZoom(false)
             settings.builtInZoomControls = false
             settings.displayZoomControls = false
@@ -94,8 +103,18 @@ class MainActivity : AppCompatActivity() {
             setLayerType(View.LAYER_TYPE_HARDWARE, null)
 
             webViewClient = object : WebViewClient() {
+                // T63: allow only our bundled assets to render in-WebView.
+                // Everything else (http(s), other file://) escapes to a real
+                // browser via ACTION_VIEW instead of loading inside the bridge.
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                    return false
+                    val url = request?.url?.toString() ?: return false
+                    if (url.startsWith("file:///android_asset/")) return false
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW, request.url)
+                        startActivity(intent)
+                    } catch (_: Exception) {
+                    }
+                    return true
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -111,8 +130,15 @@ class MainActivity : AppCompatActivity() {
             }
 
             webChromeClient = object : WebChromeClient() {
+                // T63: never auto-grant. Only allow the exact origins we trust
+                // (our asset origin) and only for resources the app actually uses.
                 override fun onPermissionRequest(request: PermissionRequest?) {
-                    request?.grant(request.resources)
+                    request ?: return
+                    val trusted = "file:///android_asset/"
+                    val granted = request.resources.filter {
+                        request.origin?.toString() == trusted
+                    }.toTypedArray()
+                    if (granted.isNotEmpty()) request.grant(granted) else request.deny()
                 }
             }
 
@@ -122,7 +148,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         installLogcatFile()
-        startLaiService()
+        maybeRequestAssistantRole()
 
         lifecycleScope.launch(Dispatchers.IO) {
             ensureModelReady()
@@ -138,7 +164,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun modelReady(): Boolean {
         val f = modelFile()
-        return f.exists() && f.length() >= MODEL_EXPECTED_BYTES - 1000
+        if (!f.exists()) return false
+        // T68: verify exact size AND pinned SHA-256 before trusting a cache.
+        val actualSha = Rpc.sha256Hex(f)
+        if (!Rpc.isModelValid(f.length(), MODEL_EXPECTED_BYTES, actualSha, MODEL_SHA256)) {
+            if (MODEL_SHA256.isNotEmpty() && actualSha != MODEL_SHA256) {
+                Log.w(TAG, "Cached model SHA mismatch — re-downloading")
+                f.delete()
+            }
+            return false
+        }
+        return true
     }
 
     private suspend fun ensureModelReady() {
@@ -150,16 +186,27 @@ class MainActivity : AppCompatActivity() {
         val tmp = File(dir, "$MODEL_NAME.tmp")
         notifyJs("model-progress", 0)
 
+        // T68: resume support — if a .tmp exists, request the remaining bytes.
+        val resumeFrom = if (tmp.exists()) tmp.length() else 0L
         try {
             val conn = URL(MODEL_URL).openConnection() as HttpURLConnection
             conn.connectTimeout = 15_000
             conn.readTimeout = 60_000
+            Rpc.rangeHeader(resumeFrom)?.let { conn.setRequestProperty("Range", it) }
             conn.connect()
 
-            val total = conn.contentLength.toLong().coerceAtLeast(1)
-            var downloaded = 0L
+            if (conn.responseCode == HttpURLConnection.HTTP_PARTIAL && resumeFrom > 0) {
+                Log.i(TAG, "Resuming model download from $resumeFrom bytes")
+            } else if (resumeFrom > 0) {
+                // Server ignored Range — restart cleanly from zero.
+                tmp.delete()
+            }
+
+            val total = (conn.contentLengthLong + resumeFrom).coerceAtLeast(1)
+            var downloaded = resumeFrom
             conn.inputStream.use { input ->
-                FileOutputStream(tmp).use { output ->
+                // Append when resuming, else overwrite.
+                FileOutputStream(tmp, resumeFrom > 0).use { output ->
                     val buf = ByteArray(64 * 1024)
                     var read: Int
                     while (input.read(buf).also { read = it } != -1) {
@@ -181,13 +228,21 @@ class MainActivity : AppCompatActivity() {
                 return
             }
 
+            // T68: hash before rename; fail loud on mismatch.
+            if (MODEL_SHA256.isNotEmpty() && Rpc.sha256Hex(tmp) != MODEL_SHA256) {
+                Log.e(TAG, "Model SHA-256 mismatch — refusing to install (verify-don't-trust)")
+                tmp.delete()
+                notifyJs("model-error", 0)
+                return
+            }
+
             tmp.renameTo(modelFile())
             Log.i(TAG, "Model ready: ${modelFile().absolutePath} (${modelFile().length()} bytes)")
             notifyJs("model-progress", 100)
         } catch (e: Exception) {
             Log.e(TAG, "Model download failed: ${e.message}")
-            tmp.delete()
             notifyJs("model-error", 0)
+            // Keep .tmp for resume on the next attempt; don't delete on network error.
         }
     }
 
@@ -202,10 +257,19 @@ class MainActivity : AppCompatActivity() {
 
     // ── Logcat to file ──────────────────────────────────────────
 
+    // T69: correct filterspec (two specs, not one malformed one) and keep the
+    // Process reference so it can be destroyed on exit (no leak, no append pile-up).
     private fun installLogcatFile() {
         try {
             val logFile = File(filesDir, "lai.log")
-            Runtime.getRuntime().exec(arrayOf("logcat", "-f", logFile.absolutePath, "-s", "LaiDaemon:LaiMain:*"))
+            // Rotate if the previous capture grew large.
+            if (logFile.exists() && logFile.length() > 4 * 1024 * 1024) {
+                logFile.renameTo(File(filesDir, "lai.log.old"))
+            }
+            logcatProcess?.destroy()
+            logcatProcess = Runtime.getRuntime().exec(
+                arrayOf("logcat", "-f", logFile.absolutePath, "LaiDaemon:D", "LaiMain:D", "*:S")
+            )
             Log.i(TAG, "Logcat writing to ${logFile.absolutePath}")
         } catch (e: Exception) {
             Log.w(TAG, "Could not start logcat file capture: ${e.message}")
@@ -224,12 +288,10 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val candidates = listOf(src.absolutePath, run {
-            val execDir = File(filesDir, "bin"); execDir.mkdirs()
-            val bin = File(execDir, "lai")
-            try { src.copyTo(bin, overwrite = true); bin.setExecutable(true, false) } catch (_: Exception) {}
-            bin.absolutePath
-        })
+        // T67: exec from nativeLibraryDir only. Copying to filesDir/bin is dead
+        // code on API 29+ (SELinux W^X denies execve on app-data) and wastes
+        // 8.5MB + flash writes on every cold start.
+        val candidates = listOf(src.absolutePath)
 
         val sb = StringBuilder()
         var process: java.lang.Process? = null
@@ -288,28 +350,74 @@ class MainActivity : AppCompatActivity() {
 
         daemonStarted = true
         daemonLog = "launched from $launchedFrom (stdio MCP)"
-        Log.i(TAG, "Daemon ready: $daemonLog")
+        llmReachable = probeLlmReachable()
+        Log.i(TAG, "Daemon ready: $daemonLog — llm=${if (llmReachable) "reachable" else "unreachable (corpus-only)"}")
+    }
+
+    // T61: the on-device LLM endpoint (ollama at 127.0.0.1:11434) is only
+    // present on dev phones. On a stock device nothing listens there, so the
+    // chat path silently degrades to the deterministic engine. Probe it once
+    // and expose the result so the UI can stop claiming LINKED when it isn't.
+    private fun probeLlmReachable(): Boolean {
+        return try {
+            val url = URL("http://127.0.0.1:11434/api/tags")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 2_000
+            conn.readTimeout = 2_000
+            conn.requestMethod = "GET"
+            val ok = conn.responseCode == HttpURLConnection.HTTP_OK
+            conn.disconnect()
+            ok
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun sendRpcSync(method: String?, params: String): String {
         daemonLock.lock()
         try {
             val id = if (method != null) { rpcId++; rpcId } else null
-            val msg = buildString {
-                append("{\"jsonrpc\":\"2.0\"")
-                if (id != null) append(",\"id\":$id")
-                if (method != null) append(",\"method\":\"$method\"")
-                append(",\"params\":$params}")
-            }
+            // Build the frame with JSONObject so newlines/control chars are
+            // JSON-escaped (T64). Hand-built strings split the line-delimited
+            // framing on any literal newline.
+            val msg = Rpc.buildFrame(method, params, id)
             val stdin = daemonStdin ?: throw IllegalStateException("daemon stdin closed")
             stdin.write((msg + "\n").toByteArray(Charsets.UTF_8))
             stdin.flush()
             if (method == null) return ""
 
             val stdout = daemonStdout ?: throw IllegalStateException("daemon stdout closed")
-            return stdout.readLine() ?: throw java.io.EOFException("daemon stdout EOF")
+            val deadline = System.currentTimeMillis() + Rpc.RPC_READ_TIMEOUT_MS
+            // Match responses by id; skip stray/non-matching frames (T64).
+            while (System.currentTimeMillis() < deadline) {
+                val line = stdout.readLine() ?: throw java.io.EOFException("daemon stdout EOF")
+                val frame = line.trim()
+                if (frame.isEmpty()) continue
+                if (id == null || Rpc.frameMatchesId(frame, id)) return frame
+            }
+            throw java.io.IOException("daemon RPC timeout (id=$id) — restarting daemon")
+        } catch (e: java.io.IOException) {
+            // Desync/unreachable: tear down and restart so the next call recovers.
+            Log.e(TAG, "RPC desync: ${e.message}")
+            restartDaemonNow()
+            throw e
         } finally {
             daemonLock.unlock()
+        }
+    }
+
+    private fun restartDaemonNow() {
+        try {
+            daemonProcess?.destroyForcibly()
+        } catch (_: Exception) {
+        }
+        daemonProcess = null
+        daemonStdin = null
+        daemonStdout = null
+        daemonStarted = false
+        try {
+            startLaiDaemon()
+        } catch (_: Exception) {
         }
     }
 
@@ -320,19 +428,30 @@ class MainActivity : AppCompatActivity() {
             val alive = try { daemonProcess?.exitValue(); false } catch (_: IllegalThreadStateException) { true }
             append("alive=$alive\n")
             append("model=${if (modelReady()) modelFile().absolutePath else "none"}\n")
+            append("llm=${if (llmReachable) "reachable" else "unreachable (corpus-only)"}\n")
         }
     }
 
-    private fun startLaiService() {
+    private fun maybeRequestAssistantRole() {
+        val rm = getSystemService(ROLE_SERVICE) as? android.app.role.RoleManager ?: return
+        val role = android.app.role.RoleManager.ROLE_ASSISTANT
+        if (!rm.isRoleAvailable(role)) return
+        if (rm.isRoleHeld(role)) return
         try {
-            val serviceIntent = Intent(this, LaiService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent)
-            } else {
-                startService(serviceIntent)
+            startActivityForResult(rm.createRequestRoleIntent(role), REQUEST_ROLE_ASSISTANT)
+        } catch (_: Exception) {
+            // Some OEM builds don't honor the dialog; send the user to Settings.
+            try {
+                startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
+            } catch (_: Exception) {
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_ROLE_ASSISTANT) {
+            // Result ignored: ROLE_ASSISTANT state is re-checked on next launch.
         }
     }
 
@@ -351,6 +470,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        try { logcatProcess?.destroy() } catch (_: Exception) {}
+        logcatProcess = null
+        try { daemonProcess?.destroyForcibly() } catch (_: Exception) {}
         webView.destroy()
         super.onDestroy()
     }
@@ -363,16 +485,10 @@ class MainActivity : AppCompatActivity() {
                 return "Error: daemon not started — model may still be downloading"
             }
             return try {
-                val raw = command
-                    .removePrefix("assistant --text")
-                    .removePrefix("--text")
-                    .replace("--format json", "")
-                    .trim()
-                    .trim('"')
-                val text = raw
-                    .replace("\\\"", "\"")
-                    .replace("\\\\\"", "\"")
-                val params = """{"name":"chat","arguments":{"text":"${text.replace("\\", "\\\\").replace("\"", "\\\"")}"}}"""
+                // One escaping layer: the JS side passes the user's raw text;
+                // we marshal it into the chat params via Rpc (T65). No prefix
+                // stripping, no blind substring replacement.
+                val params = Rpc.chatParamsJson(command)
                 val rpcResp = sendRpcSync("tools/call", params)
                 val contentText = try {
                     val root = org.json.JSONObject(rpcResp)

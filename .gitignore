@@ -9,6 +9,8 @@ bin/models/*.gguf
 # Android build artifacts
 android-app/app/src/main/jniLibs/
 android-app/lai-release.keystore
+android-app/keystore.properties
+android-app/jniLibs-bak/
 android-app/app/build/
 android-app/.gradle/
 android-app/lib/

@@ -9,11 +9,19 @@ set -uo pipefail
 DIR="${1:-app/src/main/assets}"
 fail=0
 
-command -v node >/dev/null || { echo "check-assets: node not found — install it or this guard is decorative"; exit 127; }
+# T70: resolve node portably instead of hardcoding a developer box path.
+NODE_BIN="$(command -v node || true)"
+if [ -z "$NODE_BIN" ]; then
+  # Fall back to the common local install location if it exists.
+  for cand in "$HOME/bin/node" /usr/local/bin/node /usr/bin/node; do
+    [ -x "$cand" ] && NODE_BIN="$cand" && break
+  done
+fi
+[ -n "$NODE_BIN" ] || { echo "check-assets: node not found — install it or this guard is decorative"; exit 127; }
 
 for f in "$DIR"/*.js; do
   [ -e "$f" ] || continue
-  if node --check "$f" 2>/tmp/asset-check.err; then
+  if "$NODE_BIN" --check "$f" 2>/tmp/asset-check.err; then
     echo "  ok    $f"
   else
     echo "  FAIL  $f"; sed 's/^/        /' /tmp/asset-check.err; fail=1
