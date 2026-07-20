@@ -267,9 +267,7 @@ fn parse_eval(lower: &str, original: &str) -> Option<Intent> {
 
     for trigger in &triggers {
         if let Some(rest) = lower.strip_prefix(trigger) {
-            let expr = rest
-                .trim()
-                .trim_start_matches([':', ' ']);
+            let expr = rest.trim().trim_start_matches([':', ' ']);
             if !expr.is_empty() && looks_like_math(expr) {
                 return Some(Intent::Eval {
                     expression: expr.to_string(),

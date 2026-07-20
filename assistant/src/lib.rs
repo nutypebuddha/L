@@ -135,10 +135,7 @@ impl Assistant {
             // In daemon mode, only respond to wake word
             if daemon {
                 if let Some(cmd) = text_lower.strip_prefix(&wake_lower) {
-                    let cmd = cmd
-                        .trim()
-                        .trim_start_matches([',', ':'])
-                        .trim();
+                    let cmd = cmd.trim().trim_start_matches([',', ':']).trim();
                     if cmd.is_empty() {
                         toast(personality::WAKE_YES).await;
                         speech::tts::speak(personality::WAKE_YES).await?;

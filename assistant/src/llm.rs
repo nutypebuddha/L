@@ -121,8 +121,16 @@ impl Llm {
     /// True if the LLM server appears reachable. Best-effort — a server that
     /// started but is still loading the model will answer health, so this is a
     /// soft hint only. Callers should still tolerate a failed `answer()`.
+    ///
+    /// Probes the OpenAI-compatible `/v1/models` endpoint, which both
+    /// `ollama serve` (`http://127.0.0.1:11434/v1`) and the vendored
+    /// `llama-server` (`http://127.0.0.1:8080/v1`) expose. (The legacy
+    /// `/../health` path returns 404 on ollama and falsely disabled the agent
+    /// loop — see T61/LLM-reachability.)
     pub fn available() -> bool {
-        let url = format!("{}/../health", base_url().trim_end_matches('/'));
+        let base = base_url();
+        let base = base.trim_end_matches('/');
+        let url = format!("{}/models", base);
         let config = ureq::config::Config::builder()
             .timeout_global(Some(Duration::from_secs(2)))
             .build();
