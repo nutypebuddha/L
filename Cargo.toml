@@ -14,8 +14,8 @@ members = [
 edition = "2021"
 license = "Apache-2.0"
 authors = ["nutypebuddha <nutypebuddha@proton.me>"]
-repository = "https://github.com/nutypebuddha/lai"
-homepage = "https://github.com/nutypebuddha/lai"
+repository = "https://github.com/nutypebuddha/L"
+homepage = "https://github.com/nutypebuddha/L"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

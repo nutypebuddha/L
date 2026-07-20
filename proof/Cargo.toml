@@ -6,8 +6,8 @@ description = "L.ai — deterministic reasoning engine + per-token validation (N
 authors = ["nutypebuddha <nutypebuddha@proton.me>"]
 license = "Apache-2.0"
 publish = true
-repository = "https://github.com/nutypebuddha/lai"
-homepage = "https://github.com/nutypebuddha/lai"
+repository = "https://github.com/nutypebuddha/L"
+homepage = "https://github.com/nutypebuddha/L"
 keywords = ["reasoning", "proof", "validation", "deterministic", "lai"]
 categories = ["science", "mathematics", "compilers", "cryptography"]
 

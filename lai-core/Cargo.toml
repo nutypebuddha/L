@@ -5,7 +5,7 @@ edition = "2021"
 description = "L.ai — shared domain types, primitives, and error hierarchy for the workspace"
 authors = ["nutypebuddha <nutypebuddha@proton.me>"]
 license = "Apache-2.0"
-repository = "https://github.com/nutypebuddha/lai"
+repository = "https://github.com/nutypebuddha/L"
 publish = false
 
 [dependencies]
