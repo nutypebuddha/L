@@ -1,3 +1,5 @@
+use super::schedule::{self, Kind};
+use crate::memory::data_dir;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use tokio::sync::RwLock;
@@ -19,11 +21,20 @@ pub async fn set_timer(secs: u64, label: Option<&str>) -> String {
     // Cancel existing timer with same label
     cancel_timer(Some(&label)).await;
 
+    // Persist before arming so a restart re-arms it (see actions::schedule).
+    let dir = data_dir();
+    if let Err(e) = schedule::add(&dir, Kind::Timer, &label, secs, &label).await {
+        return format!("could not persist timer: {e}");
+    }
+
     let handle = {
         let label = label.clone();
+        let dir = dir.clone();
         tokio::spawn(async move {
             sleep(Duration::from_secs(secs)).await;
             eprintln!("[TIMER EXPIRED: {label}]");
+            // Fired — drop it from the durable store.
+            let _ = schedule::remove(&dir, &Kind::Timer, &label).await;
             // TODO: play alarm sound via TTS or audio file
         })
     };
@@ -42,11 +53,13 @@ pub async fn set_timer(secs: u64, label: Option<&str>) -> String {
 }
 
 pub async fn cancel_timer(label: Option<&str>) -> String {
-    let timers = timers().write().await;
+    let dir = data_dir();
+    let mut timers = timers().write().await;
 
     if let Some(label) = label {
-        if let Some(handle) = timers.get(label) {
+        if let Some(handle) = timers.remove(label) {
             handle.abort();
+            let _ = schedule::remove(&dir, &Kind::Timer, label).await;
             return format!("Cancelled timer: {label}");
         }
         return format!("No timer named '{label}' found");
@@ -54,8 +67,9 @@ pub async fn cancel_timer(label: Option<&str>) -> String {
 
     // Cancel all
     let count = timers.len();
-    for handle in timers.values() {
+    for (label, handle) in timers.drain() {
         handle.abort();
+        let _ = schedule::remove(&dir, &Kind::Timer, &label).await;
     }
     format!("Cancelled {count} timer(s)")
 }

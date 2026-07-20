@@ -74,6 +74,13 @@ impl Assistant {
         let action_registry = actions::Registry::new();
         let pid_file = dirs_pid_file();
 
+        // Re-arm any timers/reminders that were still pending when the daemon
+        // last stopped, and prune anything that fired while it was down.
+        let restored = actions::schedule::restore(&crate::memory::data_dir()).await;
+        if restored > 0 {
+            eprintln!("[assistant] restored {restored} pending schedule(s)");
+        }
+
         Ok(Self {
             memory,
             action_registry,

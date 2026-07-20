@@ -7,6 +7,7 @@ pub mod location;
 pub mod memory;
 pub mod notification;
 pub mod reminder;
+pub mod schedule;
 pub mod sms;
 pub mod timer;
 #[cfg(feature = "web")]
