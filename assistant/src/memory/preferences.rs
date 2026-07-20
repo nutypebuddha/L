@@ -36,7 +36,12 @@ impl Preferences {
         if let Some(name) = &self.user_name {
             lines.push(format!("The user's name is {name}."));
         }
-        for (k, v) in &self.facts {
+        // Determinism rule: HashMap iteration order is unstable, so sort by key
+        // before emitting. Otherwise the injected context (and any snapshot of
+        // it) would reorder run-to-run.
+        let mut facts: Vec<(&String, &String)> = self.facts.iter().collect();
+        facts.sort_by(|a, b| a.0.cmp(b.0));
+        for (k, v) in facts {
             lines.push(format!("- {k}: {v}"));
         }
         if lines.is_empty() {

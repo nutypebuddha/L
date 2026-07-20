@@ -106,7 +106,10 @@ impl ConversationContext {
     }
 }
 
-fn data_dir() -> PathBuf {
+/// The on-disk root for the assistant's durable state (`preferences.toml`,
+/// history). Shared by `Memory` and the agent's memory tools so both read and
+/// write the same store.
+pub fn data_dir() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home).join(".lai").join("assistant")
     } else {

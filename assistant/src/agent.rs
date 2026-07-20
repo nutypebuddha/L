@@ -122,6 +122,39 @@ fn tool_schemas() -> Vec<Tool> {
                 "required": ["text"]
             }),
         },
+        Tool {
+            name: "remember".into(),
+            description: "Store a durable fact about the user (e.g. their city, preferences) so it persists across sessions. Use when the user states a lasting personal fact.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Short fact label, e.g. 'city' or 'temperature_unit'"},
+                    "value": {"type": "string", "description": "The fact value to remember"}
+                },
+                "required": ["key", "value"]
+            }),
+        },
+        Tool {
+            name: "recall".into(),
+            description: "Retrieve a remembered user fact by key, or list all remembered facts when key is empty.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Fact label to recall (empty = list all)"}
+                }
+            }),
+        },
+        Tool {
+            name: "forget".into(),
+            description: "Delete a remembered user fact by key.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Fact label to forget"}
+                },
+                "required": ["key"]
+            }),
+        },
         #[cfg(feature = "termux")]
         Tool {
             name: "battery_status".into(),

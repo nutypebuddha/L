@@ -4,6 +4,7 @@ pub mod call;
 pub mod camera;
 pub mod contacts;
 pub mod location;
+pub mod memory;
 pub mod notification;
 pub mod reminder;
 pub mod sms;
@@ -31,6 +32,7 @@ impl Registry {
         handlers.insert("timer".into(), "Set/cancel timers".into());
         handlers.insert("alarm".into(), "Set alarms".into());
         handlers.insert("reminder".into(), "Set reminders".into());
+        handlers.insert("memory".into(), "Remember/recall/forget user facts".into());
         #[cfg(feature = "termux")]
         handlers.insert("sms".into(), "Send text messages".into());
         #[cfg(feature = "termux")]
@@ -95,6 +97,19 @@ pub async fn run_tool(name: &str, args: &serde_json::Value) -> String {
             let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("");
             let when = args.get("when").and_then(|v| v.as_str()).unwrap_or("");
             reminder::set_reminder(text, when).await
+        }
+        "remember" => {
+            let key = args.get("key").and_then(|v| v.as_str()).unwrap_or("");
+            let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
+            memory::remember(key, value).await
+        }
+        "recall" => {
+            let key = args.get("key").and_then(|v| v.as_str()).unwrap_or("");
+            memory::recall(key).await
+        }
+        "forget" => {
+            let key = args.get("key").and_then(|v| v.as_str()).unwrap_or("");
+            memory::forget(key).await
         }
         #[cfg(feature = "termux")]
         "battery_status" => battery::status().await,
