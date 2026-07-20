@@ -20,6 +20,12 @@
 #   ARCH               x86_64 (default) | aarch64
 #   FEATURES           cargo features (default: the crate's default set)
 #   HUB                export dir (default: $HOME/downloads)
+#   SDCARD=1           export to shared-storage Download instead of HUB.
+#                      Path autodetected (env SDCARD_DIR overrides). On this
+#                      proot the shared store is bind-mounted at /mnt/android;
+#                      it is a FUSE mount (no exec bit, no symlinks) so copy the
+#                      binary to an exec-capable fs and `chmod +x` before running.
+#   SDCARD_DIR         explicit shared-storage Download dir (implies SDCARD=1)
 #   UPX_BIN            path to the upx binary (default: `command -v upx`)
 #   NO_UPX=1           skip compression, export the raw static binary
 #   CARGO_BUILD_JOBS   parallel jobs (not hardcoded; set per-invocation)
@@ -36,7 +42,21 @@ case "$ARCH" in
     *) echo "error: ARCH must be x86_64 or aarch64 (got '$ARCH')" >&2; exit 1 ;;
 esac
 
-HUB="${HUB:-${HOME:-/root}/downloads}"
+# Resolve the export dir. SDCARD=1 (or SDCARD_DIR) targets shared storage,
+# autodetecting the first existing Download among the known mount points.
+if [ -n "${SDCARD_DIR:-}" ]; then
+    HUB="$SDCARD_DIR"
+elif [ "${SDCARD:-0}" = 1 ]; then
+    HUB=""
+    for d in /mnt/android/Download /storage/emulated/0/Download \
+             /sdcard/Download /storage/self/primary/Download; do
+        [ -d "$d" ] && { HUB="$d"; break; }
+    done
+    [ -n "$HUB" ] || { echo "error: SDCARD set but no shared-storage Download dir found (set SDCARD_DIR=...)" >&2; exit 1; }
+    echo "==> SDCARD export dir: $HUB"
+else
+    HUB="${HUB:-${HOME:-/root}/downloads}"
+fi
 DEST="$HUB/lai-${ARCH}-static"
 # NB: upx reads its own options from the `UPX` env var, so we never name ours
 # that. Also scrub any inherited `UPX` so it can't corrupt the upx invocation.
@@ -100,19 +120,27 @@ else
     echo "ok: no dynamic-linker reference -> STATIC"
 fi
 
-mkdir -p "$HUB"
-cp "$BIN" "$DEST"
-chmod +x "$DEST"
-RAW_SIZE="$(du -h "$DEST" | cut -f1)"
+# Stage on a writable local fs first. The export dir may be a FUSE/vfat mount
+# (shared storage) where chmod +x is a no-op and in-place upx can fail — so all
+# mutation happens on the stage copy, then we cp only the finished binary out.
+STAGE="$(mktemp -t lai-export.XXXXXX)"
+cp "$BIN" "$STAGE"
+chmod +x "$STAGE"
+RAW_SIZE="$(du -h "$STAGE" | cut -f1)"
 
 if [ "${NO_UPX:-0}" = 1 ]; then
     echo "==> NO_UPX=1 set; skipping compression"
 elif [ -n "$UPX_BIN" ] && [ -x "$UPX_BIN" ]; then
     echo "==> compressing with UPX ($UPX_BIN)"
-    "$UPX_BIN" --best --lzma "$DEST"
+    "$UPX_BIN" --best --lzma "$STAGE"
 else
-    echo "warn: upx not found (set UPX=/path/to/upx or NO_UPX=1); shipping raw binary"
+    echo "warn: upx not found (set UPX_BIN=/path/to/upx or NO_UPX=1); shipping raw binary"
 fi
+
+mkdir -p "$HUB"
+cp "$STAGE" "$DEST"
+chmod +x "$DEST" 2>/dev/null || true   # no-op on FUSE/vfat; not an error
+rm -f "$STAGE"
 
 echo "==> done: $DEST (raw $RAW_SIZE -> $(du -h "$DEST" | cut -f1))"
 ls -lh "$DEST"
