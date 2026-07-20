@@ -77,7 +77,7 @@ back down to proof (NAND-to-verify). It never guesses: out-of-scope input fails 
 loudly instead of hallucinating. Also includes L.ai · Gate (per-token validation) \
 and Tanto (compute engine).",
     version,
-    after_long_help = "EXAMPLES:\n  lai ping\n  lai solve --query \"2 + 3 = 5\"\n  lai solve --query \"10 % 3 = 1\" --format json\n  lai solve --batch < queries.jsonl\n  lai route --query \"how should we architect for LLM safety?\" --format json\n  lai chart -d \"1994-04-14 20:09\" --latitude 45.4 --longitude -92.9 --format json\n  lai validate \"2 + 3 = 5\" --format json\n  lai formulas --domain health\n  lai build --domain domains/cp77_level1.toml -t \"1994-04-15 01:09\" --latitude 45.41 --longitude -92.64 --explain\n  lai strategize --query \"how do I build a resilient distributed system?\" --budget 20 --explain\n  lai schema optimize\n  lai schema domain\n  lai gate validate \"2+2=5\" math\n  lai gate fix \"2+2=5\" --- math\n  lai gate compress \"the quick brown fox\" light\n  lai gate score \"The answer is 42\"\n  lai tanto eval \"sqrt(144)\"\n  lai tanto convert \"100\" mph kmh\n  lai tanto formula circle_area 5\n  lai gate-repl"
+    after_long_help = "EXAMPLES:\n  lai ping\n  lai solve --query \"2 + 3 = 5\"\n  lai solve --query \"10 % 3 = 1\" --format json\n  lai solve --batch < queries.jsonl\n  lai route --query \"how should we architect for LLM safety?\" --format json\n  lai chart -d \"1994-04-14 20:09\" --tz \"America/Chicago\" --latitude 45.4 --longitude -92.9 --format json\n  lai validate \"2 + 3 = 5\" --format json\n  lai formulas --domain health\n  lai build --domain domains/cp77_level1.toml -t \"1994-04-15 01:09\" --tz \"America/Chicago\" --latitude 45.41 --longitude -92.64 --explain\n  lai strategize --query \"how do I build a resilient distributed system?\" --budget 20 --explain\n  lai schema optimize\n  lai schema domain\n  lai gate validate \"2+2=5\" math\n  lai gate fix \"2+2=5\" --- math\n  lai gate compress \"the quick brown fox\" light\n  lai gate score \"The answer is 42\"\n  lai tanto eval \"sqrt(144)\"\n  lai tanto convert \"100\" mph kmh\n  lai tanto formula circle_area 5\n  lai gate-repl"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -3579,15 +3579,17 @@ fn cmd_entities(filter: Option<&str>, domain: Option<&str>, limit: usize, format
         let value = serde_json::json!(seeds
             .iter()
             .take(limit)
-            .map(|seed| serde_json::json!({
-                "id": seed.id,
-                "description": seed.description,
-                "properties": seed
-                    .properties
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>()
-            }))
+            .map(|seed| {
+                // Determinism rule: HashMap key order is unstable, so sort the
+                // property keys before serialization (T52).
+                let mut props: Vec<_> = seed.properties.keys().cloned().collect();
+                props.sort();
+                serde_json::json!({
+                    "id": seed.id,
+                    "description": seed.description,
+                    "properties": props
+                })
+            })
             .collect::<Vec<_>>());
         println!("{}", serde_json::to_string(&value).unwrap());
         return;
@@ -3599,7 +3601,9 @@ fn cmd_entities(filter: Option<&str>, domain: Option<&str>, limit: usize, format
         seeds.len()
     );
     for seed in seeds.iter().take(limit) {
-        let props: Vec<_> = seed.properties.keys().cloned().collect();
+        // Determinism rule: sort HashMap keys before display (T52).
+        let mut props: Vec<_> = seed.properties.keys().cloned().collect();
+        props.sort();
         println!(
             "  {} — {} [{}]",
             seed.id,
@@ -4948,7 +4952,9 @@ fn entities_tool(
         seeds.len()
     );
     for s in seeds.iter().take(limit) {
-        let props: Vec<_> = s.properties.keys().cloned().collect();
+        // Determinism rule: sort HashMap keys before display (T52).
+        let mut props: Vec<_> = s.properties.keys().cloned().collect();
+        props.sort();
         out.push_str(&format!(
             "  {} — {} [{}]\n",
             s.id,
@@ -5759,6 +5765,50 @@ mod proof_tests {
         let recomputed = build_proof_payload(&run_solve(proof["query"].as_str().unwrap()));
         assert_eq!(recorded, recomputed);
         assert_eq!(proof_digest(&recorded), proof_digest(&recomputed));
+    }
+}
+
+#[cfg(all(test, feature = "mcp"))]
+mod entities_determinism_tests {
+    use super::*;
+
+    // T52: `entities` output must be byte-stable across runs — property keys
+    // are stored in a HashMap, whose iteration order is unstable, so they must
+    // be sorted before serialization (determinism rule).
+    #[test]
+    fn entities_tool_output_is_deterministic() {
+        let reg = load_entity_registry();
+        let first = entities_tool(None, 50, &reg).expect("entities_tool must succeed");
+        for _ in 0..8 {
+            let again = entities_tool(None, 50, &reg).expect("entities_tool must succeed");
+            assert_eq!(
+                first.text, again.text,
+                "entities output drifted between runs"
+            );
+        }
+    }
+
+    #[test]
+    fn entities_tool_emits_sorted_property_lists() {
+        let reg = load_entity_registry();
+        // Pick a seed with at least two properties so the ordering is observable.
+        let target = reg
+            .list_seeds()
+            .into_iter()
+            .filter_map(|id| reg.get_seed_ref(id))
+            .find(|s| s.properties.len() >= 2)
+            .expect("corpus must contain a seed with >=2 properties");
+
+        let mut expected: Vec<_> = target.properties.keys().cloned().collect();
+        expected.sort();
+        let expected_line = format!("[{}]", expected.join(", "));
+
+        let out = entities_tool(Some(&target.id), 50, &reg).expect("entities_tool must succeed");
+        assert!(
+            out.text.contains(&expected_line),
+            "expected sorted property list {expected_line:?} in output:\n{}",
+            out.text
+        );
     }
 }
 
