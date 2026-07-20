@@ -93,3 +93,7 @@ llm = ["athena/llm", "dep:llama-gguf", "dep:tokio", "dep:sha2"]
 milp = ["dep:good_lp"]
 graph = ["dep:petgraph"]
 assistant = ["dep:assistant", "dep:tokio"]
+# Enables the assistant's outbound web tools (search/fetch/http_request).
+# Requires the assistant feature. Off in the default build; the Android daemon
+# turns it on so the on-device agent can reach the open internet.
+assistant-web = ["assistant", "assistant/web"]

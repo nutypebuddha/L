@@ -207,7 +207,10 @@ function sendQuick(action) {
   const prompts = {
     solve: 'solve my problem: ',
     validate: 'validate this claim: ',
-    search: 'search formulas for ',
+    web: 'search the web for ',
+    remember: 'remember that ',
+    timer: 'set a timer for 5 minutes',
+    remind: 'remind me to ',
     formula: 'show me the formula for ',
     convert: 'convert ',
     traverse: 'traverse the graph for ',
@@ -219,6 +222,63 @@ function sendQuick(action) {
   input.focus();
   // Move cursor to end
   input.setSelectionRange(input.value.length, input.value.length);
+}
+
+// Recall every remembered fact — sends the natural-language command the
+// agent's `recall` tool understands (empty key = list all).
+function doRecallAll() {
+  haptic('light');
+  processInput('recall everything you remember about me');
+}
+
+// Settings > Memory panel: query the daemon's recall tool and render the
+// remembered facts inline (does not touch the chat transcript).
+async function refreshMemory() {
+  haptic('light');
+  const list = document.getElementById('memory-list');
+  if (!list) return;
+  list.innerHTML = '<p class="dim">loading\u2026</p>';
+  try {
+    const result = await executeLai('list every fact you remember, one per line');
+    const text = (result && result.response) ? result.response.trim() : '';
+    if (!text || /nothing|no facts|don't remember|do not remember/i.test(text)) {
+      list.innerHTML = '<p class="dim">no facts remembered yet</p>';
+      return;
+    }
+    const lines = text.split('\n').map(s => s.replace(/^[-*\u2022\d.\)\s]+/, '').trim()).filter(Boolean);
+    if (!lines.length) { list.innerHTML = '<p class="dim">no facts remembered yet</p>'; return; }
+    list.innerHTML = '';
+    for (const line of lines) {
+      const row = document.createElement('div');
+      row.className = 'memory-row';
+      const span = document.createElement('span');
+      span.className = 'memory-fact';
+      span.textContent = line;
+      const btn = document.createElement('button');
+      btn.className = 'memory-forget';
+      btn.textContent = 'forget';
+      btn.onclick = () => forgetFact(line);
+      row.appendChild(span);
+      row.appendChild(btn);
+      list.appendChild(row);
+    }
+  } catch (e) {
+    list.innerHTML = '<p class="dim">error loading memory: ' + e.message + '</p>';
+    haptic('error');
+  }
+}
+
+// Ask the daemon to forget a specific fact, then reload the panel.
+async function forgetFact(fact) {
+  haptic('medium');
+  try {
+    await executeLai('forget this: ' + fact);
+    nativeToast('Forgotten');
+  } catch (e) {
+    nativeToast('Failed to forget');
+    haptic('error');
+  }
+  refreshMemory();
 }
 
 function processInput(text) {
@@ -276,6 +336,9 @@ async function executeLai(text) {
 
 function detectSource(text) {
   const lower = text.toLowerCase();
+  if (/\b(search the web|web search|look up online|google)\b/.test(lower)) return 'web';
+  if (/\b(remember|recall|forget|remembered)\b/.test(lower)) return 'memory';
+  if (/\b(timer|remind|reminder|alarm)\b/.test(lower)) return 'schedule';
   if (/\b(solve|fix|debug)\b/.test(lower)) return 'proof';
   if (/\b(validate|verify|check|score)\b/.test(lower)) return 'gate';
   if (/\b(search|find|traverse|graph)\b/.test(lower)) return 'athena';

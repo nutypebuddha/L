@@ -53,11 +53,12 @@
   <div class="quick-actions" id="quick-actions">
     <button class="qa-btn" onclick="sendQuick('solve')">./solve</button>
     <button class="qa-btn" onclick="sendQuick('validate')">./validate</button>
-    <button class="qa-btn" onclick="sendQuick('search')">./search</button>
+    <button class="qa-btn qa-net" onclick="sendQuick('web')">./web</button>
+    <button class="qa-btn qa-mem" onclick="sendQuick('remember')">./remember</button>
+    <button class="qa-btn qa-mem" onclick="doRecallAll()">./recall</button>
+    <button class="qa-btn qa-sched" onclick="sendQuick('timer')">./timer</button>
+    <button class="qa-btn qa-sched" onclick="sendQuick('remind')">./remind</button>
     <button class="qa-btn" onclick="sendQuick('formula')">./formula</button>
-    <button class="qa-btn" onclick="sendQuick('convert')">./convert</button>
-    <button class="qa-btn" onclick="sendQuick('traverse')">./traverse</button>
-    <button class="qa-btn" onclick="sendQuick('score')">./score</button>
     <button class="qa-btn" onclick="sendQuick('wheel')">./wheel</button>
   </div>
 
@@ -127,10 +128,20 @@
       </div>
     </div>
     <div class="settings-group">
+      <h3>Memory</h3>
+      <div class="setting-item">
+        <label>Remembered facts</label>
+        <button class="danger-btn" onclick="refreshMemory()">Refresh</button>
+      </div>
+      <div id="memory-list" class="memory-list">
+        <p class="dim">tap Refresh to load what L.ai remembers about you</p>
+      </div>
+    </div>
+    <div class="settings-group">
       <h3>About</h3>
       <div class="about-card">
         <div class="l-mark small">L</div>
-        <p>L.AI :: CYBERDECK v1.0.0</p>
+        <p>L.AI :: CYBERDECK v1.3.0</p>
         <p class="dim">528 formulas &middot; 214 entities &middot; 5-gate verification</p>
         <p class="dim">verify, don't trust</p>
       </div>

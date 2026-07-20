@@ -94,6 +94,15 @@ body{font-family:var(--mono);background:var(--bg);color:var(--text);-webkit-tap-
 .qa-btn{flex-shrink:0;padding:7px 14px;border-radius:var(--radius-pill);background:rgba(57,255,140,0.05);color:var(--text-secondary);border:1px solid var(--glass-border);font-size:11px;font-weight:600;cursor:pointer;transition:all var(--transition-fast);letter-spacing:0.5px;backdrop-filter:blur(8px);position:relative;overflow:hidden;font-family:var(--mono)}
 .qa-btn::before{content:'>';opacity:0.5;margin-right:4px;color:var(--accent)}
 .qa-btn:active{background:linear-gradient(135deg,rgba(57,255,140,0.25) 0%,rgba(57,255,140,0.1) 100%);color:var(--accent);border-color:var(--accent);transform:scale(0.93);box-shadow:0 0 12px var(--accent-glow)}
+.qa-net{color:var(--blue);border-color:rgba(57,208,255,0.3)}
+.qa-net::before{color:var(--blue)}
+.qa-net:active{background:linear-gradient(135deg,rgba(57,208,255,0.25),rgba(57,208,255,0.08));color:var(--blue);border-color:var(--blue);box-shadow:0 0 12px rgba(57,208,255,0.35)}
+.qa-mem{color:var(--purple);border-color:rgba(179,136,255,0.3)}
+.qa-mem::before{color:var(--purple)}
+.qa-mem:active{background:linear-gradient(135deg,rgba(179,136,255,0.25),rgba(179,136,255,0.08));color:var(--purple);border-color:var(--purple);box-shadow:0 0 12px rgba(179,136,255,0.35)}
+.qa-sched{color:var(--amber);border-color:rgba(255,207,77,0.3)}
+.qa-sched::before{color:var(--amber)}
+.qa-sched:active{background:linear-gradient(135deg,rgba(255,207,77,0.25),rgba(255,207,77,0.08));color:var(--amber);border-color:var(--amber);box-shadow:0 0 12px rgba(255,207,77,0.35)}
 
 /* ═══════════════════════════════════════════════════════════════
    INPUT AREA — command line
@@ -135,6 +144,11 @@ body{font-family:var(--mono);background:var(--bg);color:var(--text);-webkit-tap-
 .about-card::before{content:'';position:absolute;top:-50%;left:-50%;width:200%;height:200%;background:radial-gradient(circle at center,var(--accent-ultra) 0%,transparent 50%);pointer-events:none;animation:about-glow 6s ease-in-out infinite}
 .about-card p{font-size:13px;position:relative;z-index:1;font-family:var(--mono);text-shadow:0 0 8px rgba(57,255,140,0.15)}
 .dim{color:var(--text-muted);font-size:11px !important;font-weight:400}
+.memory-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.memory-row{display:flex;align-items:center;gap:10px;background:var(--surface-raised);border:1px solid var(--glass-border);border-left:2px solid var(--purple);border-radius:8px;padding:10px 12px}
+.memory-fact{flex:1;font-size:12px;color:var(--text);font-family:var(--mono);word-break:break-word;line-height:1.4}
+.memory-forget{flex-shrink:0;background:rgba(255,84,112,0.1);color:var(--red);border:1px solid rgba(255,84,112,0.2);padding:5px 11px;border-radius:6px;font-size:10px;font-weight:700;cursor:pointer;transition:all var(--transition-fast);font-family:var(--mono);letter-spacing:0.5px;text-transform:uppercase}
+.memory-forget:active{background:var(--red);color:#fff;transform:scale(0.93)}
 
 /* ═══════════════════════════════════════════════════════════════
    ANIMATIONS
