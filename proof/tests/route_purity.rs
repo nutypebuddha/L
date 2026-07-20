@@ -15,12 +15,18 @@ use std::process::Command;
 use serde_json::Value;
 
 fn route_json(query: &str) -> Value {
+    route_json_rc(query).0
+}
+
+/// Route a query, returning the parsed JSON payload and the process exit code.
+fn route_json_rc(query: &str) -> (Value, i32) {
     let out = Command::new(env!("CARGO_BIN_EXE_lai"))
         .args(["route", "--query", query, "--format", "json"])
         .output()
         .expect("spawn laverna");
     let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
-    serde_json::from_str(&stdout).expect("route output is JSON")
+    let value = serde_json::from_str(&stdout).expect("route output is JSON");
+    (value, out.status.code().unwrap_or(-1))
 }
 
 fn force_names(report: &Value) -> Vec<String> {
@@ -136,4 +142,58 @@ fn out_of_corpus_query_fails_loud() {
         Some("OutOfScope"),
         "out-of-corpus query must carry a typed OutOfScope refusal"
     );
+}
+
+#[test]
+fn zero_force_queries_share_one_refusal_contract() {
+    // T60: a query that resolves to ZERO grahas must refuse identically whether
+    // the misses were unknown words or stopwords. The contract must NOT leak the
+    // implementation detail of *how* tokens failed. All three below resolve no
+    // graha and must therefore: refuse (rc=1), be typed OutOfScope, and never
+    // present a null primary as a success.
+    for q in ["asdfgh qwerty", "the of and to a in", "a"] {
+        let (report, rc) = route_json_rc(q);
+        assert_eq!(
+            rc, 1,
+            "zero-force query {q:?} must exit non-zero, got rc={rc}"
+        );
+        assert_eq!(
+            report["refused"].as_bool(),
+            Some(true),
+            "zero-force query {q:?} must be refused, not a quiet success"
+        );
+        assert_eq!(
+            report["kind"].as_str(),
+            Some("OutOfScope"),
+            "zero-force query {q:?} must be typed OutOfScope"
+        );
+    }
+}
+
+#[test]
+fn resolving_query_succeeds_with_zero_exit() {
+    // The positive half of the T60 contract: a query that resolves at least one
+    // graha succeeds (rc=0), is not refused, and carries a non-null primary.
+    let (report, rc) = route_json_rc("energy efficiency");
+    assert_eq!(rc, 0, "resolving query must exit 0, got rc={rc}");
+    assert_ne!(report["refused"].as_bool(), Some(true));
+    assert!(
+        !report["primary"].is_null(),
+        "resolving query must present a primary strategy"
+    );
+}
+
+#[test]
+fn low_confidence_flag_fires_on_partial_resolution() {
+    // T60 follow-up: `low_confidence` IS wired. A query with one resolving token
+    // and a majority of unresolved content tokens routes (rc=0) with the flag
+    // set — distinct from a hard zero-force refusal.
+    let (report, rc) = route_json_rc("energy asdfgh qwerty zxcvb");
+    assert_eq!(rc, 0, "partial-resolution query must exit 0, got rc={rc}");
+    assert_eq!(
+        report["low_confidence"].as_bool(),
+        Some(true),
+        "majority-unresolved-with-one-hit must set low_confidence"
+    );
+    assert!(!report["primary"].is_null());
 }

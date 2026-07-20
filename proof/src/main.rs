@@ -962,8 +962,14 @@ fn main() {
             (Some(query), None) => {
                 let result = run_route(&query);
 
-                // Part 2.3: a route with no resolved graha (every content token
-                // fell outside the corpus) is a typed OutOfScope refusal.
+                // Part 2.3: a route with no resolved graha is a typed OutOfScope
+                // refusal — regardless of WHY the content tokens failed. The
+                // refusal must key off "did any graha resolve?" (ranked forces
+                // empty ⟺ zero resolved weight), NOT off whether the misses
+                // landed in `unresolved` vs `stopwords`. Keying off `unresolved`
+                // let all-stopword queries ("the of and to") slip through with
+                // rc=0 + primary:null — a quiet failure with an inconsistent
+                // contract (T60).
                 if query.trim().is_empty() {
                     let refusal = laverna::verify::diagnostics::Refusal::new(
                         laverna::verify::diagnostics::RefusalKind::Underspecified,
@@ -971,7 +977,7 @@ fn main() {
                     )
                     .with_fix_suggestion("provide a non-empty query");
                     emit_solve_refusal(&refusal, format);
-                } else if result.report.primary.is_none() && !result.report.unresolved.is_empty() {
+                } else if result.report.ranked.is_empty() {
                     let refusal = laverna::verify::diagnostics::Refusal::new(
                         laverna::verify::diagnostics::RefusalKind::OutOfScope,
                         "no token resolved to a known corpus graha — outside routing scope",
