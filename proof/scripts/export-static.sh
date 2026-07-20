@@ -43,6 +43,38 @@ DEST="$HUB/lai-${ARCH}-static"
 UPX_BIN="${UPX_BIN:-$(command -v upx || true)}"
 unset UPX
 
+# Auto-download a standalone UPX for the HOST arch when none is available and
+# compression is requested. UPX ships fully static release tarballs, so no
+# install/root is needed. Cached under $UPX_CACHE (default: /tmp).
+UPX_VERSION="${UPX_VERSION:-5.0.0}"
+UPX_CACHE="${UPX_CACHE:-/tmp}"
+fetch_upx() {
+    local host_arch tarball dir url
+    case "$(uname -m)" in
+        x86_64)         host_arch="amd64_linux" ;;
+        aarch64|arm64)  host_arch="arm64_linux" ;;
+        *) echo "warn: no prebuilt UPX for host $(uname -m); skipping compression" >&2; return 1 ;;
+    esac
+    dir="$UPX_CACHE/upx-${UPX_VERSION}-${host_arch}"
+    if [ -x "$dir/upx" ]; then UPX_BIN="$dir/upx"; return 0; fi
+    tarball="$UPX_CACHE/upx-${UPX_VERSION}-${host_arch}.tar.xz"
+    url="https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-${host_arch}.tar.xz"
+    echo "==> fetching UPX $UPX_VERSION ($host_arch)"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o "$tarball" "$url" || { echo "warn: UPX download failed; skipping compression" >&2; return 1; }
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO "$tarball" "$url" || { echo "warn: UPX download failed; skipping compression" >&2; return 1; }
+    else
+        echo "warn: neither curl nor wget available; skipping compression" >&2; return 1
+    fi
+    tar -xf "$tarball" -C "$UPX_CACHE" || { echo "warn: UPX extract failed; skipping compression" >&2; return 1; }
+    [ -x "$dir/upx" ] && { UPX_BIN="$dir/upx"; return 0; }
+    echo "warn: UPX binary not found after extract; skipping compression" >&2; return 1
+}
+if [ "${NO_UPX:-0}" != 1 ] && { [ -z "$UPX_BIN" ] || [ ! -x "$UPX_BIN" ]; }; then
+    fetch_upx || true
+fi
+
 # Link with Rust's self-contained LLD so no external cross-gcc is needed for the
 # default (C-free) feature set. Per-target flag: host builds stay untouched.
 RUSTFLAGS_VAR="CARGO_TARGET_$(echo "$TARGET" | tr 'a-z-' 'A-Z_')_RUSTFLAGS"
