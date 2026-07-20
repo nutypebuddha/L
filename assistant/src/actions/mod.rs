@@ -100,9 +100,8 @@ pub async fn run_tool(name: &str, args: &serde_json::Value) -> String {
             reminder::set_reminder(text, when).await
         }
         "remember" => {
-            let key = args.get("key").and_then(|v| v.as_str()).unwrap_or("");
-            let value = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
-            memory::remember(key, value).await
+            let (key, value) = remember_args(args);
+            memory::remember(&key, &value).await
         }
         "recall" => {
             let key = args.get("key").and_then(|v| v.as_str()).unwrap_or("");
@@ -157,5 +156,85 @@ pub async fn run_tool(name: &str, args: &serde_json::Value) -> String {
             web::http_request(method, url, body).await
         }
         _ => format!("tool '{name}' is not available in-process"),
+    }
+}
+
+/// Extract `(key, value)` for the `remember` tool, tolerating the shapes small
+/// models commonly emit instead of the declared `{key, value}` object:
+///
+///   * `{"key":"x","value":"y"}` — the schema shape
+///   * `{"x":"y"}` — a single arbitrary pair (qwen2.5:0.5b collapses key/value
+///     into one field)
+///   * `{"value":"y"}` / `{"key":"x"}` — partial; the lone field is kept and the
+///     missing half stays empty so the handler still fails loud
+///
+/// This never fabricates data: an empty or non-object argument yields empty
+/// strings, which `memory::remember` rejects with a clear message.
+fn remember_args(args: &serde_json::Value) -> (String, String) {
+    let get = |k: &str| {
+        args.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let key = get("key");
+    let value = get("value");
+    if !key.is_empty() && !value.is_empty() {
+        return (key, value);
+    }
+    // Recover the single-arbitrary-pair shape: pick the first string-valued
+    // field that is not the reserved `key`/`value` names.
+    if key.is_empty() && value.is_empty() {
+        if let Some(map) = args.as_object() {
+            // Determinism: iterate keys in sorted order so recovery is stable.
+            let mut pairs: Vec<(&String, &serde_json::Value)> = map.iter().collect();
+            pairs.sort_by(|a, b| a.0.cmp(b.0));
+            for (k, v) in pairs {
+                if k == "key" || k == "value" {
+                    continue;
+                }
+                if let Some(s) = v.as_str() {
+                    return (k.clone(), s.to_string());
+                }
+            }
+        }
+    }
+    (key, value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remember_args;
+    use serde_json::json;
+
+    #[test]
+    fn remember_args_schema_shape() {
+        let (k, v) = remember_args(&json!({"key": "city", "value": "Berlin"}));
+        assert_eq!((k.as_str(), v.as_str()), ("city", "Berlin"));
+    }
+
+    #[test]
+    fn remember_args_single_pair_recovered() {
+        let (k, v) = remember_args(&json!({"favorite_language": "Rust"}));
+        assert_eq!((k.as_str(), v.as_str()), ("favorite_language", "Rust"));
+    }
+
+    #[test]
+    fn remember_args_single_pair_is_deterministic() {
+        let (k, _) = remember_args(&json!({"zebra": "1", "apple": "2"}));
+        assert_eq!(k, "apple");
+    }
+
+    #[test]
+    fn remember_args_empty_stays_empty() {
+        let (k, v) = remember_args(&json!({}));
+        assert!(k.is_empty() && v.is_empty());
+    }
+
+    #[test]
+    fn remember_args_partial_key_only() {
+        let (k, v) = remember_args(&json!({"key": "city"}));
+        assert_eq!(k, "city");
+        assert!(v.is_empty());
     }
 }

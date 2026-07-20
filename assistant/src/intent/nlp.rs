@@ -89,6 +89,13 @@ pub fn classify(text: &str) -> Intent {
         return intent;
     }
 
+    // Agentic memory — remember / recall / forget durable user facts.
+    // Parsed deterministically so memory works even when no LLM is present
+    // (or the local model is too small to reliably emit tool calls).
+    if let Some(intent) = parse_memory(lower, text) {
+        return intent;
+    }
+
     // Send message / SMS — Termux-only action; not advertised without the
     // `termux` feature so the capability list matches what the device can do.
     #[cfg(feature = "termux")]
@@ -751,6 +758,101 @@ fn parse_reminder(lower: &str) -> Option<Intent> {
     Some(Intent::SetReminder { text, when })
 }
 
+/// Strip leading possessives/articles so "my favorite language" and "the
+/// favorite language" both key on "favorite language".
+fn normalize_key(s: &str) -> String {
+    let s = s.trim().trim_end_matches(['.', '?', '!']).trim();
+    let s = s
+        .strip_prefix("my ")
+        .or_else(|| s.strip_prefix("the "))
+        .or_else(|| s.strip_prefix("your "))
+        .unwrap_or(s);
+    s.trim().to_string()
+}
+
+/// Deterministic parser for agentic memory commands. Returns `Remember`,
+/// `Recall`, or `Forget` — or `None` if the text is not a memory command.
+///
+/// Grammar (case-insensitive), each anchored so ordinary chatter is ignored:
+///   remember (that) <KEY> is <VALUE>   → Remember{key, value}
+///   remember (that) <TEXT>             → Remember{key: TEXT, value: TEXT}
+///   recall <KEY> | what do you remember| what do you know about me
+///                                      → Recall{key}  (empty ⇒ list all)
+///   forget <KEY>                       → Forget{key}
+fn parse_memory(lower: &str, _original: &str) -> Option<Intent> {
+    // ── Forget ───────────────────────────────────────────────
+    if let Some(rest) = lower
+        .strip_prefix("forget ")
+        .or_else(|| lower.strip_prefix("forget that "))
+        .or_else(|| lower.strip_prefix("forget about "))
+    {
+        let key = normalize_key(rest);
+        if key.is_empty() {
+            return None;
+        }
+        return Some(Intent::Forget { key });
+    }
+
+    // ── Recall (list-all phrasings) ──────────────────────────
+    if lower == "what do you remember"
+        || lower == "what do you remember about me"
+        || lower == "what do you know about me"
+        || lower == "recall everything"
+        || lower == "recall everything you remember about me"
+        || lower == "list every fact you remember"
+        || lower == "list every fact you remember, one per line"
+    {
+        return Some(Intent::Recall { key: String::new() });
+    }
+
+    // ── Recall (specific key) ────────────────────────────────
+    // Only the explicit "recall"/"remember about" verbs are treated as recall.
+    // Bare "what's my <x>" is intentionally NOT matched here: it collides with
+    // device queries like "what's my battery" / "what's my location", which are
+    // classified by their own parsers later in the chain.
+    if let Some(rest) = lower
+        .strip_prefix("recall ")
+        .or_else(|| lower.strip_prefix("what do you remember about "))
+        .or_else(|| lower.strip_prefix("do you remember my "))
+        .or_else(|| lower.strip_prefix("do you remember "))
+    {
+        let key = normalize_key(rest);
+        if key.is_empty() {
+            return Some(Intent::Recall { key: String::new() });
+        }
+        return Some(Intent::Recall { key });
+    }
+
+    // ── Remember ─────────────────────────────────────────────
+    let body = lower
+        .strip_prefix("remember that ")
+        .or_else(|| lower.strip_prefix("remember: "))
+        .or_else(|| lower.strip_prefix("remember "))
+        .or_else(|| lower.strip_prefix("note that "))
+        .or_else(|| lower.strip_prefix("keep in mind that "))?;
+    let body = body.trim();
+    if body.is_empty() {
+        return None;
+    }
+    // Split "<key> is <value>" on the first " is " so the key is queryable.
+    if let Some(idx) = body.find(" is ") {
+        let key = normalize_key(&body[..idx]);
+        let value = body[idx + 4..].trim().trim_end_matches(['.', '!']).trim();
+        if !key.is_empty() && !value.is_empty() {
+            return Some(Intent::Remember {
+                key,
+                value: value.to_string(),
+            });
+        }
+    }
+    // No "is" — store the whole phrase under itself so recall-all surfaces it.
+    let phrase = body.trim_end_matches(['.', '!']).trim().to_string();
+    Some(Intent::Remember {
+        key: phrase.clone(),
+        value: phrase,
+    })
+}
+
 #[cfg(feature = "termux")]
 fn parse_sms(lower: &str, original: &str) -> Option<Intent> {
     if !lower.starts_with("text ") && !lower.starts_with("send ") && !lower.starts_with("message ")
@@ -875,6 +977,60 @@ fn looks_like_math(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remember_key_is_value() {
+        match classify("remember that my favorite language is Rust") {
+            Intent::Remember { key, value } => {
+                assert_eq!(key, "favorite language");
+                assert_eq!(value, "rust");
+            }
+            other => panic!("expected Remember, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remember_phrase_without_is() {
+        match classify("remember to buy milk") {
+            Intent::Remember { key, value } => {
+                assert_eq!(key, "to buy milk");
+                assert_eq!(value, "to buy milk");
+            }
+            other => panic!("expected Remember, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recall_specific_key() {
+        match classify("recall my favorite language") {
+            Intent::Recall { key } => assert_eq!(key, "favorite language"),
+            other => panic!("expected Recall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn recall_all() {
+        match classify("what do you remember about me") {
+            Intent::Recall { key } => assert!(key.is_empty()),
+            other => panic!("expected Recall(all), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn forget_key() {
+        match classify("forget my favorite language") {
+            Intent::Forget { key } => assert_eq!(key, "favorite language"),
+            other => panic!("expected Forget, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plain_chatter_is_not_memory() {
+        assert!(!matches!(
+            classify("i will remember this day forever"),
+            Intent::Remember { .. }
+        ));
+    }
 
     #[test]
     fn timer_basic() {

@@ -13,6 +13,12 @@ pub enum Intent {
     SetAlarm { time: String },
     /// "remind me to call mom at 3pm"
     SetReminder { text: String, when: String },
+    /// "remember that my favorite language is Rust" — durable user fact
+    Remember { key: String, value: String },
+    /// "recall my favorite language" / "what do you remember" — fetch fact(s)
+    Recall { key: String },
+    /// "forget my favorite language" — delete a durable fact
+    Forget { key: String },
     /// "text John hello I'm on my way"
     #[cfg(feature = "termux")]
     SendMessage { contact: String, message: String },

@@ -267,6 +267,9 @@ impl Assistant {
             Intent::CancelTimer { label } => actions::timer::cancel_timer(label.as_deref()).await,
             Intent::SetAlarm { time } => actions::alarm::set_alarm(time).await,
             Intent::SetReminder { text, when } => actions::reminder::set_reminder(text, when).await,
+            Intent::Remember { key, value } => actions::memory::remember(key, value).await,
+            Intent::Recall { key } => actions::memory::recall(key).await,
+            Intent::Forget { key } => actions::memory::forget(key).await,
             #[cfg(feature = "termux")]
             Intent::SendMessage { contact, message } => {
                 actions::sms::send_message(contact, message).await
