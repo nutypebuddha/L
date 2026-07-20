@@ -5,6 +5,13 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Digital-assistant voice pipeline: microphone capture (STT) + overlay. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Some devices route STT through a bound recognition service. -->
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
 
     <application
         android:allowBackup="false"
@@ -41,5 +48,38 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <!-- ── Default digital assistant (ROLE_ASSISTANT) ──────────────
+             The always-on VoiceInteractionService is what makes L.ai
+             selectable as the device assistant, replacing Gemini. -->
+        <service
+            android:name=".LaiVoiceInteractionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/lai_voice_interaction_service" />
+        </service>
+
+        <!-- Spawned per interaction; hosts the STT→daemon→TTS overlay. -->
+        <service
+            android:name=".LaiVoiceInteractionSessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+
+        <!-- Mandatory RecognitionService coupling for the assistant role. -->
+        <service
+            android:name=".LaiRecognitionService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech"
+                android:resource="@xml/lai_recognition_service" />
+        </service>
     </application>
 </manifest>

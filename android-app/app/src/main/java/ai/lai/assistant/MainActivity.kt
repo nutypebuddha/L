@@ -40,15 +40,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private var pendingPermissionCallback: ((Boolean) -> Unit)? = null
     private var pendingPhotoCallback: ((String) -> Unit)? = null
-    private var daemonLog: String = ""
-    private var daemonStarted: Boolean = false
     private var llmReachable: Boolean = false
-    private var daemonProcess: java.lang.Process? = null
     private var logcatProcess: java.lang.Process? = null
-    private var daemonStdin: java.io.OutputStream? = null
-    private var daemonStdout: java.io.BufferedReader? = null
-    private val daemonLock = java.util.concurrent.locks.ReentrantLock()
-    private var rpcId: Int = 0
+    private lateinit var daemon: LaiDaemon
+    private var tts: TtsManager? = null
 
     companion object {
         private const val TAG = "LaiMain"
@@ -147,6 +142,8 @@ class MainActivity : AppCompatActivity() {
             overScrollMode = View.OVER_SCROLL_NEVER
         }
 
+        daemon = LaiDaemon(applicationContext)
+        tts = TtsManager(this)
         installLogcatFile()
         maybeRequestAssistantRole()
 
@@ -279,79 +276,13 @@ class MainActivity : AppCompatActivity() {
     // ── Daemon ──────────────────────────────────────────────────
 
     private fun startLaiDaemon() {
-        val libDir = File(applicationInfo.nativeLibraryDir)
-        val src = File(libDir, "liblai.so")
-        if (!src.exists()) {
-            Log.e(TAG, "liblai.so not found in $libDir")
-            daemonStarted = false
-            daemonLog = "liblai.so not found in $libDir"
-            return
+        val ok = daemon.start(if (modelReady()) modelFile().absolutePath else null)
+        if (ok) {
+            llmReachable = probeLlmReachable()
+            Log.i(TAG, "Daemon ready: ${daemon.lastLog} — llm=${if (llmReachable) "reachable" else "unreachable (corpus-only)"}")
+        } else {
+            Log.e(TAG, "Daemon failed to start: ${daemon.lastLog}")
         }
-
-        // T67: exec from nativeLibraryDir only. Copying to filesDir/bin is dead
-        // code on API 29+ (SELinux W^X denies execve on app-data) and wastes
-        // 8.5MB + flash writes on every cold start.
-        val candidates = listOf(src.absolutePath)
-
-        val sb = StringBuilder()
-        var process: java.lang.Process? = null
-        var launchedFrom: String? = null
-        for (path in candidates) {
-            try {
-                process = ProcessBuilder(path, "assistant", "--mcp")
-                    .directory(filesDir)
-                    .apply {
-                        val env = environment()
-                        env["HOME"] = filesDir.absolutePath
-                        env["TMPDIR"] = cacheDir.absolutePath
-                        if (modelReady()) {
-                            env["LAVERNA_LLAMA_MODEL"] = modelFile().absolutePath
-                        }
-                        env["LAI_LLM_BASE_URL"] = "http://127.0.0.1:11434/v1"
-                        env["LAI_LLM_MODEL"] = "qwen2.5:0.5b"
-                    }
-                    .start()
-                launchedFrom = path
-                break
-            } catch (e: Exception) {
-                Log.e(TAG, "exec failed for $path: ${e.message}")
-                sb.appendLine("exec failed: $path -> ${e.javaClass.simpleName}: ${e.message}")
-            }
-        }
-
-        if (process == null) {
-            daemonStarted = false
-            daemonLog = "launch failed:\n$sb"
-            return
-        }
-
-        Thread {
-            process.errorStream.bufferedReader().forEachLine { line ->
-                Log.d("LaiDaemon", line)
-            }
-        }.start()
-
-        daemonProcess = process
-        daemonStdin = process.outputStream
-        daemonStdout = process.inputStream.bufferedReader()
-
-        try {
-            rpcId = 1
-            val initResp = sendRpcSync("initialize", """{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"lai-android","version":"1.1.0"}}""")
-            Log.d(TAG, "MCP initialize: $initResp")
-            sendRpcSync(null, """{"method":"notifications/initialized"}""")
-        } catch (e: Exception) {
-            Log.e(TAG, "MCP handshake failed: ${e.message}")
-            sb.appendLine("MCP handshake failed: ${e.message}")
-            daemonStarted = false
-            daemonLog = "launch from $launchedFrom failed handshake:\n$sb"
-            return
-        }
-
-        daemonStarted = true
-        daemonLog = "launched from $launchedFrom (stdio MCP)"
-        llmReachable = probeLlmReachable()
-        Log.i(TAG, "Daemon ready: $daemonLog — llm=${if (llmReachable) "reachable" else "unreachable (corpus-only)"}")
     }
 
     // T61: the on-device LLM endpoint (ollama at 127.0.0.1:11434) is only
@@ -373,70 +304,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun sendRpcSync(method: String?, params: String): String {
-        daemonLock.lock()
-        try {
-            val id = if (method != null) { rpcId++; rpcId } else null
-            // Build the frame with JSONObject so newlines/control chars are
-            // JSON-escaped (T64). Hand-built strings split the line-delimited
-            // framing on any literal newline.
-            val msg = Rpc.buildFrame(method, params, id)
-            val stdin = daemonStdin ?: throw IllegalStateException("daemon stdin closed")
-            stdin.write((msg + "\n").toByteArray(Charsets.UTF_8))
-            stdin.flush()
-            if (method == null) return ""
-
-            val stdout = daemonStdout ?: throw IllegalStateException("daemon stdout closed")
-            val deadline = System.currentTimeMillis() + Rpc.RPC_READ_TIMEOUT_MS
-            // Match responses by id; skip stray/non-matching frames (T64).
-            while (System.currentTimeMillis() < deadline) {
-                val line = stdout.readLine() ?: throw java.io.EOFException("daemon stdout EOF")
-                val frame = line.trim()
-                if (frame.isEmpty()) continue
-                if (id == null || Rpc.frameMatchesId(frame, id)) return frame
-            }
-            throw java.io.IOException("daemon RPC timeout (id=$id) — restarting daemon")
-        } catch (e: java.io.IOException) {
-            // Desync/unreachable: tear down and restart so the next call recovers.
-            Log.e(TAG, "RPC desync: ${e.message}")
-            restartDaemonNow()
-            throw e
-        } finally {
-            daemonLock.unlock()
-        }
-    }
-
-    private fun restartDaemonNow() {
-        try {
-            daemonProcess?.destroyForcibly()
-        } catch (_: Exception) {
-        }
-        daemonProcess = null
-        daemonStdin = null
-        daemonStdout = null
-        daemonStarted = false
-        try {
-            startLaiDaemon()
-        } catch (_: Exception) {
-        }
-    }
-
     private fun daemonStatus(): String {
         return buildString {
-            append("started=$daemonStarted\n")
-            append("log=$daemonLog\n")
-            val alive = try { daemonProcess?.exitValue(); false } catch (_: IllegalThreadStateException) { true }
-            append("alive=$alive\n")
+            append("started=${daemon.started}\n")
+            append("log=${daemon.lastLog}\n")
+            append("alive=${daemon.isAlive()}\n")
             append("model=${if (modelReady()) modelFile().absolutePath else "none"}\n")
             append("llm=${if (llmReachable) "reachable" else "unreachable (corpus-only)"}\n")
         }
     }
 
     private fun maybeRequestAssistantRole() {
+        requestAssistantRole(force = false)
+    }
+
+    /**
+     * Ask the user to make L.ai the default digital assistant (ROLE_ASSISTANT),
+     * replacing Gemini. When [force] is false we only prompt if the role is not
+     * already held; when true (user tapped "Set as assistant") we always show
+     * the chooser or fall back to Settings.
+     */
+    private fun requestAssistantRole(force: Boolean) {
         val rm = getSystemService(ROLE_SERVICE) as? android.app.role.RoleManager ?: return
         val role = android.app.role.RoleManager.ROLE_ASSISTANT
         if (!rm.isRoleAvailable(role)) return
-        if (rm.isRoleHeld(role)) return
+        if (!force && rm.isRoleHeld(role)) return
         try {
             startActivityForResult(rm.createRequestRoleIntent(role), REQUEST_ROLE_ASSISTANT)
         } catch (_: Exception) {
@@ -472,7 +364,9 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         try { logcatProcess?.destroy() } catch (_: Exception) {}
         logcatProcess = null
-        try { daemonProcess?.destroyForcibly() } catch (_: Exception) {}
+        try { daemon.stop() } catch (_: Exception) {}
+        try { tts?.shutdown() } catch (_: Exception) {}
+        tts = null
         webView.destroy()
         super.onDestroy()
     }
@@ -481,27 +375,37 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun executeCommand(command: String): String {
-            if (!daemonStarted) {
+            if (!daemon.started) {
                 return "Error: daemon not started — model may still be downloading"
             }
             return try {
-                // One escaping layer: the JS side passes the user's raw text;
-                // we marshal it into the chat params via Rpc (T65). No prefix
-                // stripping, no blind substring replacement.
-                val params = Rpc.chatParamsJson(command)
-                val rpcResp = sendRpcSync("tools/call", params)
-                val contentText = try {
-                    val root = org.json.JSONObject(rpcResp)
-                    val result = root.getJSONObject("result")
-                    val content = result.getJSONArray("content")
-                    content.getJSONObject(0).getString("text")
-                } catch (_: Exception) {
-                    rpcResp
-                }
-                contentText
+                daemon.chat(command)
             } catch (e: Exception) {
                 "Error: ${e.javaClass.simpleName}: ${e.message}"
             }
+        }
+
+        /** Speak [text] aloud via Android TTS (parity with a real assistant). */
+        @JavascriptInterface
+        fun speak(text: String) {
+            Handler(Looper.getMainLooper()).post { tts?.speak(text) }
+        }
+
+        /** True if L.ai currently holds the default-assistant role. */
+        @JavascriptInterface
+        fun isDefaultAssistant(): Boolean {
+            val rm = getSystemService(ROLE_SERVICE) as? android.app.role.RoleManager ?: return false
+            return try {
+                rm.isRoleHeld(android.app.role.RoleManager.ROLE_ASSISTANT)
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        /** Prompt the user to set L.ai as the default digital assistant. */
+        @JavascriptInterface
+        fun setDefaultAssistant() {
+            Handler(Looper.getMainLooper()).post { requestAssistantRole(force = true) }
         }
 
         @JavascriptInterface
@@ -525,11 +429,12 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun restartDaemon(): String {
-            try {
+            return try {
+                daemon.stop()
                 startLaiDaemon()
-                return "restart requested"
+                "restart requested"
             } catch (e: Exception) {
-                return "restart failed: ${e.message}"
+                "restart failed: ${e.message}"
             }
         }
 
