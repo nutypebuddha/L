@@ -179,6 +179,40 @@ fn tool_schemas() -> Vec<Tool> {
                 "required": ["contact"]
             }),
         },
+        #[cfg(feature = "web")]
+        Tool {
+            name: "web_search".into(),
+            description: "Search the web for current or factual information. Use when the answer depends on real-world data not in the local corpus.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "query": {"type": "string", "description": "Search query"} },
+                "required": ["query"]
+            }),
+        },
+        #[cfg(feature = "web")]
+        Tool {
+            name: "web_fetch".into(),
+            description: "Fetch the text content of a specific http(s) URL.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "url": {"type": "string", "description": "Absolute http:// or https:// URL"} },
+                "required": ["url"]
+            }),
+        },
+        #[cfg(feature = "web")]
+        Tool {
+            name: "http_request".into(),
+            description: "Make an arbitrary HTTP request (GET/POST/PUT/DELETE) to an http(s) URL. Use for APIs.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "method": {"type": "string", "description": "HTTP method: GET, POST, PUT, or DELETE", "default": "GET"},
+                    "url": {"type": "string", "description": "Absolute http:// or https:// URL"},
+                    "body": {"type": "string", "description": "Optional request body for POST/PUT"}
+                },
+                "required": ["url"]
+            }),
+        },
     ]
 }
 

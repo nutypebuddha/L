@@ -31,3 +31,11 @@ termux = []
 # Enables `assistant --mcp`: a stdio JSON-RPC server (no localhost socket) the
 # Android app drives directly. Required for the on-device transport.
 mcp = []
+# Enables the outbound web tools (web_search, web_fetch, http_request) so the
+# agent can reach the open internet. Off by default: an offline-first assistant
+# must not advertise network tools it can't honour, and enabling them widens
+# the capability list beyond what a locked-down build should claim. Build with
+# `--features web` when the daemon is allowed to make outbound requests. Pulls
+# in ureq's rustls TLS backend, which the default offline build (plaintext
+# localhost LLM only) does not need.
+web = ["ureq/rustls"]

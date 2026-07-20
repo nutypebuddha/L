@@ -8,6 +8,8 @@ pub mod notification;
 pub mod reminder;
 pub mod sms;
 pub mod timer;
+#[cfg(feature = "web")]
+pub mod web;
 
 use std::collections::HashMap;
 
@@ -41,6 +43,8 @@ impl Registry {
         handlers.insert("location".into(), "Get current location".into());
         #[cfg(feature = "termux")]
         handlers.insert("notification".into(), "Notifications and clipboard".into());
+        #[cfg(feature = "web")]
+        handlers.insert("web".into(), "Web search, fetch, and HTTP requests".into());
         Self { handlers }
     }
 
@@ -115,6 +119,26 @@ pub async fn run_tool(name: &str, args: &serde_json::Value) -> String {
         "call_contact" => {
             let contact = args.get("contact").and_then(|v| v.as_str()).unwrap_or("");
             call::call_contact(contact).await
+        }
+        #[cfg(feature = "web")]
+        "web_search" => {
+            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+            web::search(query).await
+        }
+        #[cfg(feature = "web")]
+        "web_fetch" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            web::fetch(url).await
+        }
+        #[cfg(feature = "web")]
+        "http_request" => {
+            let method = args.get("method").and_then(|v| v.as_str()).unwrap_or("GET");
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("");
+            let body = args
+                .get("body")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            web::http_request(method, url, body).await
         }
         _ => format!("tool '{name}' is not available in-process"),
     }
