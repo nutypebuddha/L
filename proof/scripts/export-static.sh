@@ -4,12 +4,21 @@
 # Unlike export.sh (which needs an x86_64 musl cross-gcc + sysroot and targets
 # /sdcard), this script is toolchain-light: it links with Rust's bundled
 # `rust-lld`, so the default C-free feature set builds for either arch with no
-# external cross toolchain. The result is then UPX-compressed (self-decompresses
-# at launch) to cut ~75% of on-disk size.
+# external cross toolchain.
 #
-# Sizes observed (default features, opt-level=z + fat LTO + strip, then UPX):
-#   x86_64-unknown-linux-musl : 9.3 MB -> 2.3 MB
-#   aarch64-unknown-linux-musl: 7.8 MB -> 2.3 MB
+# Ships TWO artifacts by default (review workflow note):
+#   lai-<arch>-static        unpacked, fast — the default execution path.
+#   lai-<arch>-static-slim   UPX-packed, ~75% smaller, for distribution only.
+#
+# UPX self-decompresses the whole image into RAM on EVERY exec, adding a fixed
+# ~220 ms per-invocation tax. That is a heavy regression for a per-query CLI /
+# the MCP / assistant loop, so the *unpacked* binary is the default and the
+# packed `-slim` build is offered alongside it for size-constrained transport.
+# Set NO_UPX=1 to skip the slim build, or SLIM_ONLY=1 to emit only the packed one.
+#
+# Sizes observed (default features, opt-level=z + fat LTO + strip):
+#   x86_64-unknown-linux-musl : 9.3 MB unpacked -> 2.3 MB slim
+#   aarch64-unknown-linux-musl: 7.8 MB unpacked -> 2.1 MB slim
 #
 # Requirements:
 #   * rustup target add <TARGET>              (musl std for the chosen arch)
@@ -27,7 +36,8 @@
 #                      binary to an exec-capable fs and `chmod +x` before running.
 #   SDCARD_DIR         explicit shared-storage Download dir (implies SDCARD=1)
 #   UPX_BIN            path to the upx binary (default: `command -v upx`)
-#   NO_UPX=1           skip compression, export the raw static binary
+#   NO_UPX=1           skip the packed `-slim` build; export only the unpacked binary
+#   SLIM_ONLY=1        export only the packed `-slim` binary (implies UPX)
 #   CARGO_BUILD_JOBS   parallel jobs (not hardcoded; set per-invocation)
 set -euo pipefail
 
@@ -58,6 +68,7 @@ else
     HUB="${HUB:-${HOME:-/root}/downloads}"
 fi
 DEST="$HUB/lai-${ARCH}-static"
+DEST_SLIM="$HUB/lai-${ARCH}-static-slim"
 # NB: upx reads its own options from the `UPX` env var, so we never name ours
 # that. Also scrub any inherited `UPX` so it can't corrupt the upx invocation.
 UPX_BIN="${UPX_BIN:-$(command -v upx || true)}"
@@ -128,19 +139,44 @@ cp "$BIN" "$STAGE"
 chmod +x "$STAGE"
 RAW_SIZE="$(du -h "$STAGE" | cut -f1)"
 
-if [ "${NO_UPX:-0}" = 1 ]; then
-    echo "==> NO_UPX=1 set; skipping compression"
-elif [ -n "$UPX_BIN" ] && [ -x "$UPX_BIN" ]; then
-    echo "==> compressing with UPX ($UPX_BIN)"
-    "$UPX_BIN" --best --lzma "$STAGE"
+mkdir -p "$HUB"
+
+# 1) Unpacked, fast — the default execution path. Skipped only when SLIM_ONLY=1.
+if [ "${SLIM_ONLY:-0}" = 1 ]; then
+    echo "==> SLIM_ONLY=1 set; skipping unpacked artifact"
 else
-    echo "warn: upx not found (set UPX_BIN=/path/to/upx or NO_UPX=1); shipping raw binary"
+    cp "$STAGE" "$DEST"
+    chmod +x "$DEST" 2>/dev/null || true   # no-op on FUSE/vfat; not an error
+    echo "==> done (unpacked, fast): $DEST ($(du -h "$DEST" | cut -f1))"
 fi
 
-mkdir -p "$HUB"
-cp "$STAGE" "$DEST"
-chmod +x "$DEST" 2>/dev/null || true   # no-op on FUSE/vfat; not an error
+# 2) UPX-packed `-slim` — smaller on disk, +~220 ms/exec decompress tax. For
+# distribution/transport only. Skipped when NO_UPX=1 or no upx is available.
+have_upx=0
+[ -n "$UPX_BIN" ] && [ -x "$UPX_BIN" ] && have_upx=1
+if [ "${NO_UPX:-0}" = 1 ]; then
+    echo "==> NO_UPX=1 set; skipping packed -slim artifact"
+    if [ "${SLIM_ONLY:-0}" = 1 ]; then
+        echo "error: SLIM_ONLY=1 and NO_UPX=1 are mutually exclusive" >&2; exit 1
+    fi
+elif [ "$have_upx" = 1 ]; then
+    SLIM_STAGE="$(mktemp -t lai-export-slim.XXXXXX)"
+    cp "$STAGE" "$SLIM_STAGE"
+    chmod +x "$SLIM_STAGE"
+    echo "==> compressing -slim with UPX ($UPX_BIN)"
+    "$UPX_BIN" --best --lzma "$SLIM_STAGE"
+    cp "$SLIM_STAGE" "$DEST_SLIM"
+    chmod +x "$DEST_SLIM" 2>/dev/null || true
+    rm -f "$SLIM_STAGE"
+    echo "==> done (packed -slim, small): $DEST_SLIM (raw $RAW_SIZE -> $(du -h "$DEST_SLIM" | cut -f1))"
+else
+    echo "warn: upx unavailable (set UPX_BIN=/path/to/upx or NO_UPX=1); no -slim artifact"
+    if [ "${SLIM_ONLY:-0}" = 1 ]; then
+        echo "error: SLIM_ONLY=1 but no upx available" >&2; exit 1
+    fi
+fi
+
 rm -f "$STAGE"
 
-echo "==> done: $DEST (raw $RAW_SIZE -> $(du -h "$DEST" | cut -f1))"
-ls -lh "$DEST"
+echo "==> export summary"
+ls -lh "$DEST" "$DEST_SLIM" 2>/dev/null || true
