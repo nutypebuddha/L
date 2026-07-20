@@ -2890,6 +2890,7 @@ fn route_to_json(result: &RouteResult) -> Value {
         "unresolved": result.report.unresolved,
         "stopwords": result.report.stopwords,
         "warning": result.report.warning,
+        "low_confidence": result.report.low_confidence,
         "decomposition": decomposition
     })
 }

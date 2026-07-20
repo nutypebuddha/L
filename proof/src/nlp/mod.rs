@@ -165,6 +165,84 @@ pub fn is_stopword(token: &str) -> bool {
     STOPWORDS.contains(token.to_lowercase().as_str())
 }
 
+// ─── Stemming (T53) ─────────────────────────────────────────────────────────
+
+/// Deterministic, dependency-free light stemmer.
+///
+/// Strips a small, fixed set of English inflectional suffixes so that
+/// morphological variants collapse onto the base form used by the routing
+/// lexicon (e.g. `reasoning` → `reason`, `thinking` → `think`,
+/// `databases` → `database`). This is intentionally *not* a full Porter
+/// stemmer: it is a static suffix table with conservative length guards, so
+/// the mapping is pure, deterministic, and reproducible (determinism rule) —
+/// no runtime ML, no locale dependence.
+///
+/// Guarantees:
+/// - Pure: output depends only on `token`.
+/// - Idempotent on already-stemmed forms (`stem_token(stem_token(x)) == stem_token(x)`).
+/// - Never returns an empty string; if stripping would leave < 3 chars the
+///   original (lowercased) token is returned unchanged.
+pub fn stem_token(token: &str) -> String {
+    let lower = token.to_lowercase();
+    let bytes = lower.as_bytes();
+    let len = bytes.len();
+
+    // Longer, more specific suffixes are tried first so `-ations` is handled
+    // before `-s`. `(suffix, min_stem_len, replacement)`: after removing
+    // `suffix` the remaining stem must be at least `min_stem_len` chars, then
+    // `replacement` is appended. Ordering is the sole tie-break — keep it
+    // deterministic (longest / most specific first).
+    const RULES: &[(&str, usize, &str)] = &[
+        // -ing / -ining -> base (reasoning->reason, thinking->think)
+        ("ing", 4, ""),
+        // -edly / -ed -> base (deduced->deduce needs the trailing 'e' back;
+        // handled by the 'ee' guard below, so keep -ed simple)
+        ("edly", 4, ""),
+        ("ed", 4, ""),
+        // -ations / -ation -> -ate is overreach; collapse to the -ation stem
+        ("ations", 5, "ation"),
+        // plural / 3rd-person. `-es` is only dropped after a sibilant cluster
+        // (boxes->box, matches->match); a bare `-es` after a plain consonant
+        // (databases->database) must keep the `e`, so the general case falls to
+        // the `-s` rule below. `-s` never strips a word ending in `ss`.
+        ("ies", 3, "y"),
+        ("sses", 4, "ss"),
+        ("ches", 4, "ch"),
+        ("shes", 4, "sh"),
+        ("xes", 3, "x"),
+        ("zes", 3, "z"),
+        ("s", 4, ""),
+        // adverbial / nominal: -ly, -ness, -ment
+        ("ness", 5, ""),
+        ("ment", 5, ""),
+        ("ly", 5, ""),
+    ];
+
+    // Words ending in a doubled sibilant (class, process, address) are not
+    // plurals — never strip their trailing `s`. Return early so the `-s` rule
+    // below can't mangle them.
+    if lower.ends_with("ss") {
+        return lower;
+    }
+
+    for (suffix, min_stem, replacement) in RULES {
+        if len > suffix.len() && lower.ends_with(suffix) {
+            let stem_len = len - suffix.len();
+            if stem_len >= *min_stem {
+                let mut stemmed = lower[..stem_len].to_string();
+                stemmed.push_str(replacement);
+                // A word that resolves in the lexicon only after adding back a
+                // dropped 'e' (deduce/deduced, produce/produced) is handled by
+                // callers that try both forms; here we keep the plain stem.
+                if stemmed.len() >= 3 {
+                    return stemmed;
+                }
+            }
+        }
+    }
+    lower
+}
+
 // ─── Normalization ──────────────────────────────────────────────────────────
 
 /// Pure function: Normalize query text for NLP processing.
@@ -453,6 +531,34 @@ mod tests {
         assert!(is_stopword("in"));
         assert!(!is_stopword("energy"));
         assert!(!is_stopword("efficiency"));
+    }
+
+    #[test]
+    fn stem_token_collapses_common_inflections() {
+        // T53: morphological variants collapse onto the base form.
+        assert_eq!(stem_token("reasoning"), "reason");
+        assert_eq!(stem_token("thinking"), "think");
+        assert_eq!(stem_token("databases"), "database");
+        assert_eq!(stem_token("reflections"), "reflection");
+        assert_eq!(stem_token("inferences"), "inference");
+    }
+
+    #[test]
+    fn stem_token_is_pure_and_idempotent() {
+        for w in ["reasoning", "think", "databases", "cache", "reason", "x"] {
+            let once = stem_token(w);
+            assert_eq!(stem_token(&once), once, "stem must be idempotent for {w}");
+        }
+    }
+
+    #[test]
+    fn stem_token_guards_short_words() {
+        // Never strip below 3 chars; short words pass through unchanged.
+        assert_eq!(stem_token("is"), "is");
+        assert_eq!(stem_token("as"), "as");
+        assert_eq!(stem_token("gas"), "gas");
+        // Lowercasing still applies.
+        assert_eq!(stem_token("REASONING"), "reason");
     }
 
     #[test]

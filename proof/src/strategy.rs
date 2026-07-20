@@ -68,6 +68,14 @@ pub struct StrategyReport {
     /// Fail-loud diagnostic when routing confidence is too low to trust
     /// (e.g. no forces resolved, or most content tokens unresolved).
     pub warning: Option<String>,
+    /// True when a strategy WAS synthesized but on thin evidence (T53): at
+    /// least one content token resolved to a graha, yet a majority of content
+    /// tokens were unresolved. Callers should surface this as a low-confidence
+    /// best-guess rather than refusing outright — refusing the tool's core
+    /// competency (metacognitive/reasoning queries) is worse than a flagged
+    /// guess. `primary` is still populated in this case; it is only `None` when
+    /// *nothing* resolved.
+    pub low_confidence: bool,
 }
 
 /// Per-token routing classification feeding `synthesize_strategy`.
@@ -128,6 +136,9 @@ impl StrategyReport {
         }
 
         out.push_str("\nSYNTHESIZED STRATEGY:\n");
+        if self.low_confidence {
+            out.push_str("  (low confidence — best-guess from partial resolution)\n");
+        }
         match self.primary {
             Some(g) => out.push_str(&format!(
                 "  PRIMARY:    {} ({}) — {}\n",
@@ -272,16 +283,25 @@ pub fn synthesize_strategy(query: &str, forces: &[(String, TokenForce)]) -> Stra
         };
     }
 
-    let warning = if resolved_total == 0.0 {
+    // Two distinct low-confidence conditions, handled differently (T53):
+    //   1. NOTHING resolved (resolved_total == 0): genuinely outside scope —
+    //      fail loud, assert no strategy (→ caller emits OutOfScope).
+    //   2. SOMETHING resolved but a majority of content tokens missed: thin
+    //      evidence, not zero evidence. Emit a flagged best-guess rather than
+    //      refusing the tool's core competency.
+    let nothing_resolved = resolved_total == 0.0;
+    let low_confidence = !nothing_resolved
+        && content_count > 0
+        && unresolved.len() as f64 / content_count as f64 >= UNRESOLVED_WARN_FRACTION;
+
+    let warning = if nothing_resolved {
         Some(
             "no graha forces resolved — query maps to no corpus domain; routing is speculative"
                 .to_string(),
         )
-    } else if content_count > 0
-        && unresolved.len() as f64 / content_count as f64 >= UNRESOLVED_WARN_FRACTION
-    {
+    } else if low_confidence {
         Some(format!(
-            "{} of {} content tokens unresolved — routing confidence low",
+            "{} of {} content tokens unresolved — low-confidence best-guess",
             unresolved.len(),
             content_count
         ))
@@ -289,10 +309,11 @@ pub fn synthesize_strategy(query: &str, forces: &[(String, TokenForce)]) -> Stra
         None
     };
 
-    // Fail loud: when confidence is too low to trust, do NOT assert a strategy.
-    // The forces are still reported (for transparency) but primary/secondary/
-    // tertiary are left `None` rather than guessed from noise (T54).
-    let (primary, secondary, tertiary) = if warning.is_some() {
+    // Fail loud only when NOTHING resolved: leave primary/secondary/tertiary
+    // `None` so the caller refuses (T54). When at least one token resolved we
+    // still surface the ranked best-guess — flagged via `low_confidence` — so
+    // metacognitive/reasoning queries route instead of dropping to OutOfScope.
+    let (primary, secondary, tertiary) = if nothing_resolved {
         (None, None, None)
     } else {
         (
@@ -311,6 +332,7 @@ pub fn synthesize_strategy(query: &str, forces: &[(String, TokenForce)]) -> Stra
         unresolved,
         stopwords,
         warning,
+        low_confidence,
     }
 }
 
@@ -424,8 +446,10 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_majority_triggers_warning() {
-        // 3 of 4 content tokens unresolved → fail-loud warning, no primary.
+    fn unresolved_majority_yields_low_confidence_best_guess() {
+        // T53: 3 of 4 content tokens unresolved, but one DID resolve → keep a
+        // flagged best-guess rather than refusing. `primary` is populated and
+        // `low_confidence` is set (no longer a hard null / OutOfScope).
         let forces = vec![
             resolved(Domain::Budha, 1.0),
             unresolved("aaa"),
@@ -434,6 +458,19 @@ mod tests {
         ];
         let report = synthesize_strategy("query", &forces);
         assert!(report.warning.is_some());
+        assert!(report.low_confidence);
+        assert_eq!(report.primary, Some(Domain::Budha));
+        assert!(report.format().contains("low confidence"));
+    }
+
+    #[test]
+    fn nothing_resolved_still_fails_loud() {
+        // When *no* content token resolves, primary stays None so the caller
+        // emits OutOfScope. low_confidence is false (there is no guess).
+        let forces = vec![unresolved("aaa"), unresolved("bbb")];
+        let report = synthesize_strategy("query", &forces);
+        assert!(report.warning.is_some());
+        assert!(!report.low_confidence);
         assert_eq!(report.primary, None);
     }
 

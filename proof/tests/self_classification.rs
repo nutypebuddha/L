@@ -30,7 +30,10 @@ const SELF_QUERIES: &[(&str, &str, &str)] = &[
     ("search(optimization)", "search", "Mangala"),
     // Philosophical
     ("no invented scalars", "general", ""),
-    ("errors corrected on record", "general", ""),
+    // "errors" now stems to the "error" keyword (Mangala) via the T53
+    // morphological fallback, so this query resolves to an engineering domain
+    // rather than falling through unresolved.
+    ("errors corrected on record", "general", "Mangala"),
 ];
 
 #[test]

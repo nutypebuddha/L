@@ -871,8 +871,10 @@ fn aspect_details(aspect: SignAspect) -> (i32, &'static str) {
 // The canonical keyword → structural-domain mapping used by both
 // `resolve_domain` (Layer 2) and `resolve_aspect` (Layer 3). A keyword matches
 // only as a whole word (bounded by word boundaries) — never as a bare substring
-// fragment — so "velocitys" does not resolve to "velocity" and "antimass" does
-// not resolve to "mass". Common inflected forms are listed explicitly below.
+// fragment — so "antimass" does not resolve to "mass". Inflected forms
+// (plurals, `-ing`, `-ed`) are handled by the light stemmer fallback in
+// `domain_for_keyword` (T53), so "reasoning" resolves like "reason"; a few
+// irregular plurals are also listed explicitly below.
 
 /// Pre-compiled whole-word matchers for `DOMAIN_KEYWORDS`. Each pattern is
 /// `\b<keyword>\b` (regex-escaped) so a keyword must appear as a delimited
@@ -893,10 +895,25 @@ static DOMAIN_KEYWORD_RE: LazyLock<Vec<(Regex, Domain)>> = LazyLock::new(|| {
 /// fall back to entity/formula lookup.
 pub fn domain_for_keyword(token: &str) -> Option<Domain> {
     let t = token.to_lowercase();
-    DOMAIN_KEYWORD_RE
+    if let Some(domain) = DOMAIN_KEYWORD_RE
         .iter()
         .find(|(re, _)| re.is_match(&t))
         .map(|(_, domain)| *domain)
+    {
+        return Some(domain);
+    }
+    // Morphological fallback (T53): retry with a light deterministic stem so
+    // inflected forms (`reasoning`->`reason`, `thinking`->`think`) resolve to
+    // the same graha as their base word. Only consult the stem when the raw
+    // form missed, so exact lexicon entries always win.
+    let stemmed = crate::nlp::stem_token(&t);
+    if stemmed != t {
+        return DOMAIN_KEYWORD_RE
+            .iter()
+            .find(|(re, _)| re.is_match(&stemmed))
+            .map(|(_, domain)| *domain);
+    }
+    None
 }
 
 const DOMAIN_KEYWORDS: &[(&str, Domain)] = &[
@@ -1263,6 +1280,41 @@ const DOMAIN_KEYWORDS: &[(&str, Domain)] = &[
     ("truths", Domain::Shani),
     ("justices", Domain::Shani),
     ("psychologies", Domain::Brihaspati),
+    // ── Reasoning & metacognition (T53) ──
+    // The tool's headline use — "reason about reasoning" — needs the core
+    // reasoning/metacognition vocabulary in the lexicon. Deductive/logical
+    // operations map to Mangala (logic/proof); reflective/mind-facing
+    // cognition maps to Brihaspati (mind/consciousness), consistent with the
+    // existing `think`/`reason`/`mind` assignments above.
+    ("infer", Domain::Mangala),
+    ("inference", Domain::Mangala),
+    ("deduce", Domain::Mangala),
+    ("deduction", Domain::Mangala),
+    ("deductive", Domain::Mangala),
+    ("induction", Domain::Mangala),
+    ("inductive", Domain::Mangala),
+    ("rationale", Domain::Mangala),
+    ("rational", Domain::Mangala),
+    ("rationality", Domain::Mangala),
+    ("heuristic", Domain::Mangala),
+    ("abstraction", Domain::Mangala),
+    ("cognition", Domain::Brihaspati),
+    ("cognitive", Domain::Brihaspati),
+    ("metacognition", Domain::Brihaspati),
+    ("metacognitive", Domain::Brihaspati),
+    ("introspect", Domain::Brihaspati),
+    ("introspection", Domain::Brihaspati),
+    ("reflect", Domain::Brihaspati),
+    ("reflection", Domain::Brihaspati),
+    ("intuition", Domain::Brihaspati),
+    ("judgment", Domain::Brihaspati),
+    ("comprehension", Domain::Brihaspati),
+    ("awareness", Domain::Brihaspati),
+    // Data / storage vocabulary (review named `database` as a lexicon gap).
+    ("database", Domain::Mangala),
+    ("storage", Domain::Mangala),
+    ("schema", Domain::Mangala),
+    ("persistence", Domain::Mangala),
 ];
 
 /// Formal expressions: token → Tanto-evaluable expression.
@@ -2472,11 +2524,27 @@ mod tests {
 
     #[test]
     fn domain_for_keyword_rejects_substring_fragments() {
-        // Suffix fragments that are not whole words must NOT match.
-        assert_eq!(domain_for_keyword("velocitys"), None);
+        // Non-word fragments must NOT match: "antimass" ends in a doubled
+        // sibilant (never de-pluralized), and "start" has no valid stem back to
+        // "star", so both stay unresolved.
         assert_eq!(domain_for_keyword("antimass"), None);
-        // "star" must not resolve from "start" (fragment, no boundary).
         assert_eq!(domain_for_keyword("start"), None);
+    }
+
+    #[test]
+    fn domain_for_keyword_resolves_inflected_forms_via_stemming() {
+        // T53: inflected/plural forms collapse to their base and resolve to the
+        // same graha (morphological fallback in domain_for_keyword).
+        assert_eq!(
+            domain_for_keyword("reasoning"),
+            domain_for_keyword("reason")
+        );
+        assert_eq!(domain_for_keyword("thinking"), domain_for_keyword("think"));
+        assert_eq!(
+            domain_for_keyword("databases"),
+            domain_for_keyword("database")
+        );
+        assert!(domain_for_keyword("reasoning").is_some());
     }
 
     #[test]
