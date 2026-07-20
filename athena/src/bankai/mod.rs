@@ -1113,7 +1113,8 @@ mod tests {
             ambiguity: vec![],
         };
         let solve = bankai.solve(&query, &identity);
-        assert!(solve.success || !solve.success); // depends on expression
+        assert!(solve.success, "Validate of '2 + 2' must succeed");
+        // Validate answers yes/no; it does not compute a solved numeric value.
     }
 
     #[test]
