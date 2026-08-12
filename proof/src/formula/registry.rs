@@ -1097,7 +1097,7 @@ mod tests {
         // Pin the corpus size so README/docs stats cannot silently drift.
         assert_eq!(
             r.len(),
-            528,
+            537,
             "formula corpus size changed — update README/docs if intentional"
         );
         // Spot-check a few known formulas

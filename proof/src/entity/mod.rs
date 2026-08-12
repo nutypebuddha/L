@@ -1758,7 +1758,7 @@ tags = ["anime", "gundam"]
         // Pin the corpus size so README/docs stats cannot silently drift.
         assert_eq!(
             seeds.len(),
-            214,
+            222,
             "entity corpus size changed — update README/docs if intentional"
         );
         // Spot-check a few known entities
