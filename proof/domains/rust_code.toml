@@ -1,0 +1,139 @@
+# L.ai · Rust Code Domain — strategize / build profile
+#
+# Maps the 9 Vedic grahas onto 7 Rust engineering concern-pillars so the
+# deterministic strategize engine can allocate an effort budget across
+# concrete Rust techniques.
+#
+# Usage:
+#   lai strategize --domain domains/rust_code.toml \
+#     --query "design a safe, high-throughput async API" --budget 20 --explain
+#   lai build --domain domains/rust_code.toml \
+#     --datetime "2026-08-12 12:00" --latitude 0 --longitude 0 \
+#     --top-k 3 --explain
+
+[meta]
+domain = "rust_code"
+description = "Rust engineering concern allocation: Safety, Ergonomics, Performance, Testability, Modularity, Interop, Maintainability"
+
+# Graha → Rust concern pillar (identity mapping; each graha weight flows to
+# its own pillar, like the generic 7-pillar profile).
+[[graha_map]]
+graha = "surya"
+splits = { score_spear = 1.0 }
+note = "Sun → Safety/Correctness (leadership of the type system)"
+
+[[graha_map]]
+graha = "chandra"
+splits = { score_olive = 1.0 }
+note = "Moon → Ergonomics (developer experience, flow)"
+
+[[graha_map]]
+graha = "mangala"
+splits = { score_forge = 1.0 }
+note = "Mars → Performance (action, throughput)"
+
+[[graha_map]]
+graha = "budha"
+splits = { score_owl = 1.0 }
+note = "Mercury → Testability/Observability (logic, communication)"
+
+[[graha_map]]
+graha = "brihaspati"
+splits = { score_council = 1.0 }
+note = "Jupiter → Modularity/Scalability (wisdom, law, growth)"
+
+[[graha_map]]
+graha = "shukra"
+splits = { score_loom = 1.0 }
+note = "Venus → Interop/FFI (value, weaving, integration)"
+
+[[graha_map]]
+graha = "shani"
+splits = { score_stone = 1.0 }
+note = "Saturn → Maintainability/Dependency health (structure, time)"
+
+[budget]
+unit = 7
+
+# Investable Rust techniques. Each costs 1 unit of effort and contributes to
+# the Rust concern pillars. The strategize solver allocates the budget to
+# maximize the weighted objective.
+[[items]]
+id = "ownership_model"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_stone = 0.6, score_spear = 0.4 }
+note = "Ownership + borrowing discipline; &mut exclusivity, Send/Sync bounds"
+
+[[items]]
+id = "trait_abstraction"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_council = 0.7, score_olive = 0.3 }
+note = "Trait objects / generics for modular, ergonomic APIs"
+
+[[items]]
+id = "async_runtime"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_forge = 0.6, score_council = 0.4 }
+note = "tokio/async-std event loop; zero-cost futures"
+
+[[items]]
+id = "type_driven_design"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_spear = 0.8, score_owl = 0.2 }
+note = "Make illegal states unrepresentable; newtype wrappers"
+
+[[items]]
+id = "testing_ci"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_owl = 0.7, score_stone = 0.3 }
+note = "Property tests (proptest), fuzz, CI gates"
+
+[[items]]
+id = "ffi_binding"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_loom = 1.0 }
+note = "cbindgen / PyO3 / wasm-bindgen boundary"
+
+[[items]]
+id = "dep_minimization"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_stone = 0.7, score_forge = 0.3 }
+note = "Minimal dep tree; cargo-deny, feature gating"
+
+[objective]
+maximize = ["score_spear", "score_olive", "score_forge", "score_owl", "score_council", "score_loom", "score_stone"]
+
+[scoring.score_spear]
+terms = { score_spear = 1.0 }
+
+[scoring.score_olive]
+terms = { score_olive = 1.0 }
+
+[scoring.score_forge]
+terms = { score_forge = 1.0 }
+
+[scoring.score_owl]
+terms = { score_owl = 1.0 }
+
+[scoring.score_council]
+terms = { score_council = 1.0 }
+
+[scoring.score_loom]
+terms = { score_loom = 1.0 }
+
+[scoring.score_stone]
+terms = { score_stone = 1.0 }

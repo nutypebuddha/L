@@ -1,0 +1,93 @@
+# L.ai · Rust Code — archetypal construct entities
+#
+# Each Rust construct is resolved onto a graha so the descent engine can map a
+# Rust query onto the wheel and reason back down to proof. properties are
+# 0..1 concern weights (deterministic, auditable).
+
+[[entity]]
+id = "ownership"
+name = "Ownership"
+domain = "shani"
+description = "Rust's core invariant: every value has a single owner; the borrower checker enforces aliasing XOR mutation at compile time."
+graha = "shani"
+tattva = "air"
+guna = "tamas"
+tags = ["rust", "memory_safety", "borrow_checker", "compile_time"]
+properties = { memory_safety = 0.98, ergonomics_cost = 0.5, performance = 0.9, learnability = 0.4 }
+
+[[entity]]
+id = "borrow_checker"
+name = "Borrow Checker"
+domain = "budha"
+description = "Static analysis pass enforcing lifetimes and borrow rules; rejects data races and use-after-free without a runtime cost."
+graha = "budha"
+tattva = "earth"
+guna = "sattva"
+tags = ["rust", "lifetimes", "static_analysis", "memory_safety"]
+properties = { rigor = 0.97, compile_time_friction = 0.6, soundness = 0.99 }
+
+[[entity]]
+id = "trait"
+name = "Trait"
+domain = "brihaspati"
+description = "Rust's interface mechanism: ad-hoc polymorphism via impl blocks, with trait objects (dyn) for dynamic dispatch and generics for static dispatch."
+graha = "brihaspati"
+tattva = "ether"
+guna = "sattva"
+tags = ["rust", "abstraction", "polymorphism", "modularity"]
+properties = { modularity = 0.95, zero_cost_static = 0.95, dynamic_cost = 0.7 }
+
+[[entity]]
+id = "lifetime"
+name = "Lifetime"
+domain = "shani"
+description = "Compile-time annotations describing how long references are valid; enable borrow elision and prevent dangling references."
+graha = "shani"
+tattva = "air"
+guna = "tamas"
+tags = ["rust", "lifetimes", "borrow_checker", "annotation"]
+properties = { soundness = 0.96, verbosity = 0.6, necessity = 0.85 }
+
+[[entity]]
+id = "async_await"
+name = "Async/Await"
+domain = "mangala"
+description = "Zero-cost futures compiled to state machines; driven by an executor (tokio, async-std). Enables high-throughput I/O without OS threads."
+graha = "mangala"
+tattva = "fire"
+guna = "rajas"
+tags = ["rust", "concurrency", "futures", "performance"]
+properties = { throughput = 0.95, complexity = 0.7, zero_cost = 0.9 }
+
+[[entity]]
+id = "macro"
+name = "Macro / Metaprogramming"
+domain = "ketu"
+description = "declarative (macro_rules!) and procedural (derive, attribute, function-like) macros for compile-time code generation and DSLs."
+graha = "ketu"
+tattva = "ether"
+guna = "sattva"
+tags = ["rust", "metaprogramming", "compile_time", "dsl"]
+properties = { power = 0.9, readability_cost = 0.7, compile_time_impact = 0.6 }
+
+[[entity]]
+id = "unsafe"
+name = "Unsafe Block"
+domain = "rahu"
+description = "Opt-out of the borrow checker for FFI, inline asm, and raw pointer arithmetic; requires the programmer to uphold the invariants the compiler cannot check."
+graha = "rahu"
+tattva = "air"
+guna = "rajas"
+tags = ["rust", "ffi", "raw_pointers", "escape_hatch"]
+properties = { power = 0.95, danger = 0.85, necessity_for_ffi = 0.9 }
+
+[[entity]]
+id = "cargo"
+name = "Cargo"
+domain = "chandra"
+description = "Rust's package manager and build system: dependency resolution, workspaces, feature flags, and a rich ecosystem (crates.io)."
+graha = "chandra"
+tattva = "water"
+guna = "sattva"
+tags = ["rust", "tooling", "packaging", "dependency_management"]
+properties = { ergonomics = 0.92, reproducibility = 0.88, ecosystem = 0.95 }

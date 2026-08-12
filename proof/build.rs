@@ -20,6 +20,7 @@ fn main() {
         "formulas/atomic_dynamic.toml",
         "formulas/bridging_seed.toml",
         "formulas/vortex_seed.toml",
+        "formulas/rust_seed.toml",
     ];
 
     let mut formulas = String::new();

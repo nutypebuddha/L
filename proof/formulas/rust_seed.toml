@@ -1,0 +1,108 @@
+# L.ai · Rust Code — deterministic layout/formula corpus
+#
+# Every entry is a machine-checkable, fail-loud arithmetic fact about the Rust
+# language (ABI layout, type sizes, ownership overhead). Evaluated by Tanto.
+# `domain` maps each to a Vedic graha archetype:
+#   mangala = Action & Engineering (performance)
+#   budha   = Logic & Communication (type system)
+#   shani   = Structure & Time (memory layout, alignment)
+#   ketu    = Spirituality & Science (abstraction cost)
+
+[[formula]]
+id = "rust_struct_padded_size"
+tags = ["rust", "layout", "memory", "shani", "alignment"]
+domain = "shani"
+level = 3
+inputs = ["size", "align"]
+output = "padded"
+expression = "ceil(size / align) * align"
+description = "Struct padded size: round the unpadded byte size up to the next multiple of the struct alignment"
+evidence = "Rust repr(Rust)/repr(C): layout size is the smallest multiple of `align` >= sum of field offsets+field sizes"
+
+[[formula]]
+id = "rust_struct_alignment"
+tags = ["rust", "layout", "memory", "shani", "alignment"]
+domain = "shani"
+level = 3
+inputs = ["a", "b"]
+output = "align"
+expression = "max(a, b)"
+description = "Struct alignment is the maximum of its field alignments (two-field lower bound; max over all fields in general)"
+evidence = "Alignment of a composite type = max alignment over all member types"
+
+[[formula]]
+id = "rust_align_padding"
+tags = ["rust", "layout", "memory", "shani", "padding"]
+domain = "shani"
+level = 3
+inputs = ["size", "align"]
+output = "padding"
+expression = "ceil(size / align) * align - size"
+description = "Trailing padding bytes added to satisfy struct alignment"
+evidence = "padding = padded_size - unpadded_size"
+
+[[formula]]
+id = "rust_enum_size"
+tags = ["rust", "layout", "memory", "budha", "enum", "discriminant"]
+domain = "budha"
+level = 3
+inputs = ["max_variant", "disc"]
+output = "size"
+expression = "max_variant + disc"
+description = "repr(C) enum size = largest variant size + discriminant size (disc added after the largest variant)"
+evidence = "repr(C) enums place the discriminant after the maximal variant; repr(Rust) may overlap"
+
+[[formula]]
+id = "rust_vec_heap_bytes"
+tags = ["rust", "layout", "memory", "mangala", "collections"]
+domain = "mangala"
+level = 2
+inputs = ["cap", "elem"]
+output = "heap"
+expression = "cap * elem"
+description = "Vec heap allocation in bytes = capacity * per-element size"
+evidence = "Vec<T> heap buffer holds `capacity` elements of size size_of::<T>()"
+
+[[formula]]
+id = "rust_arc_overhead"
+tags = ["rust", "layout", "memory", "shani", "atomic", "smart_pointer"]
+domain = "shani"
+level = 3
+inputs = ["word"]
+output = "overhead"
+expression = "2 * word"
+description = "Arc<T> / Rc<T> control block overhead = two reference counts (strong + weak), each `word` bytes (8 on 64-bit)"
+evidence = "Arc inner = T + AtomicUsize strong + AtomicUsize weak; overhead = 2 * size_of::<usize>()"
+
+[[formula]]
+id = "rust_string_overhead"
+tags = ["rust", "layout", "memory", "mangala", "collections", "string"]
+domain = "mangala"
+level = 2
+inputs = ["word"]
+output = "overhead"
+expression = "3 * word"
+description = "String/&str fat-pointer overhead = ptr + len + capacity = three machine words"
+evidence = "String is (RawVec: ptr+cap) + len => 3 * size_of::<usize>()"
+
+[[formula]]
+id = "rust_trait_object_size"
+tags = ["rust", "layout", "memory", "budha", "trait_object", "vtable"]
+domain = "budha"
+level = 3
+inputs = ["word"]
+output = "size"
+expression = "2 * word"
+description = "dyn Trait fat pointer = data ptr + vtable ptr = two machine words"
+evidence = "A trait object (&dyn T) is a wide pointer: (data, vtable)"
+
+[[formula]]
+id = "rust_unsafe_slice_to_rawparts"
+tags = ["rust", "layout", "memory", "ketu", "ffi", "abstraction"]
+domain = "ketu"
+level = 5
+inputs = ["word"]
+output = "ptr_size"
+expression = "2 * word"
+description = "Rust slice/[T] fat pointer passed across an FFI boundary = ptr + len = two words (no capacity)"
+evidence = "Slices are (ptr, len); the capacity is not carried, unlike Vec"
