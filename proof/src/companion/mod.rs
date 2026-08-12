@@ -71,12 +71,43 @@ pub fn answer_leaks(answer: &str) -> bool {
 
 /// Pure: strip leaked terms from an answer, replacing each with a redaction.
 /// Used as a final safety net before any answer reaches the user.
+///
+/// Whole-word, case-sensitive replacement (see `redact_term`): a term is
+/// redacted only as a standalone token, so ordinary English containing a term
+/// as a substring (e.g. "gatekeeper") is left untouched.
 pub fn sanitize_answer(answer: &str) -> String {
     let mut out = answer.to_string();
     for term in LEAKED_TERMS {
-        out = out.replace(term, "[redacted]");
+        out = redact_term(&out, term);
     }
     out
+}
+
+/// Replace `term` with `[redacted]` only at whole-word boundaries (case-sensitive).
+fn redact_term(text: &str, term: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let term_chars: Vec<char> = term.chars().collect();
+    if term_chars.is_empty() {
+        return text.to_string();
+    }
+    let n = chars.len();
+    let mut result = String::with_capacity(n);
+    let mut i = 0;
+    while i < n {
+        if chars[i..].starts_with(&term_chars[..]) {
+            let before_ok = i == 0 || !chars[i - 1].is_alphanumeric();
+            let after_idx = i + term_chars.len();
+            let after_ok = after_idx >= n || !chars[after_idx].is_alphanumeric();
+            if before_ok && after_ok {
+                result.push_str("[redacted]");
+                i += term_chars.len();
+                continue;
+            }
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+    result
 }
 
 /// Pure: is `query` a factual / computable claim Laverna can verify?
