@@ -76,7 +76,7 @@ impl InferenceEngine {
     }
 
     pub fn validate_token(&mut self, token: &str, context: &str) -> CidResult<Ball> {
-        self.pipeline.validate_single_token(token, context)
+        self.pipeline.validate_single_token(token, context, token)
     }
 
     pub fn validate_beam(
@@ -84,7 +84,8 @@ impl InferenceEngine {
         candidates: Vec<String>,
         context: &str,
     ) -> CidResult<Option<Pocket>> {
-        let balls = self.pipeline.validate_candidates(&candidates, context)?;
+        let claim = candidates.join(" ");
+        let balls = self.pipeline.validate_candidates(&candidates, context, &claim)?;
         Ok(self.pipeline.select_best(balls))
     }
 

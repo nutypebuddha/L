@@ -5,11 +5,23 @@ use crate::kb::facts::KnowledgeBase;
 
 pub struct FactGate<'a> {
     kb: &'a KnowledgeBase,
+    claim: String,
 }
 
 impl<'a> FactGate<'a> {
     pub fn new(kb: &'a KnowledgeBase) -> Self {
-        FactGate { kb }
+        FactGate {
+            kb,
+            claim: String::new(),
+        }
+    }
+
+    /// Attach the full claim text so consistency checks can see the whole
+    /// statement (e.g. compare a number against an entity mentioned elsewhere
+    /// in the sentence), not just the current candidate token.
+    pub fn with_claim(mut self, claim: &str) -> Self {
+        self.claim = claim.to_string();
+        self
     }
 
     fn check_fact_exists(&self, token: &str, context: &str) -> (bool, f64) {
@@ -59,6 +71,13 @@ impl<'a> FactGate<'a> {
         let lower_token = token.to_lowercase();
         let lower_context = context.to_lowercase();
 
+        // Tier 2: reject size claims that contradict a known entity size
+        // (e.g. "an i32 occupies 8 bytes" when i32 = 4). Returns Some only
+        // when a numeric mismatch is found; otherwise falls through.
+        if let Some(decision) = self.check_entity_size() {
+            return decision;
+        }
+
         if let (Ok(token_val), Ok(context_val)) =
             (lower_token.parse::<f64>(), lower_context.parse::<f64>())
         {
@@ -84,6 +103,59 @@ impl<'a> FactGate<'a> {
         }
 
         (true, 0.75)
+    }
+
+    /// Tier-2 size validation: if the claim asserts an entity's memory size
+    /// (e.g. "a Vec is 24 bytes"), compare the stated number against the
+    /// knowledge base. Returns `Some((false, 0.1))` on a numeric mismatch,
+    /// `None` when there is no size assertion or the number is consistent
+    /// (so the caller's normal logic proceeds).
+    fn check_entity_size(&self) -> Option<(bool, f64)> {
+        let claim_l = self.claim.to_ascii_lowercase();
+        let size_kw = [
+            "bytes", "byte", "size", "occupies", "overhead", "layout", "word", "words",
+        ];
+        if !size_kw.iter().any(|k| claim_l.contains(k)) {
+            return None;
+        }
+        // Assertion verbs that bind an entity to a number ("Vec is 24 bytes").
+        let assertion = ["is", "are", "occupies", "takes", "equals", "=", "=="];
+        let tokens: Vec<&str> = claim_l
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '.')
+            .filter(|t| !t.is_empty())
+            .collect();
+
+        for i in 0..tokens.len() {
+            let fact = self
+                .kb
+                .facts
+                .iter()
+                .find(|f| !f.name.is_empty() && f.value != 0.0 && f.name.eq_ignore_ascii_case(tokens[i]));
+            let Some(fact) = fact else {
+                continue;
+            };
+            let start = i.saturating_sub(3);
+            let end = (i + 4).min(tokens.len());
+            for j in start..end {
+                if j == i {
+                    continue;
+                }
+                if let Ok(num) = tokens[j].parse::<f64>() {
+                    let lo = j.min(i);
+                    let hi = j.max(i);
+                    let has_verb = tokens[lo..=hi]
+                        .iter()
+                        .any(|&t| assertion.contains(&t));
+                    if has_verb {
+                        let ratio = num / fact.value;
+                        if !(0.9..=1.1).contains(&ratio) {
+                            return Some((false, 0.1));
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn check_source_reliable(&self, _token: &str, context: &str) -> (bool, f64) {
@@ -128,6 +200,11 @@ impl<'a> FactGate<'a> {
                 return (false, 0.1);
             }
             if lower_context.contains(true_fact) && lower_token.contains(false_fact) {
+                return (false, 0.1);
+            }
+            // Standalone false claim (e.g. "the earth is flat") — the whole
+            // claim is available via self.claim regardless of tokenization.
+            if self.claim.to_ascii_lowercase().contains(false_fact) {
                 return (false, 0.1);
             }
         }

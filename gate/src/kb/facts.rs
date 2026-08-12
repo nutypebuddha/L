@@ -35,6 +35,8 @@ pub enum Domain {
     Lambda,
     /// Psychology & Neuroscience (mind, behavior, cognition)
     Mu,
+    /// Programming & Systems (Rust, code, memory layout)
+    Nu,
 }
 
 impl Domain {
@@ -53,6 +55,7 @@ impl Domain {
             "kappa" | "language" | "linguistics" | "words" => Some(Domain::Kappa),
             "lambda" | "philosophy" | "ethics" | "morality" => Some(Domain::Lambda),
             "mu" | "psychology" | "neuroscience" | "mind" | "brain" => Some(Domain::Mu),
+            "nu" | "rust" | "rust_code" | "systems" | "programming" | "code" => Some(Domain::Nu),
             _ => None,
         }
     }
@@ -72,6 +75,7 @@ impl Domain {
             Domain::Kappa => "Κ",
             Domain::Lambda => "Λ",
             Domain::Mu => "Μ",
+            Domain::Nu => "Ν",
         }
     }
 
@@ -90,6 +94,7 @@ impl Domain {
             Domain::Kappa => "κ",
             Domain::Lambda => "λ",
             Domain::Mu => "μ",
+            Domain::Nu => "ν",
         }
     }
 
@@ -108,6 +113,7 @@ impl Domain {
             Domain::Kappa,
             Domain::Lambda,
             Domain::Mu,
+            Domain::Nu,
         ]
     }
 
@@ -126,6 +132,7 @@ impl Domain {
             Domain::Kappa => "Language & Linguistics",
             Domain::Lambda => "Philosophy & Ethics",
             Domain::Mu => "Psychology & Neuroscience",
+            Domain::Nu => "Programming & Systems",
         }
     }
 }
@@ -233,6 +240,31 @@ impl KnowledgeBase {
             "",
             "math constant",
         ));
+
+        // --- Rust / Systems (verified ABI, 64-bit; word = 8 bytes) ---
+        // Source of truth mirrors proof/src/corpus/rust_seed.toml. Sizes are the
+        // on-stack/inline footprint of the type, not heap payloads.
+        facts.push(Fact::with_domain("vec", 24.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("string", 24.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("slice", 16.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("dyn", 16.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("arc", 16.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("rc", 8.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("box", 8.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("usize", 8.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("isize", 8.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("i8", 1.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("i16", 2.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("i32", 4.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("i64", 8.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("u8", 1.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("u16", 2.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("u32", 4.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("u64", 8.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("f32", 4.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("f64", 8.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("bool", 1.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
+        facts.push(Fact::with_domain("char", 4.0, "bytes", "Rust std layout, 64-bit", Domain::Nu));
 
         // --- Physical Constants ---
         facts.push(Fact::new(

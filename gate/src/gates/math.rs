@@ -74,6 +74,14 @@ impl MathGate {
         if token.is_empty() {
             return (false, 0.0);
         }
+        // Natural-language / multi-word input is not a math expression to
+        // validate. Pass it through so the Fact gate can assess the claim
+        // (previously this failed every free-text claim, making gate validate
+        // refuse all factual statements). Equations are still checked by
+        // check_equation_correctness.
+        if token.chars().any(|c| c.is_whitespace()) {
+            return (true, 0.8);
+        }
         // Tanto handles all valid expressions, so we just check it's evaluable
         if Self::eval_tanto(token).is_some() {
             return (true, 0.95);

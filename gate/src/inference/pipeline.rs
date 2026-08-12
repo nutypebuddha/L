@@ -63,7 +63,8 @@ impl Pipeline {
         let mut result = ValidationResult::new(&request.text);
 
         if request.has_candidates() {
-            let candidates = self.validate_candidates(&request.candidates, &request.context)?;
+            let candidates =
+                self.validate_candidates(&request.candidates, &request.context, &request.text)?;
             let validated_text = candidates
                 .iter()
                 .find(|b| b.validated)
@@ -93,7 +94,7 @@ impl Pipeline {
                 result.validated_text = validated_text;
             }
         } else {
-            let ball = self.validate_single_token(&request.text, &request.context)?;
+            let ball = self.validate_single_token(&request.text, &request.context, &request.text)?;
 
             let gate_scores = ball
                 .gate_results
@@ -129,7 +130,7 @@ impl Pipeline {
         Ok(result)
     }
 
-    pub fn validate_single_token(&self, token: &str, context: &str) -> CidResult<Ball> {
+    pub fn validate_single_token(&self, token: &str, context: &str, claim: &str) -> CidResult<Ball> {
         let candidate = TokenCandidate::new(0, token, 0.5);
         let mut ball = Ball::new(candidate);
 
@@ -141,7 +142,7 @@ impl Pipeline {
             let result = match pin.gate {
                 Gate::Math => MathGate::new().validate(&mut ball, context),
                 Gate::Logic => LogicGate::new().validate(&mut ball, context),
-                Gate::Fact => FactGate::new(&self.kb).validate(&mut ball, context),
+                Gate::Fact => FactGate::new(&self.kb).with_claim(claim).validate(&mut ball, context),
                 Gate::Confidence => {
                     ConfidenceGate::with_platt_for_domain(context).validate(&mut ball, context)
                 }
@@ -158,6 +159,7 @@ impl Pipeline {
         &self,
         candidates: &[String],
         context: &str,
+        claim: &str,
     ) -> CidResult<Vec<Ball>> {
         let mut balls = Vec::new();
 
@@ -173,7 +175,7 @@ impl Pipeline {
                 let result = match pin.gate {
                     Gate::Math => MathGate::new().validate(&mut ball, context),
                     Gate::Logic => LogicGate::new().validate(&mut ball, context),
-                    Gate::Fact => FactGate::new(&self.kb).validate(&mut ball, context),
+                    Gate::Fact => FactGate::new(&self.kb).with_claim(claim).validate(&mut ball, context),
                     Gate::Confidence => {
                         ConfidenceGate::with_platt_for_domain(context).validate(&mut ball, context)
                     }

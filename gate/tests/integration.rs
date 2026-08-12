@@ -8,6 +8,7 @@ use cid::gates::{
     confidence::ConfidenceGate, fact::FactGate, formal::FormalGate, logic::LogicGate,
     math::MathGate,
 };
+use cid::inference::{InferenceEngine, ValidationRequest};
 use cid::kb::facts::Domain;
 use cid::kb::facts::KnowledgeBase;
 use cid::state::machine::StateMachine;
@@ -274,7 +275,7 @@ fn test_domain_system() {
 
     // Test all domains
     let all_domains = Domain::all();
-    assert_eq!(all_domains.len(), 12);
+    assert_eq!(all_domains.len(), 13);
 
     // Test domain counting
     let alpha_count = kb.count_domain(Domain::Alpha);
@@ -295,5 +296,50 @@ fn test_domain_system() {
 
     // Test domain stats
     let stats = kb.domain_stats();
-    assert_eq!(stats.len(), 12);
+    assert_eq!(stats.len(), 13);
+}
+
+#[test]
+fn test_rust_domain_registered() {
+    assert_eq!(Domain::from_name("rust_code"), Some(Domain::Nu));
+    assert_eq!(Domain::from_name("rust"), Some(Domain::Nu));
+    let kb = KnowledgeBase::new();
+    assert!(
+        kb.facts_by_domain(Domain::Nu).len() >= 15,
+        "rust_code domain should carry the curated Rust ABI facts"
+    );
+}
+
+#[test]
+fn test_gate_validates_rust_size_claims() {
+    let mut engine = InferenceEngine::new();
+
+    let ok = engine
+        .validate(ValidationRequest::new(
+            "A Rust Vec occupies 24 bytes on 64-bit",
+            "rust_code",
+        ))
+        .unwrap();
+    assert!(ok.passed, "true Rust Vec claim should validate");
+
+    let ok2 = engine
+        .validate(ValidationRequest::new(
+            "An i32 occupies 4 bytes on 64-bit",
+            "rust_code",
+        ))
+        .unwrap();
+    assert!(ok2.passed, "true i32 claim should validate");
+
+    let bad = engine
+        .validate(ValidationRequest::new(
+            "An i32 occupies 8 bytes on 64-bit",
+            "rust_code",
+        ))
+        .unwrap();
+    assert!(!bad.passed, "false i32 claim should be rejected");
+
+    let flat = engine
+        .validate(ValidationRequest::new("The earth is flat", "general"))
+        .unwrap();
+    assert!(!flat.passed, "known false claim should be rejected");
 }
