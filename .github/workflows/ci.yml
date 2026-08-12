@@ -55,6 +55,21 @@ jobs:
       - name: CLI/MCP parity gate
         run: cargo test -p laverna --features mcp --test mcp_parity
 
+  assistant-termux:
+    name: Assistant (termux feature gate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+      - name: Check formatting (assistant, termux)
+        run: cargo fmt -p assistant -- --check
+      - name: Check clippy (assistant, termux)
+        run: cargo clippy -p assistant --features termux --all-targets -- -D warnings
+      - name: Run tests (assistant, termux)
+        run: cargo test -p assistant --features termux
+
   wasm-build:
     name: WASM build (proof + gate)
     runs-on: ubuntu-latest
@@ -140,7 +155,7 @@ jobs:
       - name: Build static x86_64-musl release
         run: |
           cargo build --release --target x86_64-unknown-linux-musl \
-            --features "mcp websearch budget llm milp graph"
+            --features "mcp websearch budget llm milp graph assistant-web"
       - name: Verify binary exists and is statically linked
         run: |
           bin=target/x86_64-unknown-linux-musl/release/lai
@@ -185,7 +200,7 @@ jobs:
       - name: Build static aarch64-musl release
         run: |
           cross build --release --target aarch64-unknown-linux-musl \
-            --features "mcp websearch budget llm milp graph" \
+            --features "mcp websearch budget llm milp graph assistant-web" \
             -p laverna
       - name: Verify binary exists
         run: |
