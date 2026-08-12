@@ -12,8 +12,8 @@ under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
 CONDITIONS OF ANY KIND, either express or implied. See the License for the
 specific language governing permissions and limitations under the License.
 
-Components:
-- L.ai · Proof (proof/, crate "laverna") — formerly Laverna
-- L.ai · Gate (gate/, crate "lai-gate") — formerly CID (Unlicense -> Apache-2.0)
-- L.ai · Bridge (bridge/, Node/TypeScript) — formerly CID-Bridge
-- L.ai · Athena (athena/, crate "athena") — formerly Athena- (Proprietary -> Apache-2.0)
+Components (all Apache-2.0):
+- L.ai · Proof (proof/, crate "laverna")
+- L.ai · Gate (gate/, crate "lai-gate")
+- L.ai · Bridge (bridge/, Node/TypeScript)
+- L.ai · Athena (athena/, crate "athena")
