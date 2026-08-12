@@ -118,8 +118,12 @@ impl<'a> FactGate<'a> {
         if !size_kw.iter().any(|k| claim_l.contains(k)) {
             return None;
         }
-        // Assertion verbs that bind an entity to a number ("Vec is 24 bytes").
-        let assertion = ["is", "are", "occupies", "takes", "equals", "=", "=="];
+        // Assertion verbs that bind an entity to a number ("Vec is 24 bytes",
+        // "Arc adds 16 bytes"). Kept broad so phrasing variants still bind.
+        let assertion = [
+            "is", "are", "occupies", "takes", "equals", "=", "==", "adds", "has", "needs",
+            "requires", "costs", "uses",
+        ];
         let tokens: Vec<&str> = claim_l
             .split(|c: char| !c.is_ascii_alphanumeric() && c != '.')
             .filter(|t| !t.is_empty())
@@ -134,19 +138,24 @@ impl<'a> FactGate<'a> {
             let Some(fact) = fact else {
                 continue;
             };
-            let start = i.saturating_sub(3);
-            let end = (i + 4).min(tokens.len());
+            // Window around the entity; ±5 covers phrasings like
+            // "a dyn trait object is 8 bytes" where entity and number are
+            // several tokens apart.
+            let start = i.saturating_sub(5);
+            let end = (i + 6).min(tokens.len());
             for j in start..end {
                 if j == i {
                     continue;
                 }
                 if let Ok(num) = tokens[j].parse::<f64>() {
-                    let lo = j.min(i);
-                    let hi = j.max(i);
-                    let has_verb = tokens[lo..=hi]
-                        .iter()
-                        .any(|&t| assertion.contains(&t));
-                    if has_verb {
+                    // The binding verb must sit immediately next to the number
+                    // (e.g. "is 8", "occupies 24", "adds 16"). This prevents an
+                    // architecture qualifier like "64-bit" (next to "on"/"bit",
+                    // not a verb) from pairing with an unrelated entity and
+                    // producing a false rejection.
+                    let adj_verb = (j > 0 && assertion.contains(&tokens[j - 1]))
+                        || (j + 1 < tokens.len() && assertion.contains(&tokens[j + 1]));
+                    if adj_verb {
                         let ratio = num / fact.value;
                         if !(0.9..=1.1).contains(&ratio) {
                             return Some((false, 0.1));

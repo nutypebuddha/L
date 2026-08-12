@@ -343,3 +343,52 @@ fn test_gate_validates_rust_size_claims() {
         .unwrap();
     assert!(!flat.passed, "known false claim should be rejected");
 }
+
+#[test]
+fn test_gate_validates_rust_size_edge_cases() {
+    // These exercise the phrasing variants that previously slipped through:
+    // entity/number several tokens apart ("dyn trait object is 8 bytes") and a
+    // non-"is" binding verb ("Arc adds 8 bytes").
+    let mut engine = InferenceEngine::new();
+
+    let ok_dyn = engine
+        .validate(ValidationRequest::new(
+            "A dyn trait object is 16 bytes on 64-bit",
+            "rust_code",
+        ))
+        .unwrap();
+    assert!(ok_dyn.passed, "true dyn/trait-object claim should validate");
+
+    let bad_dyn = engine
+        .validate(ValidationRequest::new(
+            "A dyn trait object is 8 bytes on 64-bit",
+            "rust_code",
+        ))
+        .unwrap();
+    assert!(!bad_dyn.passed, "false dyn/trait-object claim should be rejected");
+
+    let ok_arc = engine
+        .validate(ValidationRequest::new(
+            "An Arc adds 16 bytes of overhead on 64-bit",
+            "rust_code",
+        ))
+        .unwrap();
+    assert!(ok_arc.passed, "true Arc overhead claim should validate");
+
+    let bad_arc = engine
+        .validate(ValidationRequest::new(
+            "An Arc adds 8 bytes of overhead on 64-bit",
+            "rust_code",
+        ))
+        .unwrap();
+    assert!(!bad_arc.passed, "false Arc overhead claim should be rejected");
+
+    // Architecture qualifier ("64-bit") must not pair with an entity ("vec").
+    let ok_vec = engine
+        .validate(ValidationRequest::new(
+            "A Rust Vec occupies 24 bytes on 64-bit",
+            "rust_code",
+        ))
+        .unwrap();
+    assert!(ok_vec.passed, "entity + 64-bit qualifier must not false-reject");
+}
