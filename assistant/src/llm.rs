@@ -114,6 +114,17 @@ fn model_name() -> String {
         .unwrap_or_else(|| "local".to_string())
 }
 
+/// Optional `Authorization: Bearer` header value from `LAI_LLM_API_KEY`.
+/// Hosted OpenAI-compatible endpoints (e.g. Gemini's `/v1beta/openai`) require
+/// this; local `llama-server`/`ollama` ignore it. Without it the handshake has
+/// no credential and every hosted call is rejected.
+fn auth_header() -> Option<String> {
+    std::env::var("LAI_LLM_API_KEY")
+        .ok()
+        .filter(|k| !k.is_empty())
+        .map(|k| format!("Bearer {k}"))
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Llm;
 
@@ -126,7 +137,9 @@ impl Llm {
     /// `ollama serve` (`http://127.0.0.1:11434/v1`) and the vendored
     /// `llama-server` (`http://127.0.0.1:8080/v1`) expose. (The legacy
     /// `/../health` path returns 404 on ollama and falsely disabled the agent
-    /// loop — see T61/LLM-reachability.)
+    /// loop — see T61/LLM-reachability. A plain `GET` is used, not `OPTIONS`,
+    /// because hosted endpoints reject `OPTIONS` on `/v1/models` and would
+    /// falsely disable the agent loop.)
     pub fn available() -> bool {
         let base = base_url();
         let base = base.trim_end_matches('/');
@@ -135,7 +148,11 @@ impl Llm {
             .timeout_global(Some(Duration::from_secs(2)))
             .build();
         let probe = Agent::from(config);
-        probe.options(&url).call().is_ok()
+        let mut req = probe.get(&url);
+        if let Some(auth) = auth_header() {
+            req = req.header("Authorization", &auth);
+        }
+        req.call().is_ok()
     }
 
     /// Run the persona over `user_query` with optional `grounded_context`
@@ -163,12 +180,15 @@ impl Llm {
                 { "role": "user", "content": user },
             ],
             "temperature": 0.3,
-            "max_tokens": 128,
+            "max_tokens": 1024,
             "stream": false,
         });
 
-        let resp: serde_json::Value = agent()
-            .post(&endpoint)
+        let mut req = agent().post(&endpoint);
+        if let Some(auth) = auth_header() {
+            req = req.header("Authorization", &auth);
+        }
+        let resp: serde_json::Value = req
             .send_json(body)
             .ok()?
             .body_mut()
@@ -188,12 +208,43 @@ impl Llm {
 }
 
 /// Strip internal mechanics/brand from a model answer.
+///
+/// Whole-word, case-sensitive replacement: a term is redacted only when it
+/// appears as a standalone token, so ordinary English containing a term as a
+/// substring (e.g. "gatekeeper", "Llamas") is left untouched.
 pub fn sanitize(answer: &str) -> String {
     let mut out = answer.to_string();
     for term in LEAKED_TERMS {
-        out = out.replace(term, "[redacted]");
+        out = redact_term(&out, term);
     }
     out.trim().to_string()
+}
+
+/// Replace `term` with `[redacted]` only at whole-word boundaries (case-sensitive).
+fn redact_term(text: &str, term: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let term_chars: Vec<char> = term.chars().collect();
+    if term_chars.is_empty() {
+        return text.to_string();
+    }
+    let n = chars.len();
+    let mut result = String::with_capacity(n);
+    let mut i = 0;
+    while i < n {
+        if chars[i..].starts_with(&term_chars[..]) {
+            let before_ok = i == 0 || !chars[i - 1].is_alphanumeric();
+            let after_idx = i + term_chars.len();
+            let after_ok = after_idx >= n || !chars[after_idx].is_alphanumeric();
+            if before_ok && after_ok {
+                result.push_str("[redacted]");
+                i += term_chars.len();
+                continue;
+            }
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+    result
 }
 
 /// A tool the model can call, described in OpenAI-compatible function-calling
@@ -270,8 +321,11 @@ impl Llm {
             );
         }
 
-        let resp: serde_json::Value = agent()
-            .post(&endpoint)
+        let mut req = agent().post(&endpoint);
+        if let Some(auth) = auth_header() {
+            req = req.header("Authorization", &auth);
+        }
+        let resp: serde_json::Value = req
             .send_json(body)
             .ok()?
             .body_mut()
