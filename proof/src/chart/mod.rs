@@ -452,21 +452,6 @@ fn angular_diff_to_aspect(diff: f64) -> Option<Aspect> {
     }
 }
 
-/// Create a ChartSnapshot for the current datetime.
-impl Default for ChartSnapshot {
-    fn default() -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        let secs_since_epoch = now.as_secs_f64();
-        let jd = 2440587.5 + secs_since_epoch / 86400.0;
-
-        let mut snap = ChartSnapshot::new(jd);
-        snap.label = Some("now (system time)".to_string());
-        snap
-    }
-}
-
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
