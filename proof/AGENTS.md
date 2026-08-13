@@ -109,16 +109,24 @@ JSON surface over scraping `--help`/text.
    not a contract.
 - **Binder trace is a structured document, not a story (Item 2).** `solve
    --explain-binding=json` attaches `explain_binding` to the solve JSON:
-   `{formula_id, candidates_considered, tie_count, inputs:[{input, anchored_by,
-   distance, method, pre_conversion_value, pre_unit, post_unit, converted}]}`.
-   Use this to answer "why did it read N as input X" — `method` is `name`/`unit`/
-   `derived`, `anchored_by` is the *actual* anchor token the binder selected (not a
-   re-derivation), `distance` is the token distance (or `null` for a `derived`
-   fill), `tie_count > 1` means the binding was effectively arbitrary (arbitrary →
-   treat the binding as low-trust). Every input the formula consumed is recorded —
-   including inputs filled from a prior hop's *derived* output (`method:"derived"`,
-   `distance:null`, carrying the upstream value+unit) — so a two-hop chain never
-   silently shows fewer inputs than it has. The `=text` mode (or no value) prints
+   `{formula_chain:[String], candidates_considered, tie_count, inputs:[{input,
+   formula_id, hop, anchored_by, distance, method, pre_conversion_value,
+   pre_unit, post_unit, converted}]}`. `formula_chain` is the *ordered* list of
+   formula ids that actually produced the answer (last entry = formula that
+   ultimately bound); for a single-rule query it has one element, a two-hop chain
+   has two (T102). Each input also carries `formula_id` + `hop` (T101) so a chain
+   never yields two unattributable entries with the same input name — `hop:0` is
+   the top formula, `hop:1` the downstream rule. Use this to answer "why did it
+   read N as input X" — `method` is `name`/`unit`/`derived`, `anchored_by` is the
+   *actual* anchor token the binder selected (not a re-derivation), `distance` is
+   the token distance (or `null` for a `derived` fill), `tie_count > 1` means the
+   binding was effectively arbitrary (arbitrary → treat the binding as low-trust).
+   Every input the formula consumed is recorded — including inputs filled from a
+   prior hop's *derived* output (`method:"derived"`, `distance:null`, carrying the
+   upstream value+unit) — so a two-hop chain never silently shows fewer inputs than
+   it has (T100). The trace only records the *chosen* chain, not every candidate
+   that bound during ranking (ranking uses a throwaway trace; the chosen formula is
+   re-bound into the real trace, T101/T102). The `=text` mode (or no value) prints
    the human prose to stderr and omits the field from JSON, so `-f json` stdout
    stays clean.
 - **Determinism receipt (Item 5).** Every proof JSON (`solve -f json` and
@@ -130,8 +138,10 @@ JSON surface over scraping `--help`/text.
    `corpus_content_hash` is the compile-time embedded-corpus hash;
    `effective_corpus_hash` folds any runtime overlay TOML contents into the seed
    hash, so two runs over *different* corpora get different receipts (T99 — a
-   receipt that under-reports is worse than none). `query_hash` pins the normalized
-   query ("this question"), so the receipt stands alone as a reproduce instruction.
+   receipt that under-reports is worse than none).    `query_hash` pins the normalized
+   query ("this question") — normalized as lowercase + plural-strip + whitespace
+   collapse, matching the binder's own token rule — so the receipt stands alone as
+   a reproduce instruction even though the binder also sees the raw query.
    Before trusting two proofs as comparable, compare their receipts — a different
    `effective_corpus_hash`, `features`, or `query_hash` means the runs reasoned
    over a different build/KB/question even if the rest of the proof matches. The
