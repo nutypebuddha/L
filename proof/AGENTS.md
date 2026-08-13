@@ -112,19 +112,30 @@ JSON surface over scraping `--help`/text.
    `{formula_id, candidates_considered, tie_count, inputs:[{input, anchored_by,
    distance, method, pre_conversion_value, pre_unit, post_unit, converted}]}`.
    Use this to answer "why did it read N as input X" — `method` is `name`/`unit`/
-   `derived`, `anchored_by` is the query token, `tie_count > 1` means the binding
-   was effectively arbitrary (arbitrary → treat the binding as low-trust). The
-    `=text` mode (or no value) prints the human prose to stderr and omits the
-    field from JSON, so `-f json` stdout stays clean.
+   `derived`, `anchored_by` is the *actual* anchor token the binder selected (not a
+   re-derivation), `distance` is the token distance (or `null` for a `derived`
+   fill), `tie_count > 1` means the binding was effectively arbitrary (arbitrary →
+   treat the binding as low-trust). Every input the formula consumed is recorded —
+   including inputs filled from a prior hop's *derived* output (`method:"derived"`,
+   `distance:null`, carrying the upstream value+unit) — so a two-hop chain never
+   silently shows fewer inputs than it has. The `=text` mode (or no value) prints
+   the human prose to stderr and omits the field from JSON, so `-f json` stdout
+   stays clean.
 - **Determinism receipt (Item 5).** Every proof JSON (`solve -f json` and
    `solve --proof-out`) carries `determinism_receipt`:
-   `{laverna_version, features:[…], corpus_version, corpus_content_hash}`.
-   `features` lists the cargo feature flags the binary was built with (plus
-   `embedded-corpus`); `corpus_content_hash` pins the knowledge base. Before
-   trusting two proofs as comparable, compare their receipts — a different
-   `corpus_content_hash` or `features` set means the runs reasoned over a
-   different build/KB even if the rest of the proof matches. The receipt is part
-   of the hashed payload, so it is also covered by `digest`.
+   `{laverna_version, features:[…], corpus_version, corpus_content_hash,
+   effective_corpus_hash, query_hash}`. `features` is single-sourced from
+   `collect_features()` (T99) — cargo flags plus `embedded-corpus`, and
+   `corpus-overlay` when an overlay directory is present at runtime.
+   `corpus_content_hash` is the compile-time embedded-corpus hash;
+   `effective_corpus_hash` folds any runtime overlay TOML contents into the seed
+   hash, so two runs over *different* corpora get different receipts (T99 — a
+   receipt that under-reports is worse than none). `query_hash` pins the normalized
+   query ("this question"), so the receipt stands alone as a reproduce instruction.
+   Before trusting two proofs as comparable, compare their receipts — a different
+   `effective_corpus_hash`, `features`, or `query_hash` means the runs reasoned
+   over a different build/KB/question even if the rest of the proof matches. The
+   receipt is part of the hashed payload, so it is also covered by `digest`.
 - **Deterministic.** Outputs are sorted by stable key (determinism rule in
   root AGENTS.md); identical input → byte-identical JSON across runs. Safe to
   diff or cache.

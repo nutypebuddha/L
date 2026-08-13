@@ -2023,8 +2023,9 @@ struct BindTraceInput {
     /// The token in the query that anchored this input (name method), or `None`
     /// when it was matched by unit/derived alone.
     pub anchored_by: Option<String>,
-    /// Distance (in tokens) from the anchor token to the bound scalar.
-    pub distance: f64,
+    /// Distance (in tokens) from the anchor token to the bound scalar. `None`
+    /// when the input was filled from a prior hop's derived output (no token).
+    pub distance: Option<f64>,
     /// `name` | `unit` | `derived` — how the scalar was matched to the input.
     pub method: String,
     /// Value before any unit conversion.
@@ -2186,6 +2187,24 @@ fn bind_inputs(
                             inputs[i], inputs[i], val
                         );
                     }
+                    // Item 2/T100: a derived (prior-hop) fill is still a binding
+                    // decision and must appear in the audit trace — otherwise a
+                    // two-hop chain shows fewer inputs than the formula has, with
+                    // no indication anything is missing.
+                    let converted = match (&in_u, dunit) {
+                        (Some(a), Some(b)) => !unit_eq(a, b),
+                        _ => false,
+                    };
+                    trace.inputs.push(BindTraceInput {
+                        input: inputs[i].clone(),
+                        anchored_by: None,
+                        distance: None,
+                        method: "derived".to_string(),
+                        pre_conversion_value: *v,
+                        pre_unit: dunit.clone(),
+                        post_unit: in_u.clone(),
+                        converted,
+                    });
                 }
             } else if detail {
                 eprintln!(
@@ -2201,6 +2220,10 @@ fn bind_inputs(
     }
     let mut dist = vec![vec![f64::INFINITY; m]; remaining.len()];
     let mut method: Vec<Vec<Option<&'static str>>> = vec![vec![None; m]; remaining.len()];
+    // The actual anchor token the binder selected for a name match (T100 review):
+    // recorded here rather than re-derived in the trace, so the audit trail cannot
+    // disagree with the decision it is auditing.
+    let mut anchor_tok: Vec<Vec<Option<String>>> = vec![vec![None; m]; remaining.len()];
     let mut had_type_mismatch = false;
     // First input/unit pair that failed the type gate — surfaced as a structured
     // `unit_mismatch` refusal so a caller can tell "units don't compose" (do NOT
@@ -2247,8 +2270,10 @@ fn bind_inputs(
             // topic-word-steal blocking. Only available when the input has a
             // name/alias token in the query.
             let mut name_d: f64 = f64::INFINITY;
+            // The anchor token the binder actually selects for a name match — hoisted
+            // so the audit trace can record it (T100 review) instead of re-deriving.
+            let mut best_o: Option<usize> = None;
             if has_name {
-                let mut best_o = None;
                 let mut best_d = f64::INFINITY;
                 for &o in &occ[inp_i] {
                     let d = (o as f64 - p as f64).abs();
@@ -2288,6 +2313,9 @@ fn bind_inputs(
                 } else {
                     Some("unit")
                 };
+                if name_d.is_finite() {
+                    anchor_tok[ri][k] = best_o.map(|o| toks[o].clone());
+                }
             }
         }
     }
@@ -2403,21 +2431,16 @@ fn bind_inputs(
         // Item 2: record how this input was anchored so it can be emitted as a
         // structured document (not a prose summary) for an auditing caller.
         let m = method[ri][assign[ri]].unwrap_or("?");
-        let distance = dist[ri][assign[ri]];
-        let converted = in_u.is_some()
-            && sc_u.is_some()
-            && !unit_eq(in_u.as_ref().unwrap(), sc_u.as_ref().unwrap());
-        let anchored_by = if m == "name" {
-            occ.get(inp_i).and_then(|positions| {
-                let sp = numbers[assign[ri]].0;
-                positions
-                    .iter()
-                    .min_by_key(|&&pos| (pos as i64 - sp as i64).abs())
-                    .map(|&pos| toks[pos].clone())
-            })
+        let distance = if dist[ri][assign[ri]].is_finite() {
+            Some(dist[ri][assign[ri]])
         } else {
             None
         };
+        let converted = in_u.is_some()
+            && sc_u.is_some()
+            && !unit_eq(in_u.as_ref().unwrap(), sc_u.as_ref().unwrap());
+        // Record the binder's *actual* selected anchor token, not a re-derivation.
+        let anchored_by = anchor_tok[ri][assign[ri]].clone();
         trace.inputs.push(BindTraceInput {
             input: inputs[inp_i].clone(),
             anchored_by,
@@ -3190,6 +3213,23 @@ fn bind_formula(
                     .then(rank_of(a.0).cmp(&rank_of(b.0)))
                     .then(a.0.id.cmp(&b.0.id))
             });
+            // Audit: the ranking pass above used a throwaway trace. Re-bind the
+            // *chosen* consumer so its (possibly derived) inputs reach
+            // `trace.inputs` — re-binding is deterministic and yields the same
+            // assignment already ranked. This is how a two-hop chain records
+            // which input came from a prior hop's derived output (T100).
+            let _ = bind_inputs(
+                &consumers[0].0.inputs,
+                &consumers[0].0.input_types,
+                &consumers[0].0.input_aliases,
+                &var_tokens,
+                &toks,
+                &numbers,
+                &derived,
+                explain,
+                true,
+                trace,
+            );
             current = consumers[0].0;
             current_bind = consumers[0].1.clone();
         }
@@ -3344,37 +3384,48 @@ fn run_solve(query: &str, explain_binding: Option<ExplainBindingMode>) -> SolveR
 /// Build the *hashed payload* of a proof object: every provable field, with no
 /// `digest` and no wall-clock `computed_at` (T52/T53). Keys serialize in a
 /// Determinism receipt (Item 5): the exact binary version, the feature flags it
-/// was built with, and the content hash of the corpus it reasoned over. Lets an
-/// agent tell whether two runs used the *same knowledge base and build* before
-/// trusting that their proofs are comparable — a proof built from a different
-/// corpus hash or feature set is NOT the same proof even with an identical digest
-/// over the rest.
-fn determinism_receipt() -> serde_json::Value {
-    let feature_cfgs: &[(&str, bool)] = &[
-        ("assistant", cfg!(feature = "assistant")),
-        ("mcp", cfg!(feature = "mcp")),
-        ("websearch", cfg!(feature = "websearch")),
-        ("budget", cfg!(feature = "budget")),
-        ("milp", cfg!(feature = "milp")),
-        ("graph", cfg!(feature = "graph")),
-        ("llm", cfg!(feature = "llm")),
-        ("bench", cfg!(feature = "bench")),
-        ("assistant-web", cfg!(feature = "assistant-web")),
-        ("embedded-corpus", true),
-    ];
-    let mut features: Vec<&str> = feature_cfgs
-        .iter()
-        .filter(|(_, on)| *on)
-        .map(|(f, _)| *f)
-        .collect();
-    // Sort so the receipt is byte-stable regardless of cfg! ordering.
-    features.sort_unstable();
+/// was built with, the content hash of the corpus it reasoned over, and a hash of
+/// the normalized query ("this question"). Lets an agent tell whether two runs used
+/// the *same build, knowledge base, and question* before trusting their proofs are
+/// comparable — a proof built from a different corpus/features/query is NOT the same
+/// proof even with an identical digest over the rest.
+///
+/// The `features` list is single-sourced from `collect_features()` (T99): that
+/// function is the one place the feature set is enumerated, so the receipt cannot
+/// drift from `info --json`.
+fn determinism_receipt(query: &str) -> serde_json::Value {
     serde_json::json!({
         "laverna_version": env!("CARGO_PKG_VERSION"),
-        "features": features,
+        "features": collect_features(),
         "corpus_version": CORPUS_VERSION,
-        "corpus_content_hash": CORPUS_CONTENT_HASH
+        "corpus_content_hash": CORPUS_CONTENT_HASH,
+        "effective_corpus_hash": effective_corpus_hash(),
+        "query_hash": laverna::digest::sha256_hex(query.trim().as_bytes())
     })
+}
+
+/// Runtime corpus hash that accounts for overlay contents (T99). `CORPUS_CONTENT_HASH`
+/// is a compile-time constant covering only the embedded seed; overlays load at
+/// runtime from `corpus_overlay_dirs()`, so they would otherwise make two runs with
+/// different knowledge bases produce byte-identical receipts. When overlays are
+/// present, fold their (sorted, deterministic) TOML contents into the seed hash so
+/// the receipt reflects the *effective* corpus actually reasoned over.
+fn effective_corpus_hash() -> String {
+    let seed = CORPUS_CONTENT_HASH;
+    let mut overlays = corpus_overlay_toml_contents();
+    if overlays.is_empty() {
+        return seed.to_string();
+    }
+    overlays.sort();
+    let mut buf = String::with_capacity(
+        seed.len() + overlays.iter().map(|s| s.len()).sum::<usize>() + overlays.len(),
+    );
+    buf.push_str(seed);
+    for c in &overlays {
+        buf.push('\n');
+        buf.push_str(c);
+    }
+    laverna::digest::sha256_hex(buf.as_bytes())
 }
 
 /// canonical, sorted order because `serde_json::Value` is backed by a `BTreeMap`
@@ -3424,7 +3475,7 @@ fn build_proof_payload(result: &SolveResult) -> serde_json::Value {
             "version": CORPUS_VERSION,
             "content_hash": CORPUS_CONTENT_HASH
         },
-        "determinism_receipt": determinism_receipt(),
+        "determinism_receipt": determinism_receipt(&result.query),
         "descent": {
             "resolution_score": result.matrix.resolution_score * 100.0,
             "average_depth": result.matrix.average_depth,
@@ -4331,7 +4382,7 @@ fn solve_to_json(result: &SolveResult, include_trace: bool) -> Value {
         "rule_applications": rule_applications,
         "refusals": refusals,
         "dominant_domains": result.matrix.dominant_domains,
-        "determinism_receipt": determinism_receipt()
+        "determinism_receipt": determinism_receipt(&result.query)
     });
     // Item 2: when `--explain-binding=json` was requested, attach the structured
     // binder trace as a first-class field of the solve document — so a caller can
@@ -7641,6 +7692,27 @@ mod proof_tests {
             CORPUS_CONTENT_HASH
         );
         assert!(!r["corpus_content_hash"].as_str().unwrap().is_empty());
+        // T99: effective hash must be present, and equal the compile-time seed
+        // when no overlay is loaded (so the receipt detects a different KB when one is).
+        let eff = r["effective_corpus_hash"]
+            .as_str()
+            .expect("effective_corpus_hash must be a string");
+        assert!(!eff.is_empty());
+        if corpus_overlay_dirs().is_empty() {
+            assert_eq!(
+                eff, CORPUS_CONTENT_HASH,
+                "with no overlay, effective hash equals the embedded seed hash"
+            );
+        }
+        // Item 5 (wish): the receipt must also identify *this question*, not just
+        // build + corpus, so it stands alone as a reproduce instruction.
+        assert!(
+            r["query_hash"]
+                .as_str()
+                .map(|s| !s.is_empty())
+                .unwrap_or(false),
+            "receipt must carry a query hash"
+        );
     }
 
     /// Item 5: the `solve -f json` document also carries the receipt, so an agent
@@ -10414,15 +10486,31 @@ mod binder_tests {
             .as_array()
             .expect("explain_binding.inputs must be an array");
         assert!(!inputs.is_empty(), "trace must record at least one input");
+        let mut saw_derived = false;
         for inp in inputs {
             assert!(inp["input"].is_string());
+            let method = inp["method"].as_str().expect("method must be a string");
             assert!(
-                inp["method"].is_string(),
-                "method must be name/unit/derived"
+                matches!(method, "name" | "unit" | "derived"),
+                "method must be name/unit/derived, got {method}"
             );
             assert!(inp["pre_conversion_value"].is_number());
-            assert!(inp["distance"].is_number());
+            // Forward (name/unit) binds have a real distance; derived (prior-hop)
+            // fills have none — both are valid and must appear (T100).
+            assert!(
+                inp["distance"].is_number() || inp["distance"].is_null(),
+                "distance must be a number (forward) or null (derived)"
+            );
+            if method == "derived" {
+                saw_derived = true;
+            }
         }
+        // This query is a two-hop chain; the second rule consumes a derived output,
+        // so the trace MUST record the chained input rather than silently dropping it.
+        assert!(
+            saw_derived,
+            "two-hop chain must record at least one derived input"
+        );
         assert!(trace["tie_count"].is_number(), "tie_count must be a number");
 
         // Absent flag → field omitted (no contract drift for default JSON).
@@ -10431,6 +10519,38 @@ mod binder_tests {
         assert!(
             off.get("explain_binding").is_none(),
             "explain_binding must be omitted without the flag"
+        );
+    }
+
+    /// T100: the binder trace must record inputs filled from a prior hop's derived
+    /// output. On a two-hop chain the second rule consumes the first's output; the
+    /// trace must carry that input (method "derived") with the upstream value, not
+    /// silently omit it and leave the chain looking under-specified.
+    #[test]
+    fn binder_trace_records_derived_binds() {
+        let q = "padded extent of a struct aligned to 8 bytes, the enum contributes max_variant 13 and disc 2";
+        let result = run_solve(q, Some(ExplainBindingMode::Json));
+        let derived: Vec<_> = result
+            .explain_binding
+            .inputs
+            .iter()
+            .filter(|i| i.method == "derived")
+            .collect();
+        assert!(
+            !derived.is_empty(),
+            "two-hop chain must record at least one derived (prior-hop) input"
+        );
+        let d = derived
+            .iter()
+            .find(|i| i.input == "size")
+            .expect("derived input must be the upstream `size` output");
+        assert_eq!(
+            d.pre_conversion_value, 15.0,
+            "derived value must be the upstream size output (13 + 2)"
+        );
+        assert!(
+            d.distance.is_none(),
+            "derived fills have no anchor distance"
         );
     }
 
