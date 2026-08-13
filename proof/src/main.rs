@@ -1793,6 +1793,10 @@ struct SolveResult {
     num_exprs: Vec<NumExpr>,
     provenance: Vec<(String, Vec<ProvenanceStep>)>,
     rule_applications: Vec<RuleApplication>,
+    /// Structured, machine-classifiable refusals (Item 1). Empty when the binder
+    /// bound at least one formula. When non-empty the `rule_applications` list is
+    /// empty and the caller should branch on `refusals[*].kind`, never on prose.
+    refusals: Vec<BindRefusal>,
     /// Advisory hint shown when nothing binds: did-you-mean formulas / outputs.
     /// Excluded from the proof payload (advisory, not provable).
     hint: Option<String>,
@@ -1945,6 +1949,45 @@ fn infer_number_units(
 /// query and is not in `derived`, or if the nearest-scalar assignment is
 /// ambiguous, binding **refuses** (`None`). There is deliberately no positional
 /// fallback path: that is the invented-scalar hole this design exists to prevent.
+/// Stable, machine-classifiable taxonomy of *why* the binder refused to bind a
+/// query to a formula. The textual `[bind] REFUSED: ...` line on stderr may change
+/// freely; these `kind` discriminants are API surface and must not. An LLM caller
+/// should branch on `kind`, never on the prose `detail`.
+///
+/// Maps 1:1 to the client requirements: `ambiguous` → ask the person which reading
+/// they meant; `no_name_anchor` → rephrase naming inputs, retry once; `unit_mismatch`
+/// → tell the person their units don't compose, do NOT retry; `search_too_large` →
+/// split the query, retryable.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum BindRefusal {
+    Ambiguous {
+        /// Number of equally-good injective assignments.
+        candidates: usize,
+        detail: String,
+    },
+    NoNameAnchor {
+        inputs: Vec<String>,
+        detail: String,
+    },
+    UnitMismatch {
+        input: String,
+        from_unit: String,
+        to_unit: String,
+        detail: String,
+    },
+    SearchTooLarge {
+        permutations: u64,
+        limit: u64,
+        detail: String,
+    },
+}
+
+/// Connect each extracted scalar to a formula's inputs by nearest name/unit
+/// anchor. Returns `Ok((bindings, used_scalar_indices))` when exactly one
+/// injective assignment fits, or a structured `BindRefusal` (Item 1) describing
+/// *why* no binding was possible. There is deliberately no positional fallback —
+/// that is the invented-scalar hole this design exists to prevent.
 #[allow(clippy::type_complexity)]
 #[allow(clippy::too_many_arguments)]
 fn bind_inputs(
@@ -1957,7 +2000,7 @@ fn bind_inputs(
     derived: &HashMap<String, (f64, Option<String>)>,
     explain: bool,
     detail: bool,
-) -> Option<(Vec<(String, f64)>, Vec<usize>)> {
+) -> Result<(Vec<(String, f64)>, Vec<usize>), BindRefusal> {
     // Loose-match a token: lowercase and drop a trailing 's' (>=4 chars) so
     // "bytes" matches "byte", "sizes" matches "size", etc.
     let norm = |s: &str| -> String {
@@ -2029,7 +2072,14 @@ fn bind_inputs(
                 perms, MAX_BIND_PERMUTATIONS
             );
         }
-        return None;
+        return Err(BindRefusal::SearchTooLarge {
+            permutations: perms,
+            limit: MAX_BIND_PERMUTATIONS,
+            detail: format!(
+                "binding search space too large ({} permutations > {})",
+                perms, MAX_BIND_PERMUTATIONS
+            ),
+        });
     }
     // A scalar may only bind to an input whose name token is within
     // MAX_BIND_DIST tokens of it. This rejects "topic-word steals": an input
@@ -2092,11 +2142,15 @@ fn bind_inputs(
     }
     let remaining: Vec<usize> = (0..n).filter(|&i| bindings[i].is_none()).collect();
     if remaining.is_empty() {
-        return Some((zip_bindings(inputs, &bindings), Vec::new()));
+        return Ok((zip_bindings(inputs, &bindings), Vec::new()));
     }
     let mut dist = vec![vec![f64::INFINITY; m]; remaining.len()];
     let mut method: Vec<Vec<Option<&'static str>>> = vec![vec![None; m]; remaining.len()];
     let mut had_type_mismatch = false;
+    // First input/unit pair that failed the type gate — surfaced as a structured
+    // `unit_mismatch` refusal so a caller can tell "units don't compose" (do NOT
+    // retry) apart from "ambiguous" / "no name anchor" (retryable).
+    let mut first_mismatch: Option<(String, String, String)> = None;
     for (ri, &inp_i) in remaining.iter().enumerate() {
         let in_u = input_types.get(&inputs[inp_i]).cloned().flatten();
         let has_name = !occ[inp_i].is_empty();
@@ -2115,6 +2169,13 @@ fn bind_inputs(
             };
             if !compatible {
                 had_type_mismatch = true;
+                if first_mismatch.is_none() {
+                    first_mismatch = Some((
+                        inputs[inp_i].clone(),
+                        sc_u.clone().unwrap_or_default(),
+                        in_u.clone().unwrap_or_default(),
+                    ));
+                }
                 if explain {
                     eprintln!(
                         "[bind]     type mismatch: input `{}` ({:?}) cannot take scalar #{} = {}{}",
@@ -2202,7 +2263,41 @@ fn bind_inputs(
                 eprintln!("[bind]     REFUSED: no name anchor for every input");
             }
         }
-        return None;
+        // Structured refusal (Item 1): the prose above may change; this enum is
+        // the contract. A unit mismatch takes priority — it is the irrecoverable
+        // "your units don't compose" case the caller must not retry. Otherwise:
+        // `count > 1` is genuine ambiguity (ask the person which reading); `count == 0`
+        // means no complete assignment exists at all (under-specified — rephrase,
+        // naming the missing inputs), which we surface as `no_name_anchor`.
+        if let Some((input, from, to)) = &first_mismatch {
+            return Err(BindRefusal::UnitMismatch {
+                input: input.clone(),
+                from_unit: from.clone(),
+                to_unit: to.clone(),
+                detail: format!(
+                    "scalar unit `{from}` cannot be converted to input unit `{to}` for input `{input}`"
+                ),
+            });
+        } else if count > 1 && any_finite {
+            return Err(BindRefusal::Ambiguous {
+                candidates: count,
+                detail: format!("binding is ambiguous ({count} equally-good assignments)"),
+            });
+        } else {
+            let inputs_unbound: Vec<String> =
+                remaining.iter().map(|&i| inputs[i].clone()).collect();
+            let detail = if any_finite {
+                "binding under-specified: compatible scalars exist but no complete assignment \
+                 (missing name anchor / insufficient inputs)"
+                    .to_string()
+            } else {
+                "no compatible scalar for every input (missing name anchor / type)".to_string()
+            };
+            return Err(BindRefusal::NoNameAnchor {
+                inputs: inputs_unbound,
+                detail,
+            });
+        }
     }
     let mut used_idx: Vec<usize> = Vec::new();
     for (ri, &inp_i) in remaining.iter().enumerate() {
@@ -2223,7 +2318,15 @@ fn bind_inputs(
                                 b, a, inputs[inp_i]
                             );
                         }
-                        return None;
+                        return Err(BindRefusal::UnitMismatch {
+                            input: inputs[inp_i].clone(),
+                            from_unit: b.clone(),
+                            to_unit: a.clone(),
+                            detail: format!(
+                                "cannot convert {b} -> {a} for input `{}`",
+                                inputs[inp_i]
+                            ),
+                        });
                     }
                 }
             }
@@ -2243,7 +2346,7 @@ fn bind_inputs(
         bindings[inp_i] = Some(val);
         used_idx.push(numbers[assign[ri]].0);
     }
-    Some((zip_bindings(inputs, &bindings), used_idx))
+    Ok((zip_bindings(inputs, &bindings), used_idx))
 }
 
 fn zip_bindings(inputs: &[String], bindings: &[Option<f64>]) -> Vec<(String, f64)> {
@@ -2635,7 +2738,7 @@ fn solve_inverse_fallback(
                 .filter(|(k, _)| k.as_str() != miss)
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
-            if let Some((bindings, used)) = bind_inputs(
+            if let Ok((bindings, used)) = bind_inputs(
                 &rest,
                 &rest_types,
                 &rest_aliases,
@@ -2679,12 +2782,13 @@ fn bind_formula(
     numerical: &[f64],
     reg: &FormulaRegistry,
     explain: bool,
-) -> Vec<RuleApplication> {
+) -> Result<Vec<RuleApplication>, Vec<BindRefusal>> {
+    let mut refusals: Vec<BindRefusal> = Vec::new();
     if numerical.is_empty() {
         if explain {
             eprintln!("[bind] no scalars in query — binder has nothing to bind");
         }
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let toks: Vec<String> = query.split_whitespace().map(|t| t.to_lowercase()).collect();
     let raw_numbers: Vec<(usize, f64)> = toks
@@ -2712,7 +2816,7 @@ fn bind_formula(
         })
         .collect();
     if raw_numbers.is_empty() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let formulas_all: Vec<&Formula> = reg.all();
     let unit_vocab = build_unit_vocab(&formulas_all);
@@ -2807,7 +2911,7 @@ fn bind_formula(
                 app.formula_id
             );
         }
-        return vec![app];
+        return Ok(vec![app]);
     }
 
     // A formula is a forward-binding candidate only if the query matches one of
@@ -2861,7 +2965,7 @@ fn bind_formula(
                 id_score(f)
             );
         }
-        if let Some((b, _used)) = bind_inputs(
+        match bind_inputs(
             &f.inputs,
             &f.input_types,
             &f.input_aliases,
@@ -2872,7 +2976,8 @@ fn bind_formula(
             explain,
             detail,
         ) {
-            bound.push((f, b));
+            Ok((b, _used)) => bound.push((f, b)),
+            Err(r) => refusals.push(r),
         }
     }
     if explain && skipped > 0 {
@@ -2939,7 +3044,7 @@ fn bind_formula(
                 if !consumes_by_name {
                     continue;
                 }
-                if let Some((b, _)) = bind_inputs(
+                match bind_inputs(
                     &f.inputs,
                     &f.input_types,
                     &f.input_aliases,
@@ -2950,23 +3055,29 @@ fn bind_formula(
                     explain,
                     true,
                 ) {
-                    if explain {
-                        eprintln!(
-                            "[bind]   chain step: `{}` consumes output `{}` by name",
-                            f.id, current.output
-                        );
+                    Ok((b, _)) => {
+                        if explain {
+                            eprintln!(
+                                "[bind]   chain step: `{}` consumes output `{}` by name",
+                                f.id, current.output
+                            );
+                        }
+                        consumers.push((f, b));
                     }
-                    consumers.push((f, b));
-                } else if explain {
-                    let missing: Vec<&String> = f
-                        .inputs
-                        .iter()
-                        .filter(|inp| *inp != &current.output)
-                        .collect();
-                    eprintln!(
-                        "[bind]   `{}` consumes `{}` by name but cannot fill remaining inputs {:?}",
-                        f.id, current.output, missing
-                    );
+                    Err(r) => {
+                        refusals.push(r);
+                        if explain {
+                            let missing: Vec<&String> = f
+                                .inputs
+                                .iter()
+                                .filter(|inp| *inp != &current.output)
+                                .collect();
+                            eprintln!(
+                                "[bind]   `{}` consumes `{}` by name but cannot fill remaining inputs {:?}",
+                                f.id, current.output, missing
+                            );
+                        }
+                    }
                 }
             }
             if consumers.is_empty() {
@@ -2992,7 +3103,7 @@ fn bind_formula(
             current = consumers[0].0;
             current_bind = consumers[0].1.clone();
         }
-        return chain;
+        return Ok(chain);
     }
 
     // No direct bind: try inverse solving (e.g. "what mass has KE 100 at v 5").
@@ -3005,10 +3116,10 @@ fn bind_formula(
                 app.formula_id
             );
         }
-        return vec![app];
+        return Ok(vec![app]);
     }
 
-    Vec::new()
+    Err(refusals)
 }
 
 /// Run the full `solve` pipeline and collect every result field.
@@ -3092,7 +3203,10 @@ fn run_solve(query: &str, explain_binding: bool) -> SolveResult {
         .map(|t| (t.text.clone(), t.provenance.clone()))
         .collect();
 
-    let rule_applications = bind_formula(query, &numerical, &formula_reg, explain_binding);
+    let (rule_applications, refusals) = match bind_formula(query, &numerical, &formula_reg, explain_binding) {
+        Ok(apps) => (apps, Vec::new()),
+        Err(refs) => (Vec::new(), refs),
+    };
 
     // Advisory hint when nothing bound: point at near-miss formulas/outputs so a
     // wrong query is self-correcting instead of silently empty (fail-loud UX).
@@ -3126,6 +3240,7 @@ fn run_solve(query: &str, explain_binding: bool) -> SolveResult {
         num_exprs,
         provenance,
         rule_applications,
+        refusals,
         hint,
     }
 }
@@ -4054,6 +4169,14 @@ fn solve_to_json(result: &SolveResult) -> Value {
             })
         })
         .collect();
+    // Structured refusals (Item 1): each refusal is wrapped as `{"refused": {…}}`
+    // so the `kind` discriminant is stable API surface even as `detail` prose
+    // evolves. A caller branches on `kind`, not on the string.
+    let refusals: Vec<Value> = result
+        .refusals
+        .iter()
+        .map(|r| serde_json::json!({ "refused": r }))
+        .collect();
     serde_json::json!({
         "query": result.query,
         "intent": result.intent,
@@ -4069,6 +4192,7 @@ fn solve_to_json(result: &SolveResult) -> Value {
         "numerical_expressions": num_exprs,
         "provenance": provenance,
         "rule_applications": rule_applications,
+        "refusals": refusals,
         "dominant_domains": result.matrix.dominant_domains
     })
 }
@@ -9803,11 +9927,162 @@ fn cmd_athena_budget_reset() {
 mod binder_tests {
     use super::*;
 
-    /// Load the embedded registry and run the binder on a raw query.
+    /// Load the embedded registry and run the binder on a raw query. Returns the
+    /// bound rule applications, or an empty vec when the binder classified a
+    /// refusal (you can call `bind_refusals` to inspect the structured reason).
     fn bind(query: &str) -> Vec<RuleApplication> {
         let reg = load_formula_registry();
         let numerical = extract_numerical_values(query);
-        bind_formula(query, &numerical, &reg, false)
+        bind_formula(query, &numerical, &reg, false).unwrap_or_default()
+    }
+
+    /// Run the binder and return its structured refusals (Item 1 contract).
+    fn bind_refusals(query: &str) -> Vec<BindRefusal> {
+        let reg = load_formula_registry();
+        let numerical = extract_numerical_values(query);
+        match bind_formula(query, &numerical, &reg, false) {
+            Ok(_) => Vec::new(),
+            Err(r) => r,
+        }
+    }
+
+    /// `size: bytes` vs a `celsius` scalar — units don't compose, so the binder
+    /// must classify this as a `unit_mismatch` (do NOT retry), never as a soft
+    /// bind. Deterministically exercises `bind_inputs` with a controlled type gate.
+    #[test]
+    fn bind_refusal_unit_mismatch_is_structured() {
+        let inputs = vec!["size".to_string()];
+        let mut types = HashMap::new();
+        types.insert("size".to_string(), Some("bytes".to_string()));
+        let aliases = HashMap::new();
+        let var_tokens = HashSet::new();
+        let toks: Vec<String> = ["size", "13", "celsius"].iter().map(|s| s.to_string()).collect();
+        let numbers = vec![(2usize, 13.0, Some("celsius".to_string()))];
+        let derived = HashMap::new();
+        let r = bind_inputs(
+            &inputs,
+            &types,
+            &aliases,
+            &var_tokens,
+            &toks,
+            &numbers,
+            &derived,
+            false,
+            false,
+        )
+        .expect_err("celsius must not fill a bytes input");
+        match r {
+            BindRefusal::UnitMismatch {
+                input,
+                from_unit,
+                to_unit,
+                ..
+            } => {
+                assert_eq!(input, "size");
+                assert_eq!(from_unit, "celsius");
+                assert_eq!(to_unit, "bytes");
+            }
+            other => panic!("expected UnitMismatch, got {other:?}"),
+        }
+    }
+
+    /// Untyped, non-name-anchorable inputs with only untyped scalars: no compatible
+    /// scalar can fill any input, so the binder classifies `no_name_anchor`
+    /// (retryable after rephrasing the query to name inputs).
+    #[test]
+    fn bind_refusal_no_name_anchor_is_structured() {
+        let inputs = vec!["a".to_string(), "b".to_string()];
+        let types = HashMap::new();
+        let aliases = HashMap::new();
+        let var_tokens = HashSet::new();
+        let toks: Vec<String> = ["a", "b", "5", "7"].iter().map(|s| s.to_string()).collect();
+        let numbers = vec![(2usize, 5.0, None), (3usize, 7.0, None)];
+        let derived = HashMap::new();
+        let r = bind_inputs(
+            &inputs,
+            &types,
+            &aliases,
+            &var_tokens,
+            &toks,
+            &numbers,
+            &derived,
+            false,
+            false,
+        )
+        .expect_err("no name anchor for untyped inputs");
+        match r {
+            BindRefusal::NoNameAnchor { inputs: unbound, .. } => {
+                assert!(unbound.contains(&"a".to_string()));
+                assert!(unbound.contains(&"b".to_string()));
+            }
+            other => panic!("expected NoNameAnchor, got {other:?}"),
+        }
+    }
+
+    /// The `kind` discriminant is stable API surface (Item 1); the `detail` prose is
+    /// not. A caller branches on `kind`, so every variant must serialize with a
+    /// stable `refused.kind` and the fields it needs to act on.
+    #[test]
+    fn bind_refusal_json_contract() {
+        let cases: Vec<BindRefusal> = vec![
+            BindRefusal::Ambiguous {
+                candidates: 3,
+                detail: "binding is ambiguous (3 equally-good assignments)".into(),
+            },
+            BindRefusal::NoNameAnchor {
+                inputs: vec!["size".into()],
+                detail: "no compatible scalar".into(),
+            },
+            BindRefusal::UnitMismatch {
+                input: "size".into(),
+                from_unit: "celsius".into(),
+                to_unit: "bytes".into(),
+                detail: "cannot convert celsius -> bytes".into(),
+            },
+            BindRefusal::SearchTooLarge {
+                permutations: 5_999_270,
+                limit: 5_000_000,
+                detail: "too large".into(),
+            },
+        ];
+        for c in &cases {
+            let wrapped = serde_json::json!({ "refused": c });
+            let v: serde_json::Value = serde_json::from_str(&wrapped.to_string()).unwrap();
+            let kind = v["refused"]["kind"].as_str().expect("refused.kind present");
+            assert!(
+                matches!(
+                    kind,
+                    "ambiguous" | "no_name_anchor" | "unit_mismatch" | "search_too_large"
+                ),
+                "unexpected refusal kind `{kind}`"
+            );
+        }
+        // Exact shape the client branches on for the ambiguous case:
+        let v: serde_json::Value = serde_json::from_str(
+            &serde_json::to_string(&serde_json::json!({
+                "refused": BindRefusal::Ambiguous { candidates: 3, detail: "x".into() }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(v["refused"]["kind"], "ambiguous");
+        assert_eq!(v["refused"]["candidates"], 3);
+    }
+
+    /// End-to-end: a unit-incompatible query routed through the registry must
+    /// produce a non-empty structured refusal (wiring from `bind_formula` → JSON).
+    #[test]
+    fn binder_refuses_unit_mismatch_end_to_end() {
+        let r = bind_refusals("pad a 13 celsius struct aligned 8 bytes");
+        assert!(
+            !r.is_empty(),
+            "a unit-incompatible query must yield a structured refusal"
+        );
+        assert!(
+            r.iter()
+                .any(|x| matches!(x, BindRefusal::UnitMismatch { .. })),
+            "expected a UnitMismatch refusal, got {r:?}"
+        );
     }
 
     /// Adversarial: inputs reordered. "alignment 8, size 13" must bind

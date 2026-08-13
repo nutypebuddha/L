@@ -84,6 +84,15 @@ JSON surface over scraping `--help`/text.
   `error_count`, `refusals`, `diagnostics`. Out-of-scope input is *refused*,
   never silently accepted — trust `passed:false`/`refusals`, not absence of
   output.
+- **Refusals are a stable enum, not prose (Item 1).** `solve` JSON carries
+  `"refusals": [{"refused": {"kind": "...", ...}}]`. Branch on `kind`
+  (`ambiguous` | `no_name_anchor` | `unit_mismatch` | `search_too_large`) — the
+  `detail` string may change but `kind` is API surface. Recommended responses:
+  `ambiguous` → ask the person which reading they meant; `no_name_anchor` →
+  rephrase naming inputs, retry once; `unit_mismatch` → tell the person their
+  units don't compose, do **not** retry; `search_too_large` → split the query,
+  retryable. The `[bind] REFUSED: …` stderr line is preserved for humans but is
+  not a contract.
 - **Deterministic.** Outputs are sorted by stable key (determinism rule in
   root AGENTS.md); identical input → byte-identical JSON across runs. Safe to
   diff or cache.
