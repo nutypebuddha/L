@@ -34,8 +34,10 @@ Pipeline: `query → nlp_parse → descent_engine → query_process → verify_s
 
 ## Feature flags
 
-See root `AGENTS.md` for the full table. Key gotcha: `default = []` — minimal
-build has no heavy deps. MCP requires `--features mcp`. MILP requires `--features milp`.
+See root `AGENTS.md` for the full table. `proof` (laverna) default already
+enables `["assistant","mcp","websearch","budget","milp","graph"]`; a plain
+`cargo build` pulls heavy deps. Use `--no-default-features` for a minimal build.
+`llm` and `assistant-web` are the notable opt-in flags.
 
 ## Schema shapes
 
