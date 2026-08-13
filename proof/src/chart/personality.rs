@@ -339,8 +339,9 @@ fn uccha_bala(graha: Graha, sidereal_longitude: f64) -> f64 {
 pub struct PersonalityProfile {
     /// Weight for each pillar (0.0–1.0, normalized to sum to 1.0).
     pub pillar_weights: [f64; 7],
-    /// The dominant pillar (highest weight).
-    pub dominant: Pillar,
+    /// The dominant pillar (highest weight). `None` when the signal is empty
+    /// (all weights collapsed to 0) — no pillar should be presented as dominant.
+    pub dominant: Option<Pillar>,
     /// The Watch archetype from the dominant nakshatra (or lagna).
     pub archetype: WatchArchetype,
     /// The nakshatra the archetype was derived from.
@@ -361,6 +362,24 @@ impl PersonalityProfile {
             weights.insert(pillar.name().to_lowercase(), self.pillar_weights[i]);
         }
         weights
+    }
+}
+
+/// Apply an aspect `modifier_val` to the affected grahas. A pillar graha gets
+/// the full value on its own pillar; a non-pillar graha (Rahu/Ketu) distributes
+/// it evenly across all 7 pillars. The *total* weight added is `modifier_val`
+/// per endpoint, so a node–pillar conjunction adds the same total as a
+/// pillar–pillar conjunction — i.e. no node-specific 2× reweighting (T82 pin).
+fn apply_aspect_modifier(weights: &mut [f64; 7], applied_to: &[Graha], modifier_val: f64) {
+    for &graha in applied_to {
+        if let Some(p) = graha_to_pillar(graha) {
+            weights[p.index()] += modifier_val;
+        } else {
+            let distributed = modifier_val / 7.0;
+            for w in weights.iter_mut() {
+                *w += distributed;
+            }
+        }
     }
 }
 
@@ -459,17 +478,7 @@ pub fn derive_personality(chart: &ChartSnapshot) -> PersonalityProfile {
                 };
 
                 // Apply modifier to affected grahas only.
-                for &graha in &applied_to {
-                    if let Some(p) = graha_to_pillar(graha) {
-                        weights[p.index()] += modifier_val;
-                    } else {
-                        // Non-pillar graha (Rahu/Ketu): distribute to all pillars.
-                        let distributed = modifier_val / 7.0;
-                        for w in &mut weights {
-                            *w += distributed;
-                        }
-                    }
-                }
+                apply_aspect_modifier(&mut weights, &applied_to, modifier_val);
 
                 modifiers.push(AspectModifier {
                     graha_a: a,
@@ -492,9 +501,10 @@ pub fn derive_personality(chart: &ChartSnapshot) -> PersonalityProfile {
             *w /= total;
         }
     } else {
-        // Empty signal (all weights collapsed to 0): emit a uniform profile
-        // rather than letting argmax silently crown pillar 0 (Spear) with full
-        // confidence. Uniform weights => deterministic, no false dominance.
+        // Empty signal (all weights collapsed to 0): emit uniform weights and
+        // report no dominant pillar. A uniform profile would otherwise let
+        // argmax pick an arbitrary pillar (max_by keeps the *last* tie, so it
+        // would crown Stone) and present it with false confidence.
         for w in &mut weights {
             *w = 1.0 / 7.0;
         }
@@ -506,14 +516,18 @@ pub fn derive_personality(chart: &ChartSnapshot) -> PersonalityProfile {
         .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(i, _)| i)
         .unwrap_or(0);
-    let dominant = Pillar::from_index(dominant_idx);
+    let dominant = if total > 0.0 {
+        Some(Pillar::from_index(dominant_idx))
+    } else {
+        None
+    };
 
     let (source_nakshatra, archetype, lagna_archetype, lagna_rashi) =
         if let Some(lagna) = chart.lagna {
             let lagna_nak = rashi_to_dominant_nakshatra(lagna);
             let lagna_arch = WatchArchetype::from_nakshatra(lagna_nak);
 
-            let dom_graha = graha_of_pillar(dominant, chart);
+            let dom_graha = graha_of_pillar(dominant.unwrap_or(Pillar::Spear), chart);
             let dom_nak = chart
                 .graha_position(dom_graha)
                 .map(|p| p.nakshatra)
@@ -522,7 +536,7 @@ pub fn derive_personality(chart: &ChartSnapshot) -> PersonalityProfile {
 
             (dom_nak, arch, Some(lagna_arch), Some(lagna))
         } else {
-            let dom_graha = graha_of_pillar(dominant, chart);
+            let dom_graha = graha_of_pillar(dominant.unwrap_or(Pillar::Spear), chart);
             let dom_nak = chart
                 .graha_position(dom_graha)
                 .map(|p| p.nakshatra)
@@ -670,14 +684,47 @@ mod tests {
         let jd = ephemeris::julian_day(2026, 7, 7, 12.0);
         let chart = ChartSnapshot::new(jd);
         let profile = derive_personality(&chart);
+        assert!(
+            profile.dominant.is_some(),
+            "non-empty signal must have a dominant"
+        );
 
         let max_weight = profile
             .pillar_weights
             .iter()
             .cloned()
             .fold(0.0_f64, f64::max);
-        let dominant_weight = profile.pillar_weights[profile.dominant.index()];
+        let dominant_weight = profile.pillar_weights[profile.dominant.unwrap().index()];
         assert_eq!(dominant_weight, max_weight);
+    }
+
+    // ─── T82 pin ───────────────────────────────────────────────────────────
+    // A Rahu–pillar conjunction must add the same *total* weight as a
+    // pillar–pillar conjunction. The node distributes modifier_val/7 across all
+    // 7 pillars (summing to modifier_val) and the pillar endpoint also gets
+    // modifier_val, so the total equals an ordinary conjunction (2 × modifier).
+    // If a future change reweights nodes 2× relative to ordinary aspects, this
+    // fails — that is the T82 regression to keep locked.
+    #[test]
+    fn node_and_pillar_conjunction_add_equal_total() {
+        let mut node_case = [0.0_f64; 7];
+        apply_aspect_modifier(&mut node_case, &[Graha::Rahu, Graha::Surya], 0.06);
+        let mut pillar_case = [0.0_f64; 7];
+        apply_aspect_modifier(&mut pillar_case, &[Graha::Surya, Graha::Chandra], 0.06);
+
+        let node_total: f64 = node_case.iter().sum();
+        let pillar_total: f64 = pillar_case.iter().sum();
+        assert!(
+            (node_total - pillar_total).abs() < 1e-12,
+            "node–pillar total {} != pillar–pillar total {} (T82 regression)",
+            node_total,
+            pillar_total
+        );
+        assert!(
+            (node_total - 0.12).abs() < 1e-12,
+            "expected 2 × modifier_val = 0.12, got {}",
+            node_total
+        );
     }
 
     #[test]

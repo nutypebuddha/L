@@ -1998,15 +1998,18 @@ fn bind_inputs(
 
     let n = inputs.len();
     let m = numbers.len();
-    // T85: best_injective enumerates m!/(m-n)! injective assignments. Cap the
-    // candidate-scalar count so a flood of numbers can't trigger a factorial
-    // hang; above the cap we refuse (consistent with the ambiguity-refusal path).
-    const MAX_BIND_SCALARS: usize = 12;
-    if m > MAX_BIND_SCALARS {
+    // T85: the binder enumerates P(m, n) = m!/(m-n)! injective assignments.
+    // Bound that by a leaf-visit work budget rather than an invented scalar on
+    // `m` alone (branch-and-bound pruning in best_injective_rec handles the
+    // common case cheaply). Above the budget we refuse — consistent with the
+    // existing ambiguity-refusal path.
+    const MAX_BIND_PERMUTATIONS: u64 = 5_000_000;
+    let perms = injective_permutation_count(m, n);
+    if perms > MAX_BIND_PERMUTATIONS {
         if explain {
             eprintln!(
-                "[bind]     REFUSED: too many candidate scalars ({} > {})",
-                m, MAX_BIND_SCALARS
+                "[bind]     REFUSED: binding search space too large ({} permutations > {})",
+                perms, MAX_BIND_PERMUTATIONS
             );
         }
         return None;
@@ -2238,6 +2241,22 @@ fn zip_bindings(inputs: &[String], bindings: &[Option<f64>]) -> Vec<(String, f64
 /// the minimum-total-distance one. `count` is how many distinct assignments
 /// achieve that minimum; `count != 1` means the binding is ambiguous and must be
 /// refused.
+/// P(m, n) = m!/(m-n)! — the number of injective assignments of `n` inputs to
+/// `m` scalars. Used to bound the binder search. Overflow saturates to u64::MAX.
+fn injective_permutation_count(m: usize, n: usize) -> u64 {
+    if n > m {
+        return 0;
+    }
+    let mut count: u64 = 1;
+    for i in 0..n {
+        match count.checked_mul((m - i) as u64) {
+            Some(c) => count = c,
+            None => return u64::MAX,
+        }
+    }
+    count
+}
+
 #[allow(dead_code)]
 fn best_injective(dist: &[Vec<f64>]) -> (f64, Vec<usize>, usize) {
     let m = if dist.is_empty() { 0 } else { dist[0].len() };
@@ -2256,8 +2275,17 @@ fn best_injective_rec(
 ) {
     let n = dist.len();
     let m = if n == 0 { 0 } else { dist[0].len() };
+    // Branch-and-bound: distances are non-negative, so the running partial cost
+    // only grows. Once it exceeds the best complete cost found so far (by more
+    // than float epsilon) no extension of this prefix can match or beat it, so
+    // prune. This cuts the hot case (e.g. n=7, m=12) down drastically for free
+    // while still counting exact ties (T85).
+    let partial: f64 = cur.iter().enumerate().map(|(i, k)| dist[i][*k]).sum();
+    if partial > best.0 + 1e-9 {
+        return;
+    }
     if cur.len() == n {
-        let cost: f64 = cur.iter().enumerate().map(|(i, k)| dist[i][*k]).sum();
+        let cost = partial;
         if cost < best.0 - 1e-9 {
             best.0 = cost;
             best.1 = cur.clone();
@@ -4667,7 +4695,12 @@ fn cmd_chart(
     println!();
     println!("personality:");
     println!("  archetype: {:?}", personality.archetype);
-    println!("  dominant: {:?}", personality.dominant);
+    println!(
+        "  dominant: {}",
+        personality
+            .dominant
+            .map_or_else(|| "none".to_string(), |d| format!("{d:?}"))
+    );
     println!("  pillars: {:?}", personality.pillar_weights);
 
     if explain {

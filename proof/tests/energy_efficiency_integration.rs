@@ -261,8 +261,8 @@ fn energy_efficiency_in_code_full_analysis() {
     let personality = derive_personality(&chart);
     report.push_str(&format!(
         "  Dominant pillar: {} ({})\n",
-        personality.dominant.name(),
-        personality.dominant.description()
+        personality.dominant.map_or("none", |d| d.name()),
+        personality.dominant.map_or("none", |d| d.description())
     ));
     report.push_str("  All pillar weights:\n");
     for i in 0..7 {
@@ -555,7 +555,7 @@ fn energy_efficiency_in_code_full_analysis() {
     report.push_str(&format!(
         "  Dominant domain: {:?} | Dominant pillar: {}\n",
         matrix.dominant_domains.first(),
-        personality.dominant.name()
+        personality.dominant.map_or("none", |d| d.name())
     ));
     report.push_str(&format!(
         "  Lagna: {} | Watch: {}\n",

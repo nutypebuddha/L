@@ -60,24 +60,32 @@ if ! curl -fsSL "$url" -o "$tmp"; then
 fi
 
 # 5. Verify checksum if the release published one (brand: verify, don't trust)
+# CI publishes the sum as `sha256sum lai-<arch>` → content `<hash>  lai-<arch>`,
+# so `-c` would look for that filename in $CWD. Compare the hashes directly.
 sum_url="https://github.com/$REPO/releases/download/$tag/$bin.sha256"
 if sum="$(curl -fsSL "$sum_url" 2>/dev/null)"; then
-    echo "$sum" > "$tmp.sha256"
-    if sha256sum -c "$tmp.sha256" --status 2>/dev/null; then
+    want="$(printf '%s' "$sum" | awk '{print $1}')"
+    got="$(sha256sum "$tmp" | awk '{print $1}')"
+    if [ "$want" = "$got" ]; then
         echo "Checksum verified." >&2
     else
         echo "Error: checksum mismatch for downloaded $bin" >&2
         exit 1
     fi
 else
-    echo "Warning: no $bin.sha256 published for $tag — skipping verification" >&2
+    if [ -z "${LAI_ALLOW_UNVERIFIED:-}" ]; then
+        echo "Error: no $bin.sha256 published for $tag and LAI_ALLOW_UNVERIFIED is not set." >&2
+        echo "Refusing to install an unverified binary. Set LAI_ALLOW_UNVERIFIED=1 to override." >&2
+        exit 1
+    fi
+    echo "Warning: no $bin.sha256 published for $tag — installing UNVERIFIED (LAI_ALLOW_UNVERIFIED=1)." >&2
 fi
 
 # 6. Install
 install -m 0755 "$tmp" "$DEST"
 echo "Installed: $DEST" >&2
 
-# 6. Smoke test
+# 7. Smoke test
 if "$DEST" ping >/dev/null 2>&1; then
     echo "OK: $("$DEST" --version 2>/dev/null || echo lai) installed and responding."
     echo "Try: lai info   |   lai solve --query \"2 + 3 = 5\"   |   lai --help"
