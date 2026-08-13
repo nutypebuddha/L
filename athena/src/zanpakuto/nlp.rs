@@ -17,8 +17,8 @@
 use crate::entity::EntityRegistry;
 use crate::formula::FormulaRegistry;
 use crate::shikai::Intent;
-use crate::wheel::Domain;
 use crate::wheel::ALL_DOMAINS;
+use crate::wheel::Domain;
 
 /// The type of query, inferred from token content and structure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -258,11 +258,7 @@ impl NlpEngine {
 
         let result = self.stem_inner(w);
         // Ensure we never return an empty stem
-        if result.is_empty() {
-            lower
-        } else {
-            result
-        }
+        if result.is_empty() { lower } else { result }
     }
 
     /// Inner stemmer — applies suffix stripping rules in order.
@@ -902,10 +898,10 @@ impl NlpEngine {
                     }
                 }
                 // Partial match in query (lower weight, but catches compounds)
-                else if lower.contains(kw) {
-                    if let Some(entry) = scores.iter_mut().find(|(d, _)| d == domain) {
-                        entry.1 += 0.10;
-                    }
+                else if lower.contains(kw)
+                    && let Some(entry) = scores.iter_mut().find(|(d, _)| d == domain)
+                {
+                    entry.1 += 0.10;
                 }
             }
         }
@@ -913,17 +909,17 @@ impl NlpEngine {
         // Domain name mention — strongest single signal
         for d in ALL_DOMAINS.iter() {
             let dname = d.full_name_lower();
-            if lower.contains(dname) {
-                if let Some(entry) = scores.iter_mut().find(|(sd, _)| sd == d) {
-                    entry.1 += 1.0; // Direct domain mention = near-certain
-                }
+            if lower.contains(dname)
+                && let Some(entry) = scores.iter_mut().find(|(sd, _)| sd == d)
+            {
+                entry.1 += 1.0; // Direct domain mention = near-certain
             }
             // Also check short alias
             let dalias = d.symbol().to_lowercase();
-            if significant.iter().any(|t| t.eq_ignore_ascii_case(&dalias)) {
-                if let Some(entry) = scores.iter_mut().find(|(sd, _)| sd == d) {
-                    entry.1 = entry.1.max(1.0);
-                }
+            if significant.iter().any(|t| t.eq_ignore_ascii_case(&dalias))
+                && let Some(entry) = scores.iter_mut().find(|(sd, _)| sd == d)
+            {
+                entry.1 = entry.1.max(1.0);
             }
         }
 

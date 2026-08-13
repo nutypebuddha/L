@@ -11,7 +11,7 @@
 //! All patterns are hardcoded as const arrays — no HashMap, no runtime allocation,
 //! fully deterministic.
 
-use super::{gate_output, Gate, GateOutput};
+use super::{Gate, GateOutput, gate_output};
 
 /// A single logic pattern: id, description, whether it's valid or fallacious,
 /// and an optional explanation.
@@ -124,31 +124,41 @@ const FORMAL_FALLACIES: &[LogicPattern] = &[
         id: "masked_man_fallacy",
         description: "I know who X is; I do not know who Y is; therefore X is not Y",
         is_valid: false,
-        explanation: Some("Masked man fallacy (intentional fallacy): violating Leibniz's law — different modes of presentation can refer to the same entity"),
+        explanation: Some(
+            "Masked man fallacy (intentional fallacy): violating Leibniz's law — different modes of presentation can refer to the same entity",
+        ),
     },
     LogicPattern {
         id: "illicit_major",
         description: "All A are B; No C are A, therefore No C are B",
         is_valid: false,
-        explanation: Some("Illicit major: the major term is distributed in the conclusion but not in the premise"),
+        explanation: Some(
+            "Illicit major: the major term is distributed in the conclusion but not in the premise",
+        ),
     },
     LogicPattern {
         id: "illicit_minor",
         description: "All A are B; All A are C, therefore All B are C",
         is_valid: false,
-        explanation: Some("Illicit minor: the minor term is distributed in the conclusion but not in the premise"),
+        explanation: Some(
+            "Illicit minor: the minor term is distributed in the conclusion but not in the premise",
+        ),
     },
     LogicPattern {
         id: "four_terms",
         description: "All A are B; All C are D, therefore All A are D",
         is_valid: false,
-        explanation: Some("Four terms fallacy (quaternio terminorum): a syllogism requires exactly three terms"),
+        explanation: Some(
+            "Four terms fallacy (quaternio terminorum): a syllogism requires exactly three terms",
+        ),
     },
     LogicPattern {
         id: "negative_premises",
         description: "No A are B; No C are A, therefore No C are B",
         is_valid: false,
-        explanation: Some("Exclusive premises: two negative premises cannot yield a valid conclusion in categorical logic"),
+        explanation: Some(
+            "Exclusive premises: two negative premises cannot yield a valid conclusion in categorical logic",
+        ),
     },
     LogicPattern {
         id: "existential_fallacy",
@@ -160,7 +170,9 @@ const FORMAL_FALLACIES: &[LogicPattern] = &[
         id: "modal_fallacy",
         description: "If P is necessary, and P implies Q, then Q is necessary",
         is_valid: false,
-        explanation: Some("Modal fallacy: conflating necessity of the consequence with necessity of the consequent"),
+        explanation: Some(
+            "Modal fallacy: conflating necessity of the consequence with necessity of the consequent",
+        ),
     },
     LogicPattern {
         id: "quantifier_shift",
@@ -172,7 +184,9 @@ const FORMAL_FALLACIES: &[LogicPattern] = &[
         id: "base_rate_fallacy",
         description: "Test is 99% accurate; person tested positive; therefore person has condition",
         is_valid: false,
-        explanation: Some("Base rate fallacy: ignoring the prior probability when interpreting test results"),
+        explanation: Some(
+            "Base rate fallacy: ignoring the prior probability when interpreting test results",
+        ),
     },
 ];
 
@@ -384,19 +398,25 @@ const CAUSAL_FALLACIES: &[LogicPattern] = &[
         id: "slippery_slope",
         description: "A leads to B, B leads to C, therefore A will lead to disaster",
         is_valid: false,
-        explanation: Some("Slippery slope: intermediate steps may not follow or may be preventable"),
+        explanation: Some(
+            "Slippery slope: intermediate steps may not follow or may be preventable",
+        ),
     },
     LogicPattern {
         id: "reversing_causality",
         description: "Treating effect as cause and cause as effect",
         is_valid: false,
-        explanation: Some("Reverse causality: the direction of causation may be opposite to what is assumed"),
+        explanation: Some(
+            "Reverse causality: the direction of causation may be opposite to what is assumed",
+        ),
     },
     LogicPattern {
         id: "third_cause",
         description: "Ignoring a common cause of both A and B",
         is_valid: false,
-        explanation: Some("Third cause fallacy (spurious correlation): a hidden variable may cause both"),
+        explanation: Some(
+            "Third cause fallacy (spurious correlation): a hidden variable may cause both",
+        ),
     },
     LogicPattern {
         id: "domino_fallacy",
@@ -408,13 +428,17 @@ const CAUSAL_FALLACIES: &[LogicPattern] = &[
         id: "magical_thinking",
         description: "Assuming thoughts or words can directly influence physical events",
         is_valid: false,
-        explanation: Some("Magical thinking: mental states do not directly cause physical events without mediating mechanisms"),
+        explanation: Some(
+            "Magical thinking: mental states do not directly cause physical events without mediating mechanisms",
+        ),
     },
     LogicPattern {
         id: "regression_fallacy_causal",
         description: "Punishment improves performance; reward worsens it",
         is_valid: false,
-        explanation: Some("Regression fallacy in performance: extreme performance naturally regresses, regardless of intervention"),
+        explanation: Some(
+            "Regression fallacy in performance: extreme performance naturally regresses, regardless of intervention",
+        ),
     },
     LogicPattern {
         id: "just_so_story",
@@ -430,37 +454,49 @@ const EPISTEMIC_FALLACIES: &[LogicPattern] = &[
         id: "circular_reasoning",
         description: "The conclusion is assumed in one of the premises",
         is_valid: false,
-        explanation: Some("Circular reasoning (begging the question): the argument assumes what it tries to prove"),
+        explanation: Some(
+            "Circular reasoning (begging the question): the argument assumes what it tries to prove",
+        ),
     },
     LogicPattern {
         id: "infinite_regress",
         description: "Each justification requires further justification without end",
         is_valid: false,
-        explanation: Some("Infinite regress: an endless chain of justifications that never reaches a foundation"),
+        explanation: Some(
+            "Infinite regress: an endless chain of justifications that never reaches a foundation",
+        ),
     },
     LogicPattern {
         id: "no_true_scotsman",
         description: "Redefining a category to exclude counterexamples",
         is_valid: false,
-        explanation: Some("No true Scotsman: ad-hoc redefinition insulates a claim from falsification"),
+        explanation: Some(
+            "No true Scotsman: ad-hoc redefinition insulates a claim from falsification",
+        ),
     },
     LogicPattern {
         id: "moving_goalposts",
         description: "Changing the criteria for evidence after it has been met",
         is_valid: false,
-        explanation: Some("Moving the goalposts: the standard of proof shifts to avoid disconfirmation"),
+        explanation: Some(
+            "Moving the goalposts: the standard of proof shifts to avoid disconfirmation",
+        ),
     },
     LogicPattern {
         id: "false_dilemma",
         description: "Presenting two options as the only possibilities when more exist",
         is_valid: false,
-        explanation: Some("False dilemma (black-and-white fallacy): artificially restricts the option space"),
+        explanation: Some(
+            "False dilemma (black-and-white fallacy): artificially restricts the option space",
+        ),
     },
     LogicPattern {
         id: "argument_from_incredulity",
         description: "I cannot imagine how X could be true, therefore X is false",
         is_valid: false,
-        explanation: Some("Argument from incredulity: inability to imagine does not constitute disproof"),
+        explanation: Some(
+            "Argument from incredulity: inability to imagine does not constitute disproof",
+        ),
     },
     LogicPattern {
         id: "argument_from_personal_incredulity",
@@ -500,7 +536,9 @@ const RHETORICAL_FALLACIES: &[LogicPattern] = &[
         id: "begging_the_question",
         description: "The claim is restated rather than proven",
         is_valid: false,
-        explanation: Some("Begging the question (petitio principii): circular argument where premises assume conclusion"),
+        explanation: Some(
+            "Begging the question (petitio principii): circular argument where premises assume conclusion",
+        ),
     },
     LogicPattern {
         id: "complex_question",
@@ -524,7 +562,9 @@ const RHETORICAL_FALLACIES: &[LogicPattern] = &[
         id: "appeal_to_consequences",
         description: "X must be true because believing X has good consequences",
         is_valid: false,
-        explanation: Some("Appeal to consequences: desirability of a belief does not determine its truth"),
+        explanation: Some(
+            "Appeal to consequences: desirability of a belief does not determine its truth",
+        ),
     },
     LogicPattern {
         id: "wishful_thinking",
@@ -536,7 +576,9 @@ const RHETORICAL_FALLACIES: &[LogicPattern] = &[
         id: "thought_terminating_cliche",
         description: "Using a trite saying to dismiss legitimate concerns",
         is_valid: false,
-        explanation: Some("Thought-terminating cliché: platitudes that discourage critical examination"),
+        explanation: Some(
+            "Thought-terminating cliché: platitudes that discourage critical examination",
+        ),
     },
 ];
 
@@ -552,7 +594,9 @@ const VAGUENESS_FALLACIES: &[LogicPattern] = &[
         id: "continuum_fallacy",
         description: "No clear boundary exists, therefore no distinction can be made",
         is_valid: false,
-        explanation: Some("Continuum fallacy: the absence of a sharp boundary does not mean no boundary exists"),
+        explanation: Some(
+            "Continuum fallacy: the absence of a sharp boundary does not mean no boundary exists",
+        ),
     },
 ];
 

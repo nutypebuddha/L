@@ -251,7 +251,7 @@ impl TokenFixer {
 
         replacements.sort_by_key(|x| std::cmp::Reverse(x.0));
 
-        for (_, _, ref original, ref fixed, ref reason) in &replacements {
+        for (_, _, original, fixed, reason) in &replacements {
             let token_fix = TokenFix::new(original, fixed, reason, 0.9);
             fixes.push(token_fix);
             result = result.replacen(original, fixed, 1);

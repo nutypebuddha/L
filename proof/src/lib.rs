@@ -48,42 +48,42 @@ pub mod prelude {
         PlanetaryRuler, Rashi, Sign, SignAspect, VedicClassification, VedicElement,
     };
     pub use crate::build::{
-        build, compute_objective_weights, parse_domain_profile, validate_domain_profile,
-        BuildResult, DomainProfile,
+        BuildResult, DomainProfile, build, compute_objective_weights, parse_domain_profile,
+        validate_domain_profile,
     };
     pub use crate::chart::{
-        derive_personality, AspectModifier, AstroAspect, ChartSnapshot, PersonalityProfile, Pillar,
-        SynastryAspect, WatchArchetype,
+        AspectModifier, AstroAspect, ChartSnapshot, PersonalityProfile, Pillar, SynastryAspect,
+        WatchArchetype, derive_personality,
     };
     pub use crate::compute::{
         compute_formula, create_env, evaluate_expr, evaluate_nl, evaluate_pipeline,
         extract_identifiers, is_expression_valid, solve_problem,
     };
     pub use crate::descent::{
-        lowercase_string, tokenize_descent, DescentEngine, DescentLayer, ProvenanceStep,
-        SettledToken, SettlingMatrix,
+        DescentEngine, DescentLayer, ProvenanceStep, SettledToken, SettlingMatrix,
+        lowercase_string, tokenize_descent,
     };
     pub use crate::digest::{sha256, sha256_hex, to_hex};
     pub use crate::domain_graph::{
-        CompositionAspect, Domain, UnderstandingAxis, WheelError, WheelGraph, ALL_DOMAINS,
+        ALL_DOMAINS, CompositionAspect, Domain, UnderstandingAxis, WheelError, WheelGraph,
     };
     pub use crate::economy::budget::Budget;
     pub use crate::economy::conversation::ConversationTracker;
     pub use crate::economy::cost::CostTracker;
     pub use crate::economy::tray::BallEconomy;
     pub use crate::entity::{
-        compute_entity_hash, validate_entity_id, DynamicEntity, Entity, EntityRegistry,
-        EventRegistry, ShikaiFormRegistry,
+        DynamicEntity, Entity, EntityRegistry, EventRegistry, ShikaiFormRegistry,
+        compute_entity_hash, validate_entity_id,
     };
     pub use crate::ephemeris::{
-        ayanamsa_deg, julian_day, julian_day_to_date, lahiri_ayanamsa, tropical_longitude,
-        AyanamsaSystem, GrahaPosition,
+        AyanamsaSystem, GrahaPosition, ayanamsa_deg, julian_day, julian_day_to_date,
+        lahiri_ayanamsa, tropical_longitude,
     };
     pub use crate::formula::{
-        extract_formula_domain, validate_formula_id, Formula, FormulaRegistry, FormulaType,
+        Formula, FormulaRegistry, FormulaType, extract_formula_domain, validate_formula_id,
     };
-    pub use crate::nlp::{extract_keywords, normalize_query_text, NlpContext};
-    pub use crate::optimize::{explain, parse_schema, solve, Allocation, Schema};
+    pub use crate::nlp::{NlpContext, extract_keywords, normalize_query_text};
+    pub use crate::optimize::{Allocation, Schema, explain, parse_schema, solve};
     pub use crate::primitive::arithmetic::{add_unsigned_8, full_adder, half_adder};
     pub use crate::primitive::dag::NandDag;
     pub use crate::primitive::expr::{NandExprError, NandExpression};
@@ -94,7 +94,7 @@ pub mod prelude {
     pub use crate::verify::diagnostics::{Diagnostic, DiagnosticGate, DiagnosticReport, Severity};
     pub use crate::verify::protocol::RefinementSession;
     pub use crate::verify::verifier::{
-        verify_expression, verify_proposal, LlmProposal, ProposalKind,
+        LlmProposal, ProposalKind, verify_expression, verify_proposal,
     };
     pub use crate::verify::{aggregate_confidence_scores, compute_confidence_score};
 

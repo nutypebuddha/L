@@ -1,4 +1,4 @@
-use crate::inference::json::{parse_json, JsonValue};
+use crate::inference::json::{JsonValue, parse_json};
 
 #[derive(Debug, Clone)]
 pub struct JsonRpcRequest {

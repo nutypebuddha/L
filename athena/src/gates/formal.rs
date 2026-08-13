@@ -1,6 +1,6 @@
 //! # Formal Gate — validates structural integrity
 
-use super::{gate_output, Gate, GateOutput};
+use super::{Gate, GateOutput, gate_output};
 
 /// Validates the structural integrity of formulas and chains.
 ///

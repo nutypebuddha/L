@@ -25,7 +25,7 @@ pub use dynamics::{GyroDynamics, PrecessionParams};
 pub use mapping::{PrimitiveEntry, PrimitiveMapping};
 pub use route::{GyroRouter, RouteResult};
 pub use state::GyroState;
-pub use vec3::{norm360, Vec3};
+pub use vec3::{Vec3, norm360};
 
 #[cfg(test)]
 mod tests {

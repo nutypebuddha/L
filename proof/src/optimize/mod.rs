@@ -666,10 +666,9 @@ fn enumerate_perks(state: &mut SolverState<'_>, idx: usize, levels: &mut BTreeMa
                 .top_k_objs
                 .iter_mut()
                 .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                && objective > *min_obj
             {
-                if objective > *min_obj {
-                    *min_obj = objective;
-                }
+                *min_obj = objective;
             }
         }
         return;

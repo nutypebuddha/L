@@ -1,6 +1,6 @@
 //! # Confidence Gate — assigns confidence scores
 
-use super::{gate_output, Gate, GateOutput};
+use super::{Gate, GateOutput, gate_output};
 
 /// Confidence thresholds and scoring.
 ///

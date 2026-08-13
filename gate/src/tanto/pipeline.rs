@@ -1,9 +1,9 @@
 // Tanto pipeline — pipeline operator: "div 1 3 | mul 6 _"
 // Adapted for CID
 
+use crate::tanto::TantoEnv;
 use crate::tanto::math;
 use crate::tanto::parser;
-use crate::tanto::TantoEnv;
 
 /// Evaluate a pipeline expression
 /// Segments separated by |, _ refers to previous result

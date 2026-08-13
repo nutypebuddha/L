@@ -85,7 +85,9 @@ impl InferenceEngine {
         context: &str,
     ) -> CidResult<Option<Pocket>> {
         let claim = candidates.join(" ");
-        let balls = self.pipeline.validate_candidates(&candidates, context, &claim)?;
+        let balls = self
+            .pipeline
+            .validate_candidates(&candidates, context, &claim)?;
         Ok(self.pipeline.select_best(balls))
     }
 

@@ -58,11 +58,7 @@ pub const fn sign_to_polarity(sign: Sign) -> f64 {
 /// Precomputed arc distance between any two sign indices (0–11).
 pub const fn arc_distance(a: usize, b: usize) -> usize {
     let diff = a.abs_diff(b);
-    if diff > 6 {
-        12 - diff
-    } else {
-        diff
-    }
+    if diff > 6 { 12 - diff } else { diff }
 }
 
 /// Check if two sign indices form a valid Ptolemaic aspect.

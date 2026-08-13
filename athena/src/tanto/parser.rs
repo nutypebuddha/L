@@ -9,8 +9,8 @@
 //!
 //! All parsing is done on byte slices — zero allocation beyond the input.
 
-use super::math;
 use super::TantoEnv;
+use super::math;
 
 /// Recursive descent parser for arithmetic expressions.
 pub struct Parser<'a> {

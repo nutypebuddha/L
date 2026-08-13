@@ -1,13 +1,13 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use rmcp::ErrorData;
+use rmcp::RoleServer;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::*;
 use rmcp::service::RequestContext;
-use rmcp::ErrorData;
-use rmcp::RoleServer;
 
-use super::compact::{compact_data, estimate_tokens, Detail, DEFAULT_LIMIT};
+use super::compact::{DEFAULT_LIMIT, Detail, compact_data, estimate_tokens};
 use super::{AthenaMCP, AthenaRequest};
 
 pub struct McpHandler {

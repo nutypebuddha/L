@@ -99,12 +99,11 @@ fn mcp_validate_agrees_with_cli_validate() {
     // Parse each response by its id.
     let mut responses: std::collections::HashMap<u64, String> = std::collections::HashMap::new();
     for line in output.lines() {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-            if let Some(id) = v["id"].as_u64() {
-                if let Some(text) = extract_tool_text(line) {
-                    responses.insert(id, text);
-                }
-            }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
+            && let Some(id) = v["id"].as_u64()
+            && let Some(text) = extract_tool_text(line)
+        {
+            responses.insert(id, text);
         }
     }
 

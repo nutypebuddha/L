@@ -11,7 +11,7 @@
 //! sibling `lai` executable, as on Android), every call returns `Err` and the
 //! agent loop degrades to its in-process action handlers.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
@@ -21,17 +21,17 @@ use tokio::sync::Mutex;
 /// Prefers `LAI_BIN` (set by the daemon), then the current exe's directory,
 /// then a `lai` on PATH.
 fn lai_bin() -> String {
-    if let Ok(env) = std::env::var("LAI_BIN") {
-        if !env.is_empty() {
-            return env;
-        }
+    if let Ok(env) = std::env::var("LAI_BIN")
+        && !env.is_empty()
+    {
+        return env;
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("lai");
-            if candidate.exists() {
-                return candidate.to_string_lossy().to_string();
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let candidate = dir.join("lai");
+        if candidate.exists() {
+            return candidate.to_string_lossy().to_string();
         }
     }
     "lai".to_string()
@@ -158,12 +158,12 @@ impl McpClient {
             if trimmed.is_empty() {
                 continue;
             }
-            if let Ok(msg) = serde_json::from_str::<Value>(trimmed) {
-                if msg.get("id").and_then(|v| v.as_u64()) == Some(id) {
-                    return Ok(msg);
-                }
-                // server might emit notifications; ignore and keep reading
+            if let Ok(msg) = serde_json::from_str::<Value>(trimmed)
+                && msg.get("id").and_then(|v| v.as_u64()) == Some(id)
+            {
+                return Ok(msg);
             }
+            // server might emit notifications; ignore and keep reading
         }
     }
 

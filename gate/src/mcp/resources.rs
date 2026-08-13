@@ -1,4 +1,4 @@
-use crate::inference::json::{stringify, JsonValue};
+use crate::inference::json::{JsonValue, stringify};
 use crate::kb::facts::KnowledgeBase;
 
 pub fn list_resources(kb: &KnowledgeBase) -> JsonValue {
@@ -196,16 +196,23 @@ pub fn get_prompt(name: &str, arguments: &JsonValue) -> Result<JsonValue, String
                 .unwrap_or("general");
 
             Ok(JsonValue::Object(vec![
-                ("description".to_string(), JsonValue::Str(format!("Validate '{}' in {} context", text, context))),
-                ("messages".to_string(), JsonValue::Array(vec![
-                    JsonValue::Object(vec![
+                (
+                    "description".to_string(),
+                    JsonValue::Str(format!("Validate '{}' in {} context", text, context)),
+                ),
+                (
+                    "messages".to_string(),
+                    JsonValue::Array(vec![JsonValue::Object(vec![
                         ("role".to_string(), JsonValue::Str("user".to_string())),
-                        ("content".to_string(), JsonValue::Str(format!(
-                            "Use the cid_validate tool to validate this text: \"{}\" with context \"{}\"",
-                            text, context
-                        ))),
-                    ]),
-                ])),
+                        (
+                            "content".to_string(),
+                            JsonValue::Str(format!(
+                                "Use the cid_validate tool to validate this text: \"{}\" with context \"{}\"",
+                                text, context
+                            )),
+                        ),
+                    ])]),
+                ),
             ]))
         }
         "fix_text" => {
@@ -232,9 +239,9 @@ pub fn get_prompt(name: &str, arguments: &JsonValue) -> Result<JsonValue, String
                         (
                             "content".to_string(),
                             JsonValue::Str(format!(
-                            "Use the cid_fix tool to correct errors in: \"{}\" with context \"{}\"",
-                            text, context
-                        )),
+                                "Use the cid_fix tool to correct errors in: \"{}\" with context \"{}\"",
+                                text, context
+                            )),
                         ),
                     ])]),
                 ),

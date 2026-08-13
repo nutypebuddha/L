@@ -1,6 +1,6 @@
-use crate::inference::json::{stringify, JsonValue};
-use crate::inference::request::ValidationRequest;
 use crate::inference::InferenceEngine;
+use crate::inference::json::{JsonValue, stringify};
+use crate::inference::request::ValidationRequest;
 
 pub fn list_tools() -> JsonValue {
     JsonValue::Array(vec![
@@ -9,8 +9,18 @@ pub fn list_tools() -> JsonValue {
             "Validate text through CID's validation gates (math, logic, fact, confidence). Returns validated text, confidence score, and whether it passed.",
             &[
                 ("text", "string", "Text to validate", true),
-                ("context", "string", "Context domain (e.g. 'math', 'facts', 'logic', 'english')", true),
-                ("domain", "string", "Optional domain override for confidence thresholds", false),
+                (
+                    "context",
+                    "string",
+                    "Context domain (e.g. 'math', 'facts', 'logic', 'english')",
+                    true,
+                ),
+                (
+                    "domain",
+                    "string",
+                    "Optional domain override for confidence thresholds",
+                    false,
+                ),
             ],
         ),
         make_tool(
@@ -18,51 +28,68 @@ pub fn list_tools() -> JsonValue {
             "Auto-fix errors in text: wrong math sums/products, common typos, code consistency (var->let in JS). Returns fixed text and list of fixes applied.",
             &[
                 ("text", "string", "Text to fix", true),
-                ("context", "string", "Context domain (e.g. 'math', 'javascript', 'english')", true),
+                (
+                    "context",
+                    "string",
+                    "Context domain (e.g. 'math', 'javascript', 'english')",
+                    true,
+                ),
             ],
         ),
         make_tool(
             "cid_lookup",
             "Look up a known fact by name in CID's knowledge base (pi, e, c, g, G, h, kB, water_density, air_density, speed_sound, earth_mass, sun_mass, earth_radius, au, light_year).",
-            &[
-                ("name", "string", "Fact name to look up", true),
-            ],
+            &[("name", "string", "Fact name to look up", true)],
         ),
         make_tool(
             "cid_search",
             "Search CID's knowledge base by keyword. Returns all matching facts with their values and units.",
-            &[
-                ("query", "string", "Search query (e.g. 'speed', 'mass', 'density')", true),
-            ],
+            &[(
+                "query",
+                "string",
+                "Search query (e.g. 'speed', 'mass', 'density')",
+                true,
+            )],
         ),
         make_tool(
             "cid_detect_fallacies",
             "Detect logical fallacies in text using pattern matching. Identifies ad hominem, straw man, bandwagon, slippery slope, false dilemma, circular reasoning, appeal to emotion, sunk cost, red herring, false cause, and more. Returns list of detected fallacies with confidence scores.",
-            &[
-                ("text", "string", "Text to analyze for fallacies", true),
-            ],
+            &[("text", "string", "Text to analyze for fallacies", true)],
         ),
         make_tool(
             "cid_sanity_check",
             "Check if a numeric value is within reasonable range for a given physical category (e.g. speed, temperature, height, weight, energy, power, distance, time, price, percent). Returns whether value is in typical range and valid range.",
             &[
                 ("value", "number", "Numeric value to check", true),
-                ("category", "string", "Physical category (e.g. 'speed_mph', 'temp_c', 'height_m', 'weight_kg', 'price_usd')", true),
+                (
+                    "category",
+                    "string",
+                    "Physical category (e.g. 'speed_mph', 'temp_c', 'height_m', 'weight_kg', 'price_usd')",
+                    true,
+                ),
             ],
         ),
         make_tool(
             "cid_detect_biases",
             "Detect cognitive biases in text: anchoring, availability, confirmation, sunk cost, bandwagon, framing, hindsight, Dunning-Kruger, recency, negativity, authority bias, automation bias. Returns list of detected biases with mitigations.",
-            &[
-                ("text", "string", "Text to analyze for cognitive biases", true),
-            ],
+            &[(
+                "text",
+                "string",
+                "Text to analyze for cognitive biases",
+                true,
+            )],
         ),
         make_tool(
             "cid_sample",
             "Request an LLM completion through the MCP client. CID acts as a sampling proxy, allowing the client to request completions that CID will validate. Returns the validated completion.",
             &[
                 ("prompt", "string", "Prompt to send to the LLM", true),
-                ("max_tokens", "number", "Maximum tokens to generate (default: 1000)", false),
+                (
+                    "max_tokens",
+                    "number",
+                    "Maximum tokens to generate (default: 1000)",
+                    false,
+                ),
             ],
         ),
         // === DYNAMIC KB TOOLS (Phase 1) ===
@@ -74,8 +101,18 @@ pub fn list_tools() -> JsonValue {
                 ("value", "number", "Numeric value", true),
                 ("unit", "string", "Unit string (e.g. 'kg', 'USD', '')", true),
                 ("source", "string", "Source description", true),
-                ("domain", "string", "Optional domain (alpha..mu, default: alpha)", false),
-                ("confidence", "number", "Optional confidence 0.0-1.0 (default: 0.8)", false),
+                (
+                    "domain",
+                    "string",
+                    "Optional domain (alpha..mu, default: alpha)",
+                    false,
+                ),
+                (
+                    "confidence",
+                    "number",
+                    "Optional confidence 0.0-1.0 (default: 0.8)",
+                    false,
+                ),
             ],
         ),
         make_tool(
@@ -83,38 +120,57 @@ pub fn list_tools() -> JsonValue {
             "Context-aware knowledge base retrieval. Returns facts ranked by relevance to query+domain, using keyword match + recency + confidence scoring.",
             &[
                 ("query", "string", "Search query", true),
-                ("domain", "string", "Domain (alpha..mu) to search within", true),
-                ("max_results", "number", "Maximum results (default: 10)", false),
+                (
+                    "domain",
+                    "string",
+                    "Domain (alpha..mu) to search within",
+                    true,
+                ),
+                (
+                    "max_results",
+                    "number",
+                    "Maximum results (default: 10)",
+                    false,
+                ),
             ],
         ),
         make_tool(
             "cid_kb_recent",
             "Get facts added within a recent time window. Shows dynamic and session facts.",
-            &[
-                ("within_secs", "number", "Time window in seconds (default: 3600)", false),
-            ],
+            &[(
+                "within_secs",
+                "number",
+                "Time window in seconds (default: 3600)",
+                false,
+            )],
         ),
         // === TANTO MERGED TOOLS ===
         make_tool(
             "cid_tanto_rational",
             "Evaluate an expression as an exact rational (fraction). Returns the result as a fraction string like '1/3' instead of '0.3333...'. Only handles integers and the operators + - * / ( ). Falls back to f64 for non-rational expressions (decimals, trig). Ideal for chained fraction arithmetic without floating-point drift.",
-            &[
-                ("expression", "string", "Rational expression to evaluate (e.g. '1/3 + 1/6')", true),
-            ],
+            &[(
+                "expression",
+                "string",
+                "Rational expression to evaluate (e.g. '1/3 + 1/6')",
+                true,
+            )],
         ),
         make_tool(
             "cid_tanto_eval",
             "Evaluate a math expression using Tanto's compute engine. Supports full expressions (2+3, sqrt(144), 15% of 240), named ops (add 2 3, avg 12 15 18), constants (pi, e, c, g, G, h, kB), and natural language. Returns the computed result.",
-            &[
-                ("expression", "string", "Math expression to evaluate", true),
-            ],
+            &[("expression", "string", "Math expression to evaluate", true)],
         ),
         make_tool(
             "cid_tanto_convert",
             "Convert values between units using Tanto's conversion engine. Supports 60+ conversions across length (mi, km, m, ft), speed (mph, kmh, ms, knot), temperature (F, C, K), weight (lb, kg), volume (gal, L), data (MB, GB, KB, B), and time (hr, min).",
             &[
                 ("value", "number", "Numeric value to convert", true),
-                ("from", "string", "Source unit (e.g. mph, mi, F, lb, gal)", true),
+                (
+                    "from",
+                    "string",
+                    "Source unit (e.g. mph, mi, F, lb, gal)",
+                    true,
+                ),
                 ("to", "string", "Target unit (e.g. kmh, km, C, kg, L)", true),
             ],
         ),
@@ -122,7 +178,12 @@ pub fn list_tools() -> JsonValue {
             "cid_tanto_formula",
             "Compute a verified physics/geometry/finance formula. 22 formulas available: circle_area, sphere_volume, ke (kinetic energy), pe (potential energy), ohm_v, ohm_i, momentum, force, pressure, work, power, compound_amount, and more.",
             &[
-                ("name", "string", "Formula name (e.g. circle_area, ke, pe, ohm_v)", true),
+                (
+                    "name",
+                    "string",
+                    "Formula name (e.g. circle_area, ke, pe, ohm_v)",
+                    true,
+                ),
                 ("args", "string", "Space-separated numeric arguments", true),
             ],
         ),
@@ -130,15 +191,30 @@ pub fn list_tools() -> JsonValue {
             "cid_tanto_solve",
             "Run a multi-step solver template. 9 solvers: orbit (orbital mechanics), projectile (trajectory), energy (E=mc^2), fall (free fall), ke (kinetic energy), pe (potential energy), ohm (Ohm's law), compound (interest), growth (exponential). Returns detailed step-by-step solution.",
             &[
-                ("solver", "string", "Solver name (orbit, projectile, energy, fall, ke, pe, ohm, compound, growth)", true),
-                ("args", "string", "Space-separated numeric arguments for the solver", true),
+                (
+                    "solver",
+                    "string",
+                    "Solver name (orbit, projectile, energy, fall, ke, pe, ohm, compound, growth)",
+                    true,
+                ),
+                (
+                    "args",
+                    "string",
+                    "Space-separated numeric arguments for the solver",
+                    true,
+                ),
             ],
         ),
         make_tool(
             "cid_tanto_think",
             "Apply a structured thinking framework to a problem. 6 frameworks: ooda (Observe-Orient-Decide-Act), swot (Strengths-Weaknesses-Opportunities-Threats), cynefin (domain classification), why5 (root cause analysis), firstprinciples (axiomatic reasoning), shuhari (stages of mastery).",
             &[
-                ("framework", "string", "Thinking framework (ooda, swot, cynefin, why5, firstprinciples, shuhari)", true),
+                (
+                    "framework",
+                    "string",
+                    "Thinking framework (ooda, swot, cynefin, why5, firstprinciples, shuhari)",
+                    true,
+                ),
                 ("problem", "string", "Problem description or context", true),
             ],
         ),
@@ -147,29 +223,35 @@ pub fn list_tools() -> JsonValue {
             "Sanity-check a numeric value against known physical ranges. Categories: speed_mph, speed_ms, temp_c, height_m, weight_kg, energy_j, power_w, distance_km, time_s, price_usd, percent. Returns whether value is within expected range with typical values.",
             &[
                 ("value", "number", "Numeric value to check", true),
-                ("category", "string", "Physical category (e.g. speed_mph, temp_c, height_m, weight_kg)", true),
+                (
+                    "category",
+                    "string",
+                    "Physical category (e.g. speed_mph, temp_c, height_m, weight_kg)",
+                    true,
+                ),
             ],
         ),
         make_tool(
             "cid_tanto_estimate",
             "Perform a Fermi order-of-magnitude estimate. Places a value in context with analogies (grain of sand, apple, human, car, planet, star, galaxy) and provides reference comparisons. Includes below/above reference values.",
-            &[
-                ("value", "number", "Value to estimate", true),
-            ],
+            &[("value", "number", "Value to estimate", true)],
         ),
         make_tool(
             "cid_tanto_pipeline",
             "Evaluate a pipeline expression. Pipeline operator '|' passes results between segments. '_' refers to the previous segment's result. Example: 'div 1 3 | mul 6 _' computes (1/3)*6 = 2.",
-            &[
-                ("expression", "string", "Pipeline expression", true),
-            ],
+            &[("expression", "string", "Pipeline expression", true)],
         ),
         make_tool(
             "cid_tanto_verify",
             "Verify an expression against an expected value. Returns OK (diff < 1e-10), CLOSE (diff < 0.01), or MISMATCH with computed and expected values. Example: verify 5 'hypot(3, 4)'",
             &[
                 ("expected", "number", "Expected value", true),
-                ("expression", "string", "Expression to evaluate and compare", true),
+                (
+                    "expression",
+                    "string",
+                    "Expression to evaluate and compare",
+                    true,
+                ),
             ],
         ),
         make_tool(
@@ -692,7 +774,10 @@ pub fn call_tool(
                     ("header".to_string(), JsonValue::Str(result.header)),
                     ("body".to_string(), JsonValue::Str(result.body)),
                 ]))),
-                None => Err(format!("Unknown framework: {}. Try: ooda, swot, cynefin, why5, firstprinciples, shuhari", framework)),
+                None => Err(format!(
+                    "Unknown framework: {}. Try: ooda, swot, cynefin, why5, firstprinciples, shuhari",
+                    framework
+                )),
             }
         }
         "cid_tanto_check" => {
@@ -722,13 +807,19 @@ pub fn call_tool(
                         ("max".to_string(), JsonValue::Number(result.max)),
                         ("typical".to_string(), JsonValue::Str(result.typical)),
                         ("in_range".to_string(), JsonValue::Bool(in_range)),
-                        ("warning".to_string(), match warning {
-                            Some(w) => JsonValue::Str(w.to_string()),
-                            None => JsonValue::Null,
-                        }),
+                        (
+                            "warning".to_string(),
+                            match warning {
+                                Some(w) => JsonValue::Str(w.to_string()),
+                                None => JsonValue::Null,
+                            },
+                        ),
                     ])))
                 }
-                None => Err(format!("Unknown category: {}. Available: speed_mph, speed_ms, temp_c, height_m, weight_kg, energy_j, power_w, distance_km, time_s, price_usd, percent", category)),
+                None => Err(format!(
+                    "Unknown category: {}. Available: speed_mph, speed_ms, temp_c, height_m, weight_kg, energy_j, power_w, distance_km, time_s, price_usd, percent",
+                    category
+                )),
             }
         }
         "cid_tanto_estimate" => {

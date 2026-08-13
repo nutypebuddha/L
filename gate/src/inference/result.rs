@@ -245,8 +245,7 @@ mod tests {
     use crate::core::pin::Gate;
 
     fn with_gate() -> ValidationResult {
-        ValidationResult::new("x")
-            .with_gate_scores(vec![GateScore::passed(Gate::Math, 0.9, "ok")])
+        ValidationResult::new("x").with_gate_scores(vec![GateScore::passed(Gate::Math, 0.9, "ok")])
     }
 
     #[test]
@@ -266,9 +265,12 @@ mod tests {
     fn verdict_corrected_when_passed_with_fixes() {
         // The historical trap: `passed: true` while L silently corrected the claim.
         // The verdict can never be `ok` here — it must report `corrected`.
-        let r = with_gate()
-            .with_passed(true)
-            .with_fixes(vec![TokenFix::new("2+2=5", "2+2=4", "arithmetic", 0.9)]);
+        let r = with_gate().with_passed(true).with_fixes(vec![TokenFix::new(
+            "2+2=5",
+            "2+2=4",
+            "arithmetic",
+            0.9,
+        )]);
         assert_eq!(r.verdict(), ValidationVerdict::Corrected);
         assert_eq!(r.fix_count(), 1);
     }

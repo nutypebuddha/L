@@ -1,8 +1,8 @@
 // Tanto verify — self-verification and test suite
 // Adapted for CID
 
-use crate::tanto::parser::{eval_math, eval_op_format};
 use crate::tanto::TantoEnv;
+use crate::tanto::parser::{eval_math, eval_op_format};
 
 /// Result of a verification check
 #[derive(Debug, Clone)]

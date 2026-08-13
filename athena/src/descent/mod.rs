@@ -122,7 +122,9 @@ impl DescentLayer {
             DescentLayer::Macro => "Unresolved token — floats at the query level",
             DescentLayer::Domain => "Token classified to a zodiac domain (Aries–Pisces)",
             DescentLayer::Aspect => "Token relationship computed (Conjunction–Opposition)",
-            DescentLayer::Element => "Elemental + modality classification (Fire/Earth/Air/Water + Cardinal/Fixed/Mutable)",
+            DescentLayer::Element => {
+                "Elemental + modality classification (Fire/Earth/Air/Water + Cardinal/Fixed/Mutable)"
+            }
             DescentLayer::Formula => "Token matched to a provable formula from the registry",
             DescentLayer::Entity => "Token grounded to a named entity with properties",
             DescentLayer::Nand => "Token provably resolved to NAND gate truth — absolute bedrock",
@@ -275,10 +277,9 @@ impl SettlingMatrix {
                 if let (Some(si), Some(sj)) = (
                     ti.western_classification.dominant_sign(),
                     tj.western_classification.dominant_sign(),
-                ) {
-                    if let Some(aspect) = Aspect::between_sign_indices(si.index(), sj.index()) {
-                        aspects.push((ti.text.clone(), tj.text.clone(), aspect));
-                    }
+                ) && let Some(aspect) = Aspect::between_sign_indices(si.index(), sj.index())
+                {
+                    aspects.push((ti.text.clone(), tj.text.clone(), aspect));
                 }
             }
         }
@@ -631,11 +632,11 @@ impl DescentEngine {
         // Search entities by keyword
         let seed_results = self.entity_registry.search_seeds(&token_lower);
         if let Some(s) = seed_results.first() {
-            if let Some(ref class) = s.classification {
-                if let Some(sign) = class.dominant_sign() {
-                    let domain = Domain::from_sign(sign);
-                    st.domains.push(domain);
-                }
+            if let Some(ref class) = s.classification
+                && let Some(sign) = class.dominant_sign()
+            {
+                let domain = Domain::from_sign(sign);
+                st.domains.push(domain);
             }
             st.entity = Some(s.id.clone());
             st.settled_layer = DescentLayer::Entity;
@@ -682,21 +683,20 @@ impl DescentEngine {
         let token_lower = st.text.to_lowercase();
 
         // Direct entity lookup first
-        if let Some(entity) = self.entity_registry.get_seed(&token_lower) {
-            if let Some(ref class) = entity.classification {
-                if let Some(sign) = class.dominant_sign() {
-                    let domain = Domain::from_sign(sign);
-                    st.domains.push(domain);
-                    st.western_classification = class.clone();
-                    // Also try to set vedic from entity properties
-                    if let Some(vedic_val) = entity.properties.get("vedic_graha") {
-                        let idx = (*vedic_val as usize).min(8);
-                        let graha = Graha::from_index(idx);
-                        st.vedic_classification.grahas[graha.index()] = 0.8;
-                    }
-                    return;
-                }
+        if let Some(entity) = self.entity_registry.get_seed(&token_lower)
+            && let Some(ref class) = entity.classification
+            && let Some(sign) = class.dominant_sign()
+        {
+            let domain = Domain::from_sign(sign);
+            st.domains.push(domain);
+            st.western_classification = class.clone();
+            // Also try to set vedic from entity properties
+            if let Some(vedic_val) = entity.properties.get("vedic_graha") {
+                let idx = (*vedic_val as usize).min(8);
+                let graha = Graha::from_index(idx);
+                st.vedic_classification.grahas[graha.index()] = 0.8;
             }
+            return;
         }
 
         // Keyword-based domain matching
@@ -926,12 +926,11 @@ impl DescentEngine {
 
         // If no formula found, check if the token matches an entity
         // (entities may have associated formulas)
-        if st.formulas.is_empty() {
-            if let Some(seed) = self.entity_registry.get_seed(&token_lower) {
-                if let Some(ref formula_id) = seed.formula {
-                    st.formulas.push(formula_id.clone());
-                }
-            }
+        if st.formulas.is_empty()
+            && let Some(seed) = self.entity_registry.get_seed(&token_lower)
+            && let Some(ref formula_id) = seed.formula
+        {
+            st.formulas.push(formula_id.clone());
         }
     }
 
@@ -991,26 +990,26 @@ impl DescentEngine {
         // 2. It has a formula that produces deterministic outputs
         // 3. The entity/formula combination can be represented as a NAND expression
 
-        if let Some(ref entity_id) = st.entity {
-            if let Some(seed) = self.entity_registry.get_seed(entity_id) {
-                // Check if entity has Boolean constants
-                let has_boolean_props = seed.constants.values().any(|v| *v == 0.0 || *v == 1.0);
-                let has_formula = seed.formula.is_some();
-                if has_boolean_props || has_formula {
-                    st.is_absolute = true;
-                    return;
-                }
+        if let Some(ref entity_id) = st.entity
+            && let Some(seed) = self.entity_registry.get_seed(entity_id)
+        {
+            // Check if entity has Boolean constants
+            let has_boolean_props = seed.constants.values().any(|v| *v == 0.0 || *v == 1.0);
+            let has_formula = seed.formula.is_some();
+            if has_boolean_props || has_formula {
+                st.is_absolute = true;
+                return;
             }
         }
 
         // If entity has a formula that can be evaluated, check if it's a NAND expression
-        if let Some(formula_id) = st.formulas.first() {
-            if let Some(f) = self.formula_registry.get(formula_id) {
-                // Simple check: formula with no inputs is a constant — absolute truth
-                if f.inputs.is_empty() {
-                    st.is_absolute = true;
-                    return;
-                }
+        if let Some(formula_id) = st.formulas.first()
+            && let Some(f) = self.formula_registry.get(formula_id)
+        {
+            // Simple check: formula with no inputs is a constant — absolute truth
+            if f.inputs.is_empty() {
+                st.is_absolute = true;
+                return;
             }
         }
 

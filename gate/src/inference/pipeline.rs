@@ -6,8 +6,8 @@ use crate::core::pocket::Pocket;
 use crate::economy::budget::Budget;
 use crate::economy::tray::BallEconomy;
 use crate::gates::{
-    confidence::ConfidenceGate, fact::FactGate, formal::FormalGate, logic::LogicGate,
-    math::MathGate, GateValidator,
+    GateValidator, confidence::ConfidenceGate, fact::FactGate, formal::FormalGate,
+    logic::LogicGate, math::MathGate,
 };
 use crate::kb::facts::KnowledgeBase;
 use crate::state::machine::{State, StateMachine};
@@ -94,7 +94,8 @@ impl Pipeline {
                 result.validated_text = validated_text;
             }
         } else {
-            let ball = self.validate_single_token(&request.text, &request.context, &request.text)?;
+            let ball =
+                self.validate_single_token(&request.text, &request.context, &request.text)?;
 
             let gate_scores = ball
                 .gate_results
@@ -130,7 +131,12 @@ impl Pipeline {
         Ok(result)
     }
 
-    pub fn validate_single_token(&self, token: &str, context: &str, claim: &str) -> CidResult<Ball> {
+    pub fn validate_single_token(
+        &self,
+        token: &str,
+        context: &str,
+        claim: &str,
+    ) -> CidResult<Ball> {
         let candidate = TokenCandidate::new(0, token, 0.5);
         let mut ball = Ball::new(candidate);
 
@@ -142,7 +148,9 @@ impl Pipeline {
             let result = match pin.gate {
                 Gate::Math => MathGate::new().validate(&mut ball, context),
                 Gate::Logic => LogicGate::new().validate(&mut ball, context),
-                Gate::Fact => FactGate::new(&self.kb).with_claim(claim).validate(&mut ball, context),
+                Gate::Fact => FactGate::new(&self.kb)
+                    .with_claim(claim)
+                    .validate(&mut ball, context),
                 Gate::Confidence => {
                     ConfidenceGate::with_platt_for_domain(context).validate(&mut ball, context)
                 }
@@ -175,7 +183,9 @@ impl Pipeline {
                 let result = match pin.gate {
                     Gate::Math => MathGate::new().validate(&mut ball, context),
                     Gate::Logic => LogicGate::new().validate(&mut ball, context),
-                    Gate::Fact => FactGate::new(&self.kb).with_claim(claim).validate(&mut ball, context),
+                    Gate::Fact => FactGate::new(&self.kb)
+                        .with_claim(claim)
+                        .validate(&mut ball, context),
                     Gate::Confidence => {
                         ConfidenceGate::with_platt_for_domain(context).validate(&mut ball, context)
                     }

@@ -23,8 +23,8 @@ use crate::entity::EntityRegistry;
 use crate::formula::{Formula, FormulaRegistry};
 use crate::gyro::GyroState;
 use crate::wheel::{BleachLayer, Domain, UnderstandingAxis, WheelGraph};
-use crate::zanpakuto::nlp::NlpContext;
 use crate::zanpakuto::Identity;
+use crate::zanpakuto::nlp::NlpContext;
 
 pub use intent::Intent;
 
@@ -272,10 +272,10 @@ impl Shikai {
                         for formula_id in &formula_ids {
                             if let Some(formula) = self.formulas.get(formula_id) {
                                 for input in &formula.inputs {
-                                    if !final_args.iter().any(|(k, _)| k == input) {
-                                        if let Some(val) = seed.properties.get(input) {
-                                            final_args.push((input.clone(), *val));
-                                        }
+                                    if !final_args.iter().any(|(k, _)| k == input)
+                                        && let Some(val) = seed.properties.get(input)
+                                    {
+                                        final_args.push((input.clone(), *val));
                                     }
                                 }
                             }
@@ -285,10 +285,10 @@ impl Shikai {
                         for formula_id in &formula_ids {
                             if let Some(formula) = self.formulas.get(formula_id) {
                                 for input in &formula.inputs {
-                                    if !final_args.iter().any(|(k, _)| k == input) {
-                                        if let Some(val) = entity.values.get(input) {
-                                            final_args.push((input.clone(), *val));
-                                        }
+                                    if !final_args.iter().any(|(k, _)| k == input)
+                                        && let Some(val) = entity.values.get(input)
+                                    {
+                                        final_args.push((input.clone(), *val));
                                     }
                                 }
                             }
@@ -434,14 +434,14 @@ impl Shikai {
             let w = raw_w.trim_matches(|c: char| !c.is_alphanumeric());
 
             // Adjacent pair check (e.g. "grade 5", "level 3", "cycle 2")
-            if let Some(p) = prev {
-                if let Ok(n) = w.parse::<u8>() {
-                    if p == "grade" || p == "level" {
-                        level = Some(n.min(12));
-                    }
-                    if p == "cycle" || p == "pass" {
-                        cycle = Some(n);
-                    }
+            if let Some(p) = prev
+                && let Ok(n) = w.parse::<u8>()
+            {
+                if p == "grade" || p == "level" {
+                    level = Some(n.min(12));
+                }
+                if p == "cycle" || p == "pass" {
+                    cycle = Some(n);
                 }
             }
 

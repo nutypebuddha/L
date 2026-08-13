@@ -11,8 +11,8 @@
 //! back to the deterministic engine.
 
 use anyhow::Result;
-use serde_json::json;
 use serde_json::Value;
+use serde_json::json;
 
 use crate::llm::{AgentStep, Llm, Tool};
 use crate::mcp_client::McpClient;
@@ -319,11 +319,11 @@ pub async fn run(goal: &str, memory_block: &str) -> Option<String> {
 
     // Budget exhausted: ask the model for a concise final answer from what it
     // has, without further tool calls.
-    let summarise = llm.answer(
+
+    llm.answer(
         &format!("Summarize the answer to: {goal}"),
         "You have gathered context via tools. Give a concise final answer.",
-    );
-    summarise
+    )
 }
 
 /// Phase 4 — verify-before-answer.

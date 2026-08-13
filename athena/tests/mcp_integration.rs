@@ -361,11 +361,9 @@ fn test_wire_limit_param_respected() {
 fn test_wire_savings_ledger_accumulates() {
     let handler = setup_handler_with_many_entities();
     handler.call_tool_sync("athena_entity_list", None);
-    handler.call_tool_sync("athena_formula_search", {
-        let args: serde_json::Map<String, serde_json::Value> =
-            serde_json::from_value(serde_json::json!({"keyword": "newtons"})).unwrap();
-        Some(&args.clone())
-    });
+    let args: serde_json::Map<String, serde_json::Value> =
+        serde_json::from_value(serde_json::json!({"keyword": "newtons"})).unwrap();
+    handler.call_tool_sync("athena_formula_search", Some(&args));
 
     let result = handler.call_tool_sync("athena_savings", None);
     let data = tool_result_json(&result);

@@ -56,11 +56,7 @@ pub struct GrahaPosition {
 /// Normalize an angle in degrees to [0, 360).
 fn norm360(deg: f64) -> f64 {
     let d = deg % 360.0;
-    if d < 0.0 {
-        d + 360.0
-    } else {
-        d
-    }
+    if d < 0.0 { d + 360.0 } else { d }
 }
 
 /// Julian Day for a Gregorian calendar date and UT time-of-day.

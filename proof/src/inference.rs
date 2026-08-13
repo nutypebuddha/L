@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use crate::companion::{sanitize_answer, PERSONA_SYSTEM_PROMPT};
+use crate::companion::{PERSONA_SYSTEM_PROMPT, sanitize_answer};
 
 /// Hint from the copilot for token descent (kept for the descent pipeline).
 #[derive(Debug, Clone, Default)]

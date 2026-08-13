@@ -1264,7 +1264,7 @@ impl VedicClassification {
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .filter(|(_, &v)| v > 0.0)
+            .filter(|(_, v)| **v > 0.0)
             .map(|(i, _)| Graha::from_index(i))
     }
 
@@ -1274,7 +1274,7 @@ impl VedicClassification {
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .filter(|(_, &v)| v > 0.0)
+            .filter(|(_, v)| **v > 0.0)
             .map(|(i, _)| Nakshatra::from_index(i))
     }
 
@@ -1284,7 +1284,7 @@ impl VedicClassification {
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .filter(|(_, &v)| v > 0.0)
+            .filter(|(_, v)| **v > 0.0)
             .map(|(i, _)| Guna::from_index(i))
     }
 
@@ -1294,7 +1294,7 @@ impl VedicClassification {
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-            .filter(|(_, &v)| v > 0.0)
+            .filter(|(_, v)| **v > 0.0)
             .map(|(i, _)| VedicElement::from_index(i))
     }
 

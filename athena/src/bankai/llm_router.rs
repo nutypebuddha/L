@@ -31,8 +31,8 @@
 //! runs through Athena's deterministic symbolic engine.
 
 use crate::inference::{
-    config::InferenceConfig, BackendKind, InferenceBackend, InferenceError, InferenceRequest,
-    InferenceResponse,
+    BackendKind, InferenceBackend, InferenceError, InferenceRequest, InferenceResponse,
+    config::InferenceConfig,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;

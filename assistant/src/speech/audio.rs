@@ -7,10 +7,10 @@ pub async fn play_file(path: &str) -> Result<()> {
     for cmd in &["paplay", "aplay", "play"] {
         let result = Command::new(cmd).args([path]).output().await;
 
-        if let Ok(o) = result {
-            if o.status.success() {
-                return Ok(());
-            }
+        if let Ok(o) = result
+            && o.status.success()
+        {
+            return Ok(());
         }
     }
 

@@ -365,7 +365,10 @@ fn test_gate_validates_rust_size_edge_cases() {
             "rust_code",
         ))
         .unwrap();
-    assert!(!bad_dyn.passed, "false dyn/trait-object claim should be rejected");
+    assert!(
+        !bad_dyn.passed,
+        "false dyn/trait-object claim should be rejected"
+    );
 
     let ok_arc = engine
         .validate(ValidationRequest::new(
@@ -381,7 +384,10 @@ fn test_gate_validates_rust_size_edge_cases() {
             "rust_code",
         ))
         .unwrap();
-    assert!(!bad_arc.passed, "false Arc overhead claim should be rejected");
+    assert!(
+        !bad_arc.passed,
+        "false Arc overhead claim should be rejected"
+    );
 
     // Architecture qualifier ("64-bit") must not pair with an entity ("vec").
     let ok_vec = engine
@@ -390,5 +396,8 @@ fn test_gate_validates_rust_size_edge_cases() {
             "rust_code",
         ))
         .unwrap();
-    assert!(ok_vec.passed, "entity + 64-bit qualifier must not false-reject");
+    assert!(
+        ok_vec.passed,
+        "entity + 64-bit qualifier must not false-reject"
+    );
 }

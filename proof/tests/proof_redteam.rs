@@ -152,23 +152,23 @@ fn every_mutated_field_is_rejected() {
         checked += 1;
 
         // Descend one level into `descent` and mutate each subfield too.
-        if key == "descent" {
-            if let Some(d) = val.as_object() {
-                for (dk, dv) in d {
-                    let mut forged = base.clone();
-                    let mut descent = d.clone();
-                    descent.insert(dk.clone(), mutate(dv));
-                    forged
-                        .as_object_mut()
-                        .unwrap()
-                        .insert("descent".into(), Value::Object(descent));
-                    let (ok, verified) = verify(&forged);
-                    assert!(
-                        !ok && !verified,
-                        "forging descent.{dk} must be rejected, got ok={ok} verified={verified}"
-                    );
-                    checked += 1;
-                }
+        if key == "descent"
+            && let Some(d) = val.as_object()
+        {
+            for (dk, dv) in d {
+                let mut forged = base.clone();
+                let mut descent = d.clone();
+                descent.insert(dk.clone(), mutate(dv));
+                forged
+                    .as_object_mut()
+                    .unwrap()
+                    .insert("descent".into(), Value::Object(descent));
+                let (ok, verified) = verify(&forged);
+                assert!(
+                    !ok && !verified,
+                    "forging descent.{dk} must be rejected, got ok={ok} verified={verified}"
+                );
+                checked += 1;
             }
         }
     }

@@ -194,36 +194,36 @@ fn parse_convert(lower: &str, original: &str) -> Option<Intent> {
         let parts: Vec<&str> = rest
             .splitn(3, |c: char| c.is_whitespace() || c == ',')
             .collect();
-        if parts.len() >= 3 {
-            if let Ok(value) = parts[0].parse::<f64>() {
-                let from = parts[1].trim();
-                let to = parts[2]
-                    .trim()
-                    .trim_start_matches("to ")
-                    .trim_start_matches("in ")
-                    .trim();
-                return Some(Intent::Convert {
-                    value,
-                    from: from.to_string(),
-                    to: to.to_string(),
-                });
-            }
+        if parts.len() >= 3
+            && let Ok(value) = parts[0].parse::<f64>()
+        {
+            let from = parts[1].trim();
+            let to = parts[2]
+                .trim()
+                .trim_start_matches("to ")
+                .trim_start_matches("in ")
+                .trim();
+            return Some(Intent::Convert {
+                value,
+                from: from.to_string(),
+                to: to.to_string(),
+            });
         }
     }
 
     // "100 miles to kilometers" / "5 kg in pounds"
     let words: Vec<&str> = lower.split_whitespace().collect();
     for i in 0..words.len() {
-        if let Ok(value) = words[i].parse::<f64>() {
-            if i + 2 < words.len() {
-                let after = words[i + 1];
-                let connector = words[i + 2];
-                if connector == "to" || connector == "in" {
-                    let from = after.to_string();
-                    let to: String = words[i + 3..].join(" ");
-                    if !to.is_empty() {
-                        return Some(Intent::Convert { value, from, to });
-                    }
+        if let Ok(value) = words[i].parse::<f64>()
+            && i + 2 < words.len()
+        {
+            let after = words[i + 1];
+            let connector = words[i + 2];
+            if connector == "to" || connector == "in" {
+                let from = after.to_string();
+                let to: String = words[i + 3..].join(" ");
+                if !to.is_empty() {
+                    return Some(Intent::Convert { value, from, to });
                 }
             }
         }
@@ -299,20 +299,20 @@ fn parse_eval(lower: &str, original: &str) -> Option<Intent> {
 /// "validate this claim" / "check if water is H2O" / "verify X against Y"
 fn parse_validate(lower: &str, original: &str) -> Option<Intent> {
     // "validate X against Y"
-    if lower.starts_with("validate ") {
-        if let Some(rest) = lower.strip_prefix("validate ") {
-            if let Some((claim, context)) = parse_against(rest) {
-                return Some(Intent::Validate {
-                    text: claim,
-                    context,
-                });
-            }
-            // No "against" — use claim as text, empty context
+    if lower.starts_with("validate ")
+        && let Some(rest) = lower.strip_prefix("validate ")
+    {
+        if let Some((claim, context)) = parse_against(rest) {
             return Some(Intent::Validate {
-                text: rest.to_string(),
-                context: String::new(),
+                text: claim,
+                context,
             });
         }
+        // No "against" — use claim as text, empty context
+        return Some(Intent::Validate {
+            text: rest.to_string(),
+            context: String::new(),
+        });
     }
 
     // "check if X is Y" / "verify X"

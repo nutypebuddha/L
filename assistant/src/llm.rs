@@ -188,12 +188,7 @@ impl Llm {
         if let Some(auth) = auth_header() {
             req = req.header("Authorization", &auth);
         }
-        let resp: serde_json::Value = req
-            .send_json(body)
-            .ok()?
-            .body_mut()
-            .read_json()
-            .ok()?;
+        let resp: serde_json::Value = req.send_json(body).ok()?.body_mut().read_json().ok()?;
 
         let content = resp
             .pointer("/choices/0/message/content")
@@ -325,32 +320,27 @@ impl Llm {
         if let Some(auth) = auth_header() {
             req = req.header("Authorization", &auth);
         }
-        let resp: serde_json::Value = req
-            .send_json(body)
-            .ok()?
-            .body_mut()
-            .read_json()
-            .ok()?;
+        let resp: serde_json::Value = req.send_json(body).ok()?.body_mut().read_json().ok()?;
 
         let msg = resp.pointer("/choices/0/message")?;
 
         // Tool call takes priority.
-        if let Some(calls) = msg.get("tool_calls").and_then(|t| t.as_array()) {
-            if let Some(first) = calls.first() {
-                let name = first
-                    .pointer("/function/name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let raw = first
-                    .pointer("/function/arguments")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("{}");
-                let arguments =
-                    serde_json::from_str::<serde_json::Value>(raw).unwrap_or(serde_json::json!({}));
-                if !name.is_empty() {
-                    return Some(AgentStep::Call(ToolCall { name, arguments }));
-                }
+        if let Some(calls) = msg.get("tool_calls").and_then(|t| t.as_array())
+            && let Some(first) = calls.first()
+        {
+            let name = first
+                .pointer("/function/name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let raw = first
+                .pointer("/function/arguments")
+                .and_then(|v| v.as_str())
+                .unwrap_or("{}");
+            let arguments =
+                serde_json::from_str::<serde_json::Value>(raw).unwrap_or(serde_json::json!({}));
+            if !name.is_empty() {
+                return Some(AgentStep::Call(ToolCall { name, arguments }));
             }
         }
 

@@ -333,7 +333,7 @@ impl Ledger {
         let parts: Vec<String> = EventKind::ALL
             .iter()
             .zip(counts.iter())
-            .filter(|(_, &c)| c > 0)
+            .filter(|(_, c)| **c > 0)
             .map(|(k, &c)| format!("{}:{}", k.name(), c))
             .collect();
         format!(

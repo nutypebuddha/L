@@ -1,8 +1,8 @@
 // Tanto recursive descent expression parser — adapted for CID
 // Precedence: ^ > unary - > * / > + -
 
-use crate::tanto::math;
 use crate::tanto::TantoEnv;
+use crate::tanto::math;
 
 pub struct Parser<'a> {
     pub bytes: &'a [u8],

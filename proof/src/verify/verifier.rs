@@ -542,20 +542,24 @@ mod tests {
         let report = verify_expression("(2 + 3");
         assert!(!report.passed);
         assert!(report.error_count > 0);
-        assert!(report
-            .diagnostics
-            .iter()
-            .any(|d| d.constraint_id.as_deref() == Some("structural.balanced_parens")));
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|d| d.constraint_id.as_deref() == Some("structural.balanced_parens"))
+        );
     }
 
     #[test]
     fn test_verify_equation_balance() {
         let report = verify_expression("2 + 3 = 6");
         assert!(!report.passed);
-        assert!(report
-            .diagnostics
-            .iter()
-            .any(|d| d.constraint_id.as_deref() == Some("math.equation_balance")));
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|d| d.constraint_id.as_deref() == Some("math.equation_balance"))
+        );
     }
 
     #[test]
@@ -568,10 +572,12 @@ mod tests {
     fn test_verify_empty_expression() {
         let report = verify_expression("");
         assert!(!report.passed);
-        assert!(report
-            .diagnostics
-            .iter()
-            .any(|d| d.constraint_id.as_deref() == Some("structural.non_empty")));
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|d| d.constraint_id.as_deref() == Some("structural.non_empty"))
+        );
     }
 
     #[test]
@@ -611,10 +617,12 @@ mod tests {
         };
         let report = verify_proposal(&proposal);
         assert!(!report.passed);
-        assert!(report
-            .diagnostics
-            .iter()
-            .any(|d| d.constraint_id.as_deref() == Some("logic.no_prompt_injection")));
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|d| d.constraint_id.as_deref() == Some("logic.no_prompt_injection"))
+        );
     }
 
     #[test]
@@ -668,10 +676,12 @@ mod tests {
             claimed_confidence: None,
         };
         let report = verify_proposal(&proposal);
-        assert!(report
-            .diagnostics
-            .iter()
-            .any(|d| d.gate == DiagnosticGate::Fallacy));
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|d| d.gate == DiagnosticGate::Fallacy)
+        );
     }
 
     #[test]

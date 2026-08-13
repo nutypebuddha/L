@@ -164,7 +164,7 @@ impl InfluenceMap {
             .weights
             .iter()
             .enumerate()
-            .filter(|(_, &w)| w > MIN_INFLUENCE)
+            .filter(|(_, w)| **w > MIN_INFLUENCE)
             .map(|(i, &w)| (Domain::from_index(i), w))
             .collect();
         active.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));

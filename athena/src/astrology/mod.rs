@@ -265,7 +265,7 @@ impl AtomClassification {
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .filter(|(_, &v)| v > 0.0)
+            .filter(|(_, v)| **v > 0.0)
             .map(|(i, _)| Sign::from_index(i))
     }
 
@@ -275,7 +275,7 @@ impl AtomClassification {
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .filter(|(_, &v)| v > 0.0)
+            .filter(|(_, v)| **v > 0.0)
             .map(|(i, _)| Element::from_index(i))
     }
 
@@ -285,7 +285,7 @@ impl AtomClassification {
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-            .filter(|(_, &v)| v > 0.0)
+            .filter(|(_, v)| **v > 0.0)
             .map(|(i, _)| Modality::from_index(i))
     }
 }

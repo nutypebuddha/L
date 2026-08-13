@@ -130,11 +130,9 @@ impl<'a> FactGate<'a> {
             .collect();
 
         for i in 0..tokens.len() {
-            let fact = self
-                .kb
-                .facts
-                .iter()
-                .find(|f| !f.name.is_empty() && f.value != 0.0 && f.name.eq_ignore_ascii_case(tokens[i]));
+            let fact = self.kb.facts.iter().find(|f| {
+                !f.name.is_empty() && f.value != 0.0 && f.name.eq_ignore_ascii_case(tokens[i])
+            });
             let Some(fact) = fact else {
                 continue;
             };

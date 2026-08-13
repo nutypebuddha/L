@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-edition = "2021"
+edition = "2024"
 # MSRV floor is 1.85. The binding reason is NOT hashbrown/indexmap (those are
 # transitive via toml and could be downgraded) — it is the xalen-* ephemeris
 # crates: xalen-vedic, xalen-houses, xalen-ayanamsa, xalen-time, xalen-coords

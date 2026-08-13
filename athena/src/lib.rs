@@ -50,8 +50,8 @@ pub mod llm {
         LlmRouteResult, LlmRouter, QueryCategory, RouterIntent, RouterToken,
     };
     pub use crate::inference::{
-        config::InferenceConfig, BackendKind, Capability, HealthStatus, InferenceBackend,
-        InferenceError, InferenceRequest, InferenceResponse,
+        BackendKind, Capability, HealthStatus, InferenceBackend, InferenceError, InferenceRequest,
+        InferenceResponse, config::InferenceConfig,
     };
 }
 
@@ -66,16 +66,16 @@ pub mod prelude {
     pub use crate::gates::{GateOutput, GateResult};
     pub use crate::influence::{DomainInfluence, InfluenceEngine, InfluenceMap};
     pub use crate::ledger::{
-        record_detailed, record_event, session_ledger, Event, EventKind, Ledger,
+        Event, EventKind, Ledger, record_detailed, record_event, session_ledger,
     };
     pub use crate::primitive::{
-        and, implies, nand, nor, not, or, xnor, xor, NandDag, NandExpression,
+        NandDag, NandExpression, and, implies, nand, nor, not, or, xnor, xor,
     };
     pub use crate::shikai::{Ambiguity, Intent, Shikai, ShikaiQuery};
-    pub use crate::tanto::{evaluate as tanto_evaluate, TantoEnv};
+    pub use crate::tanto::{TantoEnv, evaluate as tanto_evaluate};
     pub use crate::wheel::{Aspect, Domain, Node, WheelGraph};
     pub use crate::zanpakuto::{
-        guest_identity, AccessTier, Capability, Identity, Stage, Zanpakuto,
+        AccessTier, Capability, Identity, Stage, Zanpakuto, guest_identity,
     };
 
     pub use crate::error::{LaiError, ReasoningError, ValidationError};

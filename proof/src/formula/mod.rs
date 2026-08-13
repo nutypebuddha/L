@@ -23,8 +23,8 @@ pub mod nonmath;
 mod registry;
 
 pub use glyph::{
-    apply_operator, binding_power, decompose_bound, is_bound, Glyph, GlyphOperator, GlyphResult,
-    NamedGlyph, GLYPH_COUNT, MAX_GLYPH, OPERATOR_TABLE,
+    GLYPH_COUNT, Glyph, GlyphOperator, GlyphResult, MAX_GLYPH, NamedGlyph, OPERATOR_TABLE,
+    apply_operator, binding_power, decompose_bound, is_bound,
 };
 pub use registry::FormulaRegistry;
 

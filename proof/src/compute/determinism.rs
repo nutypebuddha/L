@@ -181,10 +181,10 @@ pub fn check_determinism(expr: &str, expected: Option<f64>) -> bool {
         None => return false,
     };
 
-    if let Some(exp) = expected {
-        if (first - exp).abs() > 1e-6 {
-            return false;
-        }
+    if let Some(exp) = expected
+        && (first - exp).abs() > 1e-6
+    {
+        return false;
     }
 
     for _ in 1..ITERATIONS {

@@ -113,10 +113,10 @@ impl GyroState {
         let mut result = Vec::new();
         let weights = self.normalized_graha_weights();
         for (i, w) in weights.iter().enumerate() {
-            if *w > 0.0 {
-                if let Some(graha) = Domain::from_index(i) {
-                    result.push((graha, *w));
-                }
+            if *w > 0.0
+                && let Some(graha) = Domain::from_index(i)
+            {
+                result.push((graha, *w));
             }
         }
         result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));

@@ -56,11 +56,7 @@ pub const fn sign_to_polarity(sign: usize) -> f64 {
 /// Precomputed arc distance between any two sign indices (0–11).
 pub const fn arc_distance(a: usize, b: usize) -> usize {
     let diff = a.abs_diff(b);
-    if diff > 6 {
-        12 - diff
-    } else {
-        diff
-    }
+    if diff > 6 { 12 - diff } else { diff }
 }
 
 /// Check if two sign indices form a valid Ptolemaic aspect.
@@ -132,13 +128,13 @@ mod tests {
         assert_eq!(sign_to_element(0), 0); // Aries → Fire
         assert_eq!(sign_to_element(4), 0); // Leo → Fire
         assert_eq!(sign_to_element(8), 0); // Sagittarius → Fire
-                                           // Earth
+        // Earth
         assert_eq!(sign_to_element(1), 1); // Taurus → Earth
         assert_eq!(sign_to_element(5), 1); // Virgo → Earth
-                                           // Air
+        // Air
         assert_eq!(sign_to_element(2), 2); // Gemini → Air
         assert_eq!(sign_to_element(6), 2); // Libra → Air
-                                           // Water
+        // Water
         assert_eq!(sign_to_element(3), 3); // Cancer → Water
         assert_eq!(sign_to_element(7), 3); // Scorpio → Water
     }

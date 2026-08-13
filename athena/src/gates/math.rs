@@ -1,7 +1,7 @@
 //! # Math Gate — validates numeric calculations
 
-use super::{gate_output, Gate, GateOutput};
-use crate::tanto::{evaluate as tanto_eval, TantoEnv};
+use super::{Gate, GateOutput, gate_output};
+use crate::tanto::{TantoEnv, evaluate as tanto_eval};
 
 /// Evaluate an expression string using Tanto, returning `Result<f64, String>`.
 fn eval_expression(expr: &str) -> Result<f64, String> {

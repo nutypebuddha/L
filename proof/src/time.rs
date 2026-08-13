@@ -26,12 +26,12 @@ pub enum TimezoneError {
     #[error("invalid timezone identifier '{0}': expected an IANA zone such as 'America/Chicago'")]
     InvalidTimezone(String),
 
-    #[error("invalid datetime '{0}': expected format 'YYYY-MM-DD HH:MM[:SS]' (or ...T... with a trailing Z for UTC)")]
+    #[error(
+        "invalid datetime '{0}': expected format 'YYYY-MM-DD HH:MM[:SS]' (or ...T... with a trailing Z for UTC)"
+    )]
     InvalidDatetime(String),
 
-    #[error(
-        "conflicting datetime inputs: provide --datetime-utc OR (--datetime + --tz), not both"
-    )]
+    #[error("conflicting datetime inputs: provide --datetime-utc OR (--datetime + --tz), not both")]
     ConflictingInputs,
 }
 

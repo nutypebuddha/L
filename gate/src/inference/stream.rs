@@ -1,7 +1,7 @@
 use crate::core::ball::{Ball, TokenCandidate};
 use crate::core::pin::{Gate, PinField};
 use crate::gates::{
-    confidence::ConfidenceGate, fact::FactGate, logic::LogicGate, math::MathGate, GateValidator,
+    GateValidator, confidence::ConfidenceGate, fact::FactGate, logic::LogicGate, math::MathGate,
 };
 use crate::kb::facts::KnowledgeBase;
 
@@ -37,16 +37,25 @@ impl StreamEvent {
                 confidence,
                 passed,
             } => {
-                format!("event: token\ndata: {{\"index\":{},\"text\":\"{}\",\"confidence\":{:.4},\"passed\":{}}}\n\n",
-                    index, escape_json(text), confidence, passed)
+                format!(
+                    "event: token\ndata: {{\"index\":{},\"text\":\"{}\",\"confidence\":{:.4},\"passed\":{}}}\n\n",
+                    index,
+                    escape_json(text),
+                    confidence,
+                    passed
+                )
             }
             StreamEvent::Fix {
                 original,
                 fixed,
                 reason,
             } => {
-                format!("event: fix\ndata: {{\"original\":\"{}\",\"fixed\":\"{}\",\"reason\":\"{}\"}}\n\n",
-                    escape_json(original), escape_json(fixed), escape_json(reason))
+                format!(
+                    "event: fix\ndata: {{\"original\":\"{}\",\"fixed\":\"{}\",\"reason\":\"{}\"}}\n\n",
+                    escape_json(original),
+                    escape_json(fixed),
+                    escape_json(reason)
+                )
             }
             StreamEvent::Warning { message } => {
                 format!(
@@ -59,8 +68,10 @@ impl StreamEvent {
                 passed_count,
                 avg_confidence,
             } => {
-                format!("event: complete\ndata: {{\"total_tokens\":{},\"passed_count\":{},\"avg_confidence\":{:.4}}}\n\n",
-                    total_tokens, passed_count, avg_confidence)
+                format!(
+                    "event: complete\ndata: {{\"total_tokens\":{},\"passed_count\":{},\"avg_confidence\":{:.4}}}\n\n",
+                    total_tokens, passed_count, avg_confidence
+                )
             }
         }
     }

@@ -13,7 +13,7 @@
 //!
 //! Run: `cargo test --test optimizer_determinism`
 
-use laverna::optimize::{parse_schema, solve, Allocation, Schema};
+use laverna::optimize::{Allocation, Schema, parse_schema, solve};
 
 /// Two attributes share one 20-point pool; each level yields +1 to its own
 /// stat. Objective weights atk/def at 0.5/0.5, so `0.5*atk + 0.5*def` is

@@ -7,7 +7,7 @@
 //!
 //! Uses `ureq` for blocking HTTP — no async runtime needed at CLI level.
 
-use crate::inference::config::{InferenceConfig, DEFAULT_ENDPOINT_URL};
+use crate::inference::config::{DEFAULT_ENDPOINT_URL, InferenceConfig};
 use crate::inference::{
     BackendKind, Capability, HealthStatus, InferenceBackend, InferenceError, InferenceRequest,
     InferenceResponse,

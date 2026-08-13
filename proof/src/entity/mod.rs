@@ -233,10 +233,10 @@ impl EntityRegistry {
         self.entities.insert(id, entity);
 
         // Evict oldest if over capacity (at most once per insert)
-        if self.order.len() > self.max_entities {
-            if let Some(old_id) = self.order.pop_back() {
-                self.entities.remove(&old_id);
-            }
+        if self.order.len() > self.max_entities
+            && let Some(old_id) = self.order.pop_back()
+        {
+            self.entities.remove(&old_id);
         }
 
         // The entity we just inserted is the newest (front of order)
@@ -522,10 +522,10 @@ impl EntityRegistry {
             .map_err(|e| format!("cannot parse {}: {e}", path.display()))?;
         for entry in parsed.entity {
             let mut classification = AtomClassification::new();
-            if let Some(domain) = &entry.domain {
-                if let Some(graha) = Graha::parse(domain) {
-                    classification = classification.with_graha(graha, 0.9);
-                }
+            if let Some(domain) = &entry.domain
+                && let Some(graha) = Graha::parse(domain)
+            {
+                classification = classification.with_graha(graha, 0.9);
             }
             let seed = SeedEntity {
                 id: entry.id,
@@ -554,10 +554,10 @@ impl EntityRegistry {
             toml::from_str(content).map_err(|e| format!("cannot parse seed TOML: {e}"))?;
         for entry in parsed.entity {
             let mut classification = AtomClassification::new();
-            if let Some(domain) = &entry.domain {
-                if let Some(graha) = Graha::parse(domain) {
-                    classification = classification.with_graha(graha, 0.9);
-                }
+            if let Some(domain) = &entry.domain
+                && let Some(graha) = Graha::parse(domain)
+            {
+                classification = classification.with_graha(graha, 0.9);
             }
             let seed = SeedEntity {
                 id: entry.id,
@@ -639,25 +639,25 @@ impl ShikaiFormEntry {
     /// Build a VedicClassification from this form's string fields.
     pub fn to_vedic(&self) -> VedicClassification {
         let mut vc = VedicClassification::new();
-        if let Some(ref g) = self.graha {
-            if let Some(graha) = Graha::parse(g) {
-                vc = vc.with_graha(graha, 0.9);
-            }
+        if let Some(ref g) = self.graha
+            && let Some(graha) = Graha::parse(g)
+        {
+            vc = vc.with_graha(graha, 0.9);
         }
-        if let Some(ref n) = self.nakshatra {
-            if let Some(nak) = Nakshatra::parse(n) {
-                vc = vc.with_nakshatra(nak, 0.8);
-            }
+        if let Some(ref n) = self.nakshatra
+            && let Some(nak) = Nakshatra::parse(n)
+        {
+            vc = vc.with_nakshatra(nak, 0.8);
         }
-        if let Some(ref g) = self.guna {
-            if let Some(guna) = Guna::parse(g) {
-                vc = vc.with_guna(guna, 0.8);
-            }
+        if let Some(ref g) = self.guna
+            && let Some(guna) = Guna::parse(g)
+        {
+            vc = vc.with_guna(guna, 0.8);
         }
-        if let Some(ref t) = self.tattva {
-            if let Some(elem) = VedicElement::parse(t) {
-                vc = vc.with_vedic_element(elem, 0.8);
-            }
+        if let Some(ref t) = self.tattva
+            && let Some(elem) = VedicElement::parse(t)
+        {
+            vc = vc.with_vedic_element(elem, 0.8);
         }
         vc.confidence = self.priority.unwrap_or(0.7);
         vc

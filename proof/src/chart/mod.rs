@@ -26,7 +26,7 @@ pub enum AstroAspect {
 pub type Aspect = AstroAspect;
 
 pub use personality::{
-    derive_personality, AspectModifier, PersonalityProfile, Pillar, WatchArchetype,
+    AspectModifier, PersonalityProfile, Pillar, WatchArchetype, derive_personality,
 };
 
 /// House (bhava) system used to derive the 12 cusps.
@@ -463,11 +463,7 @@ pub struct SynastryAspect {
 /// Normalize an angle in degrees to [0, 360).
 fn norm360(deg: f64) -> f64 {
     let d = deg % 360.0;
-    if d < 0.0 {
-        d + 360.0
-    } else {
-        d
-    }
+    if d < 0.0 { d + 360.0 } else { d }
 }
 
 /// Map an angular difference (0–180°) to a wheel aspect.

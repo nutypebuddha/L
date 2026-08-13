@@ -2,11 +2,11 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-use super::json::{parse_json, stringify, JsonValue};
+use super::InferenceEngine;
+use super::json::{JsonValue, parse_json, stringify};
 use super::request::{ProxyConfig, ValidationRequest};
 use super::result::{CidError, CidResult};
 use super::stream::StreamValidator;
-use super::InferenceEngine;
 
 #[cfg(feature = "proxy")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -482,7 +482,10 @@ impl ProxyServer {
 
         let response = format!(
             "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            status, status_text, body.len(), body
+            status,
+            status_text,
+            body.len(),
+            body
         );
 
         stream
@@ -507,7 +510,10 @@ impl ProxyServer {
 
         let response = format!(
             "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            status, status_text, body.len(), body
+            status,
+            status_text,
+            body.len(),
+            body
         );
 
         stream

@@ -6,8 +6,8 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::chart::personality::{PersonalityProfile, Pillar};
 use crate::chart::ChartSnapshot;
+use crate::chart::personality::{PersonalityProfile, Pillar};
 use crate::optimize;
 
 // ── Domain Profile ──────────────────────────────────────────────────────────

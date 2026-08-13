@@ -84,7 +84,11 @@ fn solve_orbit(args: &str) -> Option<String> {
     };
     Some(format!(
         "=== ORBITAL SOLUTION ===\n  v (velocity)    = {} m/s\n  T (period)      = {} s\n  KE (per kg)     = {} J/kg\n  grav accel      = {} m/s^2\n  verify: v^2/r == GM/r^2 => {}",
-        format_value(v), format_value(t), format_value(ke), format_value(grav), verify
+        format_value(v),
+        format_value(t),
+        format_value(ke),
+        format_value(grav),
+        verify
     ))
 }
 
@@ -103,7 +107,11 @@ fn solve_projectile(args: &str) -> Option<String> {
     let max_h = vy * vy / (2.0 * G_GRAV);
     Some(format!(
         "=== PROJECTILE SOLUTION ===\n  vx           = {} m/s\n  vy           = {} m/s\n  flight time  = {} s\n  range        = {} m\n  max height   = {} m",
-        format_value(vx), format_value(vy), format_value(t_flight), format_value(range), format_value(max_h)
+        format_value(vx),
+        format_value(vy),
+        format_value(t_flight),
+        format_value(range),
+        format_value(max_h)
     ))
 }
 
@@ -118,7 +126,9 @@ fn solve_energy(args: &str) -> Option<String> {
     let tons_tnt = e / 4.184e9;
     Some(format!(
         "=== ENERGY SOLUTION (E=mc^2) ===\n  E (joules)   = {} J\n  E (kWh)      = {} kWh\n  E (tons TNT) = {} tons",
-        format_value(e), format_value(kwh), format_value(tons_tnt)
+        format_value(e),
+        format_value(kwh),
+        format_value(tons_tnt)
     ))
 }
 
@@ -134,15 +144,15 @@ fn solve_fall(args: &str) -> Option<String> {
     let verify = {
         let v_expected = (2.0 * G_GRAV * h).sqrt();
         let diff = (v - v_expected).abs();
-        if diff < 0.0001 {
-            "CLOSE"
-        } else {
-            "MISMATCH"
-        }
+        if diff < 0.0001 { "CLOSE" } else { "MISMATCH" }
     };
     Some(format!(
         "=== FREE FALL SOLUTION ===\n  formula: t = sqrt(2h/g), v = g*t, KE = 0.5*v^2\n  height       = {} m\n  fall time    = {} s\n  impact vel   = {} m/s\n  KE per kg    = {} J/kg\n  verify: v == sqrt(2gh) => {}",
-        format_value(h), format_value(t), format_value(v), format_value(ke), verify
+        format_value(h),
+        format_value(t),
+        format_value(v),
+        format_value(ke),
+        verify
     ))
 }
 
@@ -157,7 +167,10 @@ fn solve_ke(args: &str) -> Option<String> {
     let p = m * v;
     Some(format!(
         "=== KINETIC ENERGY SOLUTION ===\n  formula: KE = 0.5*m*v^2, p = m*v\n  mass     = {} kg\n  velocity = {} m/s\n  KE       = {} J\n  momentum = {} kg*m/s",
-        format_value(m), format_value(v), format_value(ke), format_value(p)
+        format_value(m),
+        format_value(v),
+        format_value(ke),
+        format_value(p)
     ))
 }
 
@@ -171,7 +184,9 @@ fn solve_pe(args: &str) -> Option<String> {
     let pe = m * G_GRAV * h;
     Some(format!(
         "=== POTENTIAL ENERGY SOLUTION ===\n  formula: PE = m*g*h (g = 9.80665 m/s^2)\n  mass   = {} kg\n  height = {} m\n  PE     = {} J",
-        format_value(m), format_value(h), format_value(pe)
+        format_value(m),
+        format_value(h),
+        format_value(pe)
     ))
 }
 
@@ -189,7 +204,10 @@ fn solve_ohm(args: &str) -> Option<String> {
     let p = v * i;
     Some(format!(
         "=== OHM'S LAW SOLUTION ===\n  formula: I = V/R, P = V*I\n  voltage   = {} V\n  resistance = {} ohm\n  current   = {} A\n  power     = {} W",
-        format_value(v), format_value(r), format_value(i), format_value(p)
+        format_value(v),
+        format_value(r),
+        format_value(i),
+        format_value(p)
     ))
 }
 
@@ -206,7 +224,12 @@ fn solve_compound(args: &str) -> Option<String> {
     let interest = amount - principal;
     Some(format!(
         "=== COMPOUND INTEREST ===\n  formula: A = P*(1 + r/n)^(n*t)\n  principal = {}\n  rate      = {}%/year\n  compounds = {}/year\n  years     = {}\n  final     = {}\n  interest  = {}",
-        format_value(principal), format_value(rate * 100.0), format_value(periods), format_value(years), format_value(amount), format_value(interest)
+        format_value(principal),
+        format_value(rate * 100.0),
+        format_value(periods),
+        format_value(years),
+        format_value(amount),
+        format_value(interest)
     ))
 }
 
@@ -222,7 +245,11 @@ fn solve_growth(args: &str) -> Option<String> {
     let doubling_time = (2.0_f64).ln() / rate;
     Some(format!(
         "=== EXPONENTIAL GROWTH/DECAY ===\n  formula: N = N0 * e^(r*t)\n  initial (N0) = {}\n  rate (r)     = {} /time\n  time (t)     = {}\n  final (N)    = {}\n  doubling time = {}",
-        format_value(initial), format_value(rate), format_value(t), format_value(final_val), format_value(doubling_time)
+        format_value(initial),
+        format_value(rate),
+        format_value(t),
+        format_value(final_val),
+        format_value(doubling_time)
     ))
 }
 
@@ -248,7 +275,14 @@ fn solve_stats(args: &str) -> Option<String> {
     let max = sorted.last().copied().unwrap_or(0.0);
     Some(format!(
         "=== STATISTICS ===\n  n            = {}\n  sum          = {}\n  mean         = {}\n  median       = {}\n  std_dev      = {}\n  variance     = {}\n  min          = {}\n  max          = {}",
-        format_value(n), format_value(sum), format_value(mean), format_value(median), format_value(std_dev), format_value(variance), format_value(min), format_value(max)
+        format_value(n),
+        format_value(sum),
+        format_value(mean),
+        format_value(median),
+        format_value(std_dev),
+        format_value(variance),
+        format_value(min),
+        format_value(max)
     ))
 }
 
@@ -268,7 +302,12 @@ fn solve_kinematics(args: &str) -> Option<String> {
     let d2 = v0 * t + 0.5 * a * t * t;
     Some(format!(
         "=== KINEMATICS SOLUTION ===\n  formulas: a = (v-v0)/t, d = (v0+v)*t/2\n  v0           = {} m/s\n  v            = {} m/s\n  t            = {} s\n  a            = {} m/s^2\n  d            = {} m\n  d (alt)      = {} m",
-        format_value(v0), format_value(v), format_value(t), format_value(a), format_value(d), format_value(d2)
+        format_value(v0),
+        format_value(v),
+        format_value(t),
+        format_value(a),
+        format_value(d),
+        format_value(d2)
     ))
 }
 
@@ -292,8 +331,14 @@ fn solve_thermo(args: &str) -> Option<String> {
     let u = 1.5 * n_calc * r_gas * t_calc;
     Some(format!(
         "=== THERMODYNAMICS (Ideal Gas) ===\n  formula: PV = nRT, U = 3/2 nRT\n  P            = {} Pa\n  V            = {} m^3\n  n            = {} mol\n  T            = {} K\n  R            = {} J/(mol*K)\n  verify: PV   = {} J\n  verify: nRT  = {} J\n  U (internal) = {} J",
-        format_value(p_calc), format_value(v_calc), format_value(n_calc), format_value(t_calc), format_value(r_gas),
-        format_value(p_calc * v_calc), format_value(n_calc * r_gas * t_calc), format_value(u)
+        format_value(p_calc),
+        format_value(v_calc),
+        format_value(n_calc),
+        format_value(t_calc),
+        format_value(r_gas),
+        format_value(p_calc * v_calc),
+        format_value(n_calc * r_gas * t_calc),
+        format_value(u)
     ))
 }
 
@@ -316,8 +361,15 @@ fn solve_circuit(args: &str) -> Option<String> {
     let p_parallel = v_ref * i_parallel;
     Some(format!(
         "=== CIRCUIT SOLUTION (2 resistors) ===\n  formulas: R_series = R1+R2, R_parallel = 1/(1/R1+1/R2)\n  R1           = {} ohm\n  R2           = {} ohm\n  R_series     = {} ohm\n  R_parallel   = {} ohm\n  (at V={}V)\n  I_series     = {} A\n  I_parallel   = {} A\n  P_series     = {} W\n  P_parallel   = {} W",
-        format_value(r1), format_value(r2), format_value(r_series), format_value(r_parallel),
-        format_value(v_ref), format_value(i_series), format_value(i_parallel), format_value(p_series), format_value(p_parallel)
+        format_value(r1),
+        format_value(r2),
+        format_value(r_series),
+        format_value(r_parallel),
+        format_value(v_ref),
+        format_value(i_series),
+        format_value(i_parallel),
+        format_value(p_series),
+        format_value(p_parallel)
     ))
 }
 
@@ -333,7 +385,11 @@ fn solve_tvm(args: &str) -> Option<String> {
     let npv = fv - pv;
     Some(format!(
         "=== TIME VALUE OF MONEY ===\n  formula: FV = PV * (1+r)^n\n  PV (present) = {} USD\n  r (periodic) = {}%\n  n (periods)  = {}\n  FV (future)  = {} USD\n  NPV          = {} USD",
-        format_value(pv), format_value(r * 100.0), format_value(n), format_value(fv), format_value(npv)
+        format_value(pv),
+        format_value(r * 100.0),
+        format_value(n),
+        format_value(fv),
+        format_value(npv)
     ))
 }
 
@@ -351,7 +407,10 @@ fn solve_lens(args: &str) -> Option<String> {
     let mag = -di / do_;
     Some(format!(
         "=== THIN LENS SOLUTION ===\n  formula: 1/f = 1/do + 1/di, m = -di/do\n  f (focal)    = {} m\n  do (object)  = {} m\n  di (image)   = {} m\n  m (mag)      = {}x",
-        format_value(f), format_value(do_), format_value(di), format_value(mag)
+        format_value(f),
+        format_value(do_),
+        format_value(di),
+        format_value(mag)
     ))
 }
 

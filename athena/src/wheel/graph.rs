@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::edges::{Aspect, Relationship};
 use super::nodes::Domain;
-use super::{Node, WheelError, WheelResult, ALL_DOMAINS};
+use super::{ALL_DOMAINS, Node, WheelError, WheelResult};
 
 /// Precomputed edge existence table for O(1) `has_edge` lookup.
 /// `EDGE_TABLE[a][b]` is `true` if the wheel has a direct edge between
