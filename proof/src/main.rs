@@ -4772,6 +4772,23 @@ fn cmd_chart(
     let personality = derive_personality(&chart);
 
     if format == OutputFormat::Json {
+        // Item 4: tag the fully-computed chart and the fully-modeled personality
+        // with their epistemic class so a caller can never present an archetype
+        // in the same voice as a verifiable planet longitude.
+        let mut chart_val = serde_json::to_value(&chart).unwrap();
+        let mut personality_val = serde_json::to_value(&personality).unwrap();
+        if let serde_json::Value::Object(o) = &mut chart_val {
+            o.insert(
+                "epistemic".to_string(),
+                serde_json::to_value(laverna::chart::EPHEMERIS_EPISTEMIC).unwrap(),
+            );
+        }
+        if let serde_json::Value::Object(o) = &mut personality_val {
+            o.insert(
+                "epistemic".to_string(),
+                serde_json::to_value(laverna::chart::PERSONALITY_EPISTEMIC).unwrap(),
+            );
+        }
         let value = serde_json::json!({
             "julian_day": jd,
             "date": date_str,
@@ -4779,8 +4796,8 @@ fn cmd_chart(
             "offset_seconds": offset_seconds,
             "ayanamsa": ayanamsa,
             "ayanamsa_system": ayanamsa_system.name(),
-            "chart": serde_json::to_value(&chart).unwrap(),
-            "personality": serde_json::to_value(&personality).unwrap()
+            "chart": chart_val,
+            "personality": personality_val
         });
         println!("{}", serde_json::to_string_pretty(&value).unwrap());
         return;
@@ -6401,7 +6418,7 @@ fn chart_tool(
         }));
     }
 
-    let structured = serde_json::json!({
+    let mut chart_structured = serde_json::json!({
         "julian_day": jd,
         "utc": resolved.utc_iso,
         "offset_seconds": resolved.offset_seconds,
@@ -6411,7 +6428,15 @@ fn chart_tool(
         "bhavas": bhavas_json,
         "grahas": grahas_json
     });
-    Ok(ToolOutput::with_structured(out, structured))
+    // Item 4: the chart is verifiable astronomy — tag it so the caller presents
+    // these longitudes with confidence, distinct from any modeled interpretation.
+    if let serde_json::Value::Object(o) = &mut chart_structured {
+        o.insert(
+            "epistemic".to_string(),
+            serde_json::to_value(laverna::chart::EPHEMERIS_EPISTEMIC).unwrap(),
+        );
+    }
+    Ok(ToolOutput::with_structured(out, chart_structured))
 }
 
 #[cfg(feature = "mcp")]

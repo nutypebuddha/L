@@ -74,6 +74,50 @@ pub enum HouseSystemError {
     PlacidusUnsupportedAtLatitude(f64),
 }
 
+/// Epistemic tag for a value emitted by Lai (Item 4). Makes the
+/// computed-vs-interpreted boundary *structural*: a caller can present a
+/// `computed` value (VSOP87/ELP-2000, Lahiri, gated against a Swiss-ephemeris
+/// oracle) with confidence, but must not present a `modeled` value (a BPHS
+/// interpretation with chosen coefficients) in the same voice.
+///
+/// T79/T80 are the argument for this: five grahas scored backwards for a whole
+/// release and the output looked exactly as confident as it does now. If the
+/// modeled values had arrived tagged `modeled`, the wrongness would still have
+/// been wrong — but it would have been *presented* as a model output, which is
+/// the honest framing whether or not the coefficients are right.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct Epistemic {
+    /// `computed` = verifiable from first principles / an oracle;
+    /// `modeled` = a chosen interpretation with chosen coefficients.
+    pub kind: &'static str,
+    /// Origin of the number (e.g. `vsop87+lahiri`, `bphs_shadbala`).
+    pub source: &'static str,
+    /// Oracle/reference this was checked against, if any.
+    pub verified_against: Option<&'static str>,
+    /// Chosen model coefficients, if this is `modeled`.
+    pub coefficients: Option<&'static [&'static str]>,
+}
+
+/// Chart positions are verifiable astronomy (VSOP87/ELP-2000 → Lahiri sidereal),
+/// gated against a Swiss-ephemeris oracle in CI to 0.01°.
+pub const EPHEMERIS_EPISTEMIC: Epistemic = Epistemic {
+    kind: "computed",
+    source: "vsop87+lahiri",
+    verified_against: Some("swiss_oracle"),
+    coefficients: None,
+};
+
+/// Personality/archetype/pillar weights are a model: defensible, sourced to BPHS,
+/// but a *chosen interpretation* with chosen coefficients (uccha weight `0.06`,
+/// pillar split `1/7`, a clamp ceiling). Tagged `modeled` so the caller never
+/// presents an archetype with the same confidence as a Moon longitude.
+pub const PERSONALITY_EPISTEMIC: Epistemic = Epistemic {
+    kind: "modeled",
+    source: "bphs_shadbala",
+    verified_against: None,
+    coefficients: Some(&["uccha_weight=0.06", "pillar_split=1/7", "clamp_ceiling"]),
+};
+
 /// A complete sky snapshot at a moment in time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChartSnapshot {
@@ -707,5 +751,29 @@ mod tests {
         assert!(output.contains("Bhavas"));
         assert!(output.contains("1st"));
         assert!(output.contains("10th"));
+    }
+}
+
+#[cfg(test)]
+mod epistemic_tests {
+    use super::*;
+
+    #[test]
+    fn computed_chart_tag_is_stable() {
+        let v = serde_json::to_value(EPHEMERIS_EPISTEMIC).unwrap();
+        assert_eq!(v["kind"], "computed");
+        assert_eq!(v["source"], "vsop87+lahiri");
+        assert_eq!(v["verified_against"], "swiss_oracle");
+        assert!(v["coefficients"].is_null());
+    }
+
+    #[test]
+    fn modeled_personality_tag_lists_coefficients() {
+        let v = serde_json::to_value(PERSONALITY_EPISTEMIC).unwrap();
+        assert_eq!(v["kind"], "modeled");
+        assert_eq!(v["source"], "bphs_shadbala");
+        assert!(v["verified_against"].is_null());
+        let coeffs: Vec<String> = serde_json::from_value(v["coefficients"].clone()).unwrap();
+        assert!(coeffs.iter().any(|c| c.starts_with("uccha_weight")));
     }
 }

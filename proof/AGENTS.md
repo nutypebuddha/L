@@ -84,6 +84,14 @@ JSON surface over scraping `--help`/text.
   `error_count`, `refusals`, `diagnostics`. Out-of-scope input is *refused*,
   never silently accepted — trust `passed:false`/`refusals`, not absence of
   output.
+- **Epistemic provenance tags (Item 4).** `chart` JSON tags the fully-computed
+  `chart` block `epistemic: {kind:"computed", source:"vsop87+lahiri",
+  verified_against:"swiss_oracle"}` and the fully-modeled `personality` block
+  `epistemic: {kind:"modeled", source:"bphs_shadbala", coefficients:[...]}`.
+  Present `computed` values (planet longitudes, lagna, bhavas, aspects) with
+  confidence; never present a `modeled` value (archetype, pillar weights,
+  `dominant`) in the same voice. T79/T80: modeled values looked identical to
+  computed ones for a whole release — the tag makes the boundary structural.
 - **`gate validate` verdict is a stable enum, not a bool (Item 3).** The JSON
   carries `verdict` (`ok` | `corrected` | `failed` | `unevaluable`) and
   `fix_count`; the old `passed: bool` is gone. Branch on `verdict` — a
