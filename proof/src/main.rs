@@ -46,6 +46,16 @@ enum OutputFormat {
     Json,
 }
 
+/// Mode for `--explain-binding`. `Text` keeps the human prose on stderr (the
+/// historical behavior); `Json` also emits a structured document of the binding
+/// decision on stdout (Item 2) so a caller can answer "why did it read 8 as the
+/// alignment" from the trace instead of reconstructing a story.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum ExplainBindingMode {
+    Text,
+    Json,
+}
+
 #[derive(Debug, Clone)]
 struct KeyVal {
     key: String,
@@ -118,10 +128,12 @@ enum Commands {
         #[arg(long)]
         timestamp: bool,
         /// Explain the binder's decision: candidates considered, accept/refuse
-        /// reasons, and how each input was bound (name / unit / derived). Prints to
-        /// stderr so JSON `-f json` output on stdout stays intact.
-        #[arg(long)]
-        explain_binding: bool,
+        /// reasons, and how each input was bound (name / unit / derived). `text`
+        /// (default, when given with no value) prints the prose to stderr; `json`
+        /// also emits a structured document to stdout (Item 2) so JSON `-f json`
+        /// output on stdout stays intact.
+        #[arg(long, value_enum, default_missing_value = "text", num_args = 0..=1)]
+        explain_binding: Option<ExplainBindingMode>,
     },
     /// Reverse-route a query to a strategy via the 9-graha wheel
     Route {
@@ -911,8 +923,9 @@ fn main() {
             explain_binding,
         } => {
             if batch {
-                cmd_solve_batch(verbose, explain);
+                cmd_solve_batch(verbose, explain, explain_binding);
             } else if let Some(q) = query {
+                let include_trace = explain_binding == Some(ExplainBindingMode::Json);
                 let result = run_solve(&q, explain_binding);
 
                 // Part 2.3: typed refusals. An empty query lacks the facts to
@@ -962,7 +975,7 @@ fn main() {
                         Err(e) => eprintln!("error: could not write proof to {path}: {e}"),
                     }
                 }
-                print_solve(&result, verbose, explain, format);
+                print_solve(&result, verbose, explain, format, include_trace);
             } else {
                 eprintln!("error: `solve` requires --query <Q> or --batch");
                 std::process::exit(2);
@@ -1800,6 +1813,9 @@ struct SolveResult {
     /// Advisory hint shown when nothing binds: did-you-mean formulas / outputs.
     /// Excluded from the proof payload (advisory, not provable).
     hint: Option<String>,
+    /// Structured binder trace (Item 2). Populated when `--explain-binding` is
+    /// given; empty otherwise. Emitted as JSON when the mode is `json`.
+    explain_binding: BindTrace,
 }
 
 /// Minimal binder: connect the solver's extracted scalars to a registered
@@ -1983,6 +1999,44 @@ enum BindRefusal {
     },
 }
 
+/// Structured record of how the binder bound a query (Item 2). Emitted as JSON
+/// when `--explain-binding=json` so a caller can audit each input's anchor
+/// instead of trusting a prose summary — answering "why did it read 8 as the
+/// alignment" from the trace, not a reconstructed story.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+struct BindTrace {
+    /// The formula that ultimately bound (set by `bind_formula`).
+    pub formula_id: Option<String>,
+    /// Number of equally-good injective assignments at the chosen binding (from
+    /// `best_injective`); `> 1` means the binding was effectively arbitrary.
+    pub tie_count: Option<usize>,
+    /// Per-input account of how it was anchored.
+    pub inputs: Vec<BindTraceInput>,
+    /// How many candidate formulas were considered before one bound.
+    pub candidates_considered: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct BindTraceInput {
+    /// The input name (e.g. `size`, `align`).
+    pub input: String,
+    /// The token in the query that anchored this input (name method), or `None`
+    /// when it was matched by unit/derived alone.
+    pub anchored_by: Option<String>,
+    /// Distance (in tokens) from the anchor token to the bound scalar.
+    pub distance: f64,
+    /// `name` | `unit` | `derived` — how the scalar was matched to the input.
+    pub method: String,
+    /// Value before any unit conversion.
+    pub pre_conversion_value: f64,
+    /// Unit of the scalar before conversion (if known).
+    pub pre_unit: Option<String>,
+    /// Unit of the input after conversion (if known / differs).
+    pub post_unit: Option<String>,
+    /// Whether a unit conversion was applied.
+    pub converted: bool,
+}
+
 /// Connect each extracted scalar to a formula's inputs by nearest name/unit
 /// anchor. Returns `Ok((bindings, used_scalar_indices))` when exactly one
 /// injective assignment fits, or a structured `BindRefusal` (Item 1) describing
@@ -2000,6 +2054,7 @@ fn bind_inputs(
     derived: &HashMap<String, (f64, Option<String>)>,
     explain: bool,
     detail: bool,
+    trace: &mut BindTrace,
 ) -> Result<(Vec<(String, f64)>, Vec<usize>), BindRefusal> {
     // Loose-match a token: lowercase and drop a trailing 's' (>=4 chars) so
     // "bytes" matches "byte", "sizes" matches "size", etc.
@@ -2345,7 +2400,36 @@ fn bind_inputs(
         }
         bindings[inp_i] = Some(val);
         used_idx.push(numbers[assign[ri]].0);
+        // Item 2: record how this input was anchored so it can be emitted as a
+        // structured document (not a prose summary) for an auditing caller.
+        let m = method[ri][assign[ri]].unwrap_or("?");
+        let distance = dist[ri][assign[ri]];
+        let converted = in_u.is_some()
+            && sc_u.is_some()
+            && !unit_eq(in_u.as_ref().unwrap(), sc_u.as_ref().unwrap());
+        let anchored_by = if m == "name" {
+            occ.get(inp_i).and_then(|positions| {
+                let sp = numbers[assign[ri]].0;
+                positions
+                    .iter()
+                    .min_by_key(|&&pos| (pos as i64 - sp as i64).abs())
+                    .map(|&pos| toks[pos].clone())
+            })
+        } else {
+            None
+        };
+        trace.inputs.push(BindTraceInput {
+            input: inputs[inp_i].clone(),
+            anchored_by,
+            distance,
+            method: m.to_string(),
+            pre_conversion_value: raw,
+            pre_unit: sc_u.clone(),
+            post_unit: in_u.clone(),
+            converted,
+        });
     }
+    trace.tie_count = Some(count);
     Ok((zip_bindings(inputs, &bindings), used_idx))
 }
 
@@ -2748,6 +2832,7 @@ fn solve_inverse_fallback(
                 &HashMap::new(),
                 false,
                 false,
+                &mut BindTrace::default(),
             ) {
                 let leftover: Vec<(usize, f64, Option<String>)> = numbers
                     .iter()
@@ -2782,6 +2867,7 @@ fn bind_formula(
     numerical: &[f64],
     reg: &FormulaRegistry,
     explain: bool,
+    trace: &mut BindTrace,
 ) -> Result<Vec<RuleApplication>, Vec<BindRefusal>> {
     let mut refusals: Vec<BindRefusal> = Vec::new();
     if numerical.is_empty() {
@@ -2911,6 +2997,7 @@ fn bind_formula(
                 app.formula_id
             );
         }
+        trace.formula_id = Some(app.formula_id.clone());
         return Ok(vec![app]);
     }
 
@@ -2965,6 +3052,7 @@ fn bind_formula(
                 id_score(f)
             );
         }
+        trace.candidates_considered += 1;
         match bind_inputs(
             &f.inputs,
             &f.input_types,
@@ -2975,6 +3063,7 @@ fn bind_formula(
             &HashMap::new(),
             explain,
             detail,
+            trace,
         ) {
             Ok((b, _used)) => bound.push((f, b)),
             Err(r) => refusals.push(r),
@@ -3054,6 +3143,7 @@ fn bind_formula(
                     &derived,
                     explain,
                     true,
+                    &mut BindTrace::default(),
                 ) {
                     Ok((b, _)) => {
                         if explain {
@@ -3103,6 +3193,7 @@ fn bind_formula(
             current = consumers[0].0;
             current_bind = consumers[0].1.clone();
         }
+        trace.formula_id = Some(first.id.clone());
         return Ok(chain);
     }
 
@@ -3116,6 +3207,7 @@ fn bind_formula(
                 app.formula_id
             );
         }
+        trace.formula_id = Some(app.formula_id.clone());
         return Ok(vec![app]);
     }
 
@@ -3123,7 +3215,7 @@ fn bind_formula(
 }
 
 /// Run the full `solve` pipeline and collect every result field.
-fn run_solve(query: &str, explain_binding: bool) -> SolveResult {
+fn run_solve(query: &str, explain_binding: Option<ExplainBindingMode>) -> SolveResult {
     let formula_reg = load_formula_registry();
     let entity_reg = load_entity_registry();
     let forms = load_shikai_forms();
@@ -3203,10 +3295,13 @@ fn run_solve(query: &str, explain_binding: bool) -> SolveResult {
         .map(|t| (t.text.clone(), t.provenance.clone()))
         .collect();
 
-    let (rule_applications, refusals) = match bind_formula(query, &numerical, &formula_reg, explain_binding) {
-        Ok(apps) => (apps, Vec::new()),
-        Err(refs) => (Vec::new(), refs),
-    };
+    let explain = explain_binding.is_some();
+    let mut trace = BindTrace::default();
+    let (rule_applications, refusals) =
+        match bind_formula(query, &numerical, &formula_reg, explain, &mut trace) {
+            Ok(apps) => (apps, Vec::new()),
+            Err(refs) => (Vec::new(), refs),
+        };
 
     // Advisory hint when nothing bound: point at near-miss formulas/outputs so a
     // wrong query is self-correcting instead of silently empty (fail-loud UX).
@@ -3242,6 +3337,7 @@ fn run_solve(query: &str, explain_binding: bool) -> SolveResult {
         rule_applications,
         refusals,
         hint,
+        explain_binding: trace,
     }
 }
 
@@ -3386,7 +3482,7 @@ fn cmd_verify(path: &str, format: OutputFormat) {
     let digest_ok = !recorded_digest.is_empty() && recorded_digest == recomputed_digest_of_recorded;
 
     // 2. Recomputation: re-run the descent and rebuild the canonical payload.
-    let recomputed_payload = build_proof_payload(&run_solve(&query, false));
+    let recomputed_payload = build_proof_payload(&run_solve(&query, None));
     let recomputed_digest = proof_digest(&recomputed_payload);
     let recompute_ok = recorded_payload == recomputed_payload;
 
@@ -3905,9 +4001,15 @@ fn chrono_now() -> String {
 }
 
 /// Render `solve` as text or JSON.
-fn print_solve(result: &SolveResult, verbose: bool, explain: bool, format: OutputFormat) {
+fn print_solve(
+    result: &SolveResult,
+    verbose: bool,
+    explain: bool,
+    format: OutputFormat,
+    include_trace: bool,
+) {
     if format == OutputFormat::Json {
-        let value = solve_to_json(result);
+        let value = solve_to_json(result, include_trace);
         println!("{}", serde_json::to_string(&value).unwrap());
         return;
     }
@@ -4115,7 +4217,7 @@ fn print_solve(result: &SolveResult, verbose: bool, explain: bool, format: Outpu
 }
 
 /// Build the JSON rendering of a `solve` result (self-describing for LLM callers).
-fn solve_to_json(result: &SolveResult) -> Value {
+fn solve_to_json(result: &SolveResult, include_trace: bool) -> Value {
     let mut tokens = serde_json::to_value(&result.matrix.tokens).unwrap();
     if let Value::Array(arr) = &mut tokens {
         for (i, tok_val) in arr.iter_mut().enumerate() {
@@ -4177,7 +4279,7 @@ fn solve_to_json(result: &SolveResult) -> Value {
         .iter()
         .map(|r| serde_json::json!({ "refused": r }))
         .collect();
-    serde_json::json!({
+    let mut value = serde_json::json!({
         "query": result.query,
         "intent": result.intent,
         "domain": result.domain,
@@ -4194,12 +4296,24 @@ fn solve_to_json(result: &SolveResult) -> Value {
         "rule_applications": rule_applications,
         "refusals": refusals,
         "dominant_domains": result.matrix.dominant_domains
-    })
+    });
+    // Item 2: when `--explain-binding=json` was requested, attach the structured
+    // binder trace as a first-class field of the solve document — so a caller can
+    // answer "why did it read N as input X" from JSON, not from the stderr prose.
+    if include_trace {
+        if let Value::Object(o) = &mut value {
+            o.insert(
+                "explain_binding".to_string(),
+                serde_json::to_value(&result.explain_binding).unwrap(),
+            );
+        }
+    }
+    value
 }
 
 /// Batch mode: read queries from stdin (JSONL `{"query": "..."}` or one per line)
 /// and emit one JSON object per line (JSONL) — amortizes the registry load.
-fn cmd_solve_batch(_verbose: bool, _explain: bool) {
+fn cmd_solve_batch(_verbose: bool, _explain: bool, explain_binding: Option<ExplainBindingMode>) {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
@@ -4220,8 +4334,9 @@ fn cmd_solve_batch(_verbose: bool, _explain: bool) {
         } else {
             line.to_string()
         };
-        let result = run_solve(&query, false);
-        let value = solve_to_json(&result);
+        let include_trace = explain_binding == Some(ExplainBindingMode::Json);
+        let result = run_solve(&query, explain_binding);
+        let value = solve_to_json(&result, include_trace);
         let _ = writeln!(out, "{}", serde_json::to_string(&value).unwrap());
     }
 }
@@ -7452,7 +7567,7 @@ mod proof_tests {
         // Part 2.6: every proof object must pin the corpus it was computed
         // against (T35 embedded corpus) so a verifier can reject proofs that
         // silently drift the knowledge base.
-        let result = run_solve("दशम भाव मे बुध", false);
+        let result = run_solve("दशम भाव मे बुध", None);
         let proof = build_proof_object(&result, false);
         let corpus = proof
             .get("corpus")
@@ -7465,7 +7580,7 @@ mod proof_tests {
     #[test]
     fn proof_digest_is_stable_without_timestamp() {
         // T53: with timestamp off, two proofs of the same query are byte-identical.
-        let result = run_solve("दशम भाव मे बुध", false);
+        let result = run_solve("दशम भाव मे बुध", None);
         let a = build_proof_object(&result, false);
         let b = build_proof_object(&result, false);
         assert_eq!(a.to_string(), b.to_string());
@@ -7479,10 +7594,10 @@ mod proof_tests {
     fn verify_recomputation_matches_recorded_proof() {
         // Recompute path used by `laverna verify`: rebuild the canonical payload
         // from the recorded query and confirm it equals the recorded payload.
-        let result = run_solve("दशम भाव मे बुध", false);
+        let result = run_solve("दशम भाव मे बुध", None);
         let proof = build_proof_object(&result, false);
         let recorded = proof_payload_view(&proof);
-        let recomputed = build_proof_payload(&run_solve(proof["query"].as_str().unwrap(), false));
+        let recomputed = build_proof_payload(&run_solve(proof["query"].as_str().unwrap(), None));
         assert_eq!(recorded, recomputed);
         assert_eq!(proof_digest(&recorded), proof_digest(&recomputed));
     }
@@ -9958,14 +10073,14 @@ mod binder_tests {
     fn bind(query: &str) -> Vec<RuleApplication> {
         let reg = load_formula_registry();
         let numerical = extract_numerical_values(query);
-        bind_formula(query, &numerical, &reg, false).unwrap_or_default()
+        bind_formula(query, &numerical, &reg, false, &mut BindTrace::default()).unwrap_or_default()
     }
 
     /// Run the binder and return its structured refusals (Item 1 contract).
     fn bind_refusals(query: &str) -> Vec<BindRefusal> {
         let reg = load_formula_registry();
         let numerical = extract_numerical_values(query);
-        match bind_formula(query, &numerical, &reg, false) {
+        match bind_formula(query, &numerical, &reg, false, &mut BindTrace::default()) {
             Ok(_) => Vec::new(),
             Err(r) => r,
         }
@@ -9981,7 +10096,10 @@ mod binder_tests {
         types.insert("size".to_string(), Some("bytes".to_string()));
         let aliases = HashMap::new();
         let var_tokens = HashSet::new();
-        let toks: Vec<String> = ["size", "13", "celsius"].iter().map(|s| s.to_string()).collect();
+        let toks: Vec<String> = ["size", "13", "celsius"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         let numbers = vec![(2usize, 13.0, Some("celsius".to_string()))];
         let derived = HashMap::new();
         let r = bind_inputs(
@@ -9994,6 +10112,7 @@ mod binder_tests {
             &derived,
             false,
             false,
+            &mut BindTrace::default(),
         )
         .expect_err("celsius must not fill a bytes input");
         match r {
@@ -10033,10 +10152,13 @@ mod binder_tests {
             &derived,
             false,
             false,
+            &mut BindTrace::default(),
         )
         .expect_err("no name anchor for untyped inputs");
         match r {
-            BindRefusal::NoNameAnchor { inputs: unbound, .. } => {
+            BindRefusal::NoNameAnchor {
+                inputs: unbound, ..
+            } => {
                 assert!(unbound.contains(&"a".to_string()));
                 assert!(unbound.contains(&"b".to_string()));
             }
@@ -10182,14 +10304,55 @@ mod binder_tests {
     #[test]
     fn binder_deterministic_json() {
         let q = "padded extent of a struct aligned to 8 bytes, the enum contributes max_variant 13 and disc 2";
-        let a = serde_json::to_string(&solve_to_json(&run_solve(q, false))).unwrap();
-        let b = serde_json::to_string(&solve_to_json(&run_solve(q, false))).unwrap();
+        let a = serde_json::to_string(&solve_to_json(&run_solve(q, None), false)).unwrap();
+        let b = serde_json::to_string(&solve_to_json(&run_solve(q, None), false)).unwrap();
         assert_eq!(a, b, "two-hop JSON must be byte-identical across runs");
         assert!(a.contains("rust_enum_size"), "missing step 1");
         assert!(a.contains("rust_struct_padded_size"), "missing step 2");
         assert!(
             a.contains("bytes"),
             "output unit must be carried into the chain"
+        );
+    }
+
+    /// Item 2: `--explain-binding=json` attaches a structured binder trace to the
+    /// solve JSON — so a caller can answer "why did it read N as input X" from the
+    /// document, not from the stderr prose. Absent the flag (or `=text`) the field
+    /// is omitted entirely.
+    #[test]
+    fn explain_binding_json_is_structured() {
+        let q = "padded extent of a struct aligned to 8 bytes, the enum contributes max_variant 13 and disc 2";
+        // `=json` → field present with the expected shape.
+        let on = solve_to_json(&run_solve(q, Some(ExplainBindingMode::Json)), true);
+        let on: serde_json::Value = serde_json::to_value(&on).unwrap();
+        let trace = on
+            .get("explain_binding")
+            .expect("explain_binding must be present with =json");
+        assert!(
+            trace["formula_id"].is_string(),
+            "formula_id must be a string"
+        );
+        let inputs = trace["inputs"]
+            .as_array()
+            .expect("explain_binding.inputs must be an array");
+        assert!(!inputs.is_empty(), "trace must record at least one input");
+        for inp in inputs {
+            assert!(inp["input"].is_string());
+            assert!(
+                inp["method"].is_string(),
+                "method must be name/unit/derived"
+            );
+            assert!(inp["pre_conversion_value"].is_number());
+            assert!(inp["distance"].is_number());
+        }
+        assert!(trace["tie_count"].is_number(), "tie_count must be a number");
+
+        // Absent flag → field omitted (no contract drift for default JSON).
+        let off = solve_to_json(&run_solve(q, None), false);
+        let off: serde_json::Value = serde_json::to_value(&off).unwrap();
+        assert!(
+            off.get("explain_binding").is_none(),
+            "explain_binding must be omitted without the flag"
         );
     }
 

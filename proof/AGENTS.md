@@ -104,9 +104,18 @@ JSON surface over scraping `--help`/text.
   `detail` string may change but `kind` is API surface. Recommended responses:
   `ambiguous` → ask the person which reading they meant; `no_name_anchor` →
   rephrase naming inputs, retry once; `unit_mismatch` → tell the person their
-  units don't compose, do **not** retry; `search_too_large` → split the query,
-  retryable. The `[bind] REFUSED: …` stderr line is preserved for humans but is
-  not a contract.
+   units don't compose, do **not** retry; `search_too_large` → split the query,
+   retryable. The `[bind] REFUSED: …` stderr line is preserved for humans but is
+   not a contract.
+- **Binder trace is a structured document, not a story (Item 2).** `solve
+   --explain-binding=json` attaches `explain_binding` to the solve JSON:
+   `{formula_id, candidates_considered, tie_count, inputs:[{input, anchored_by,
+   distance, method, pre_conversion_value, pre_unit, post_unit, converted}]}`.
+   Use this to answer "why did it read N as input X" — `method` is `name`/`unit`/
+   `derived`, `anchored_by` is the query token, `tie_count > 1` means the binding
+   was effectively arbitrary (arbitrary → treat the binding as low-trust). The
+   `=text` mode (or no value) prints the human prose to stderr and omits the
+   field from JSON, so `-f json` stdout stays clean.
 - **Deterministic.** Outputs are sorted by stable key (determinism rule in
   root AGENTS.md); identical input → byte-identical JSON across runs. Safe to
   diff or cache.
