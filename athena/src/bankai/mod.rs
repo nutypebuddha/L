@@ -388,10 +388,10 @@ impl Bankai {
                         let domain_aligned = formula.domain == entity_sign;
                         formula_domain_aligned.insert(formula_id.clone(), domain_aligned);
                         for input in &formula.inputs {
-                            if !args_map.contains_key(input)
-                                && let Some(v) = entity.values.get(input)
-                            {
-                                args_map.insert(input.clone(), *v);
+                            if !args_map.contains_key(input) {
+                                if let Some(v) = entity.values.get(input) {
+                                    args_map.insert(input.clone(), *v);
+                                }
                             }
                         }
                     }

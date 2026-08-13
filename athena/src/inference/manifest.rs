@@ -102,10 +102,10 @@ impl ModelManifest {
 /// Manifest search directories, in priority order (mirrors model discovery).
 pub fn manifest_search_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![PathBuf::from("./capstone/")];
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(exe_dir) = exe.parent()
-    {
-        dirs.push(exe_dir.join("capstone"));
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            dirs.push(exe_dir.join("capstone"));
+        }
     }
     if let Ok(val) = std::env::var("XDG_CONFIG_HOME") {
         if !val.is_empty() {

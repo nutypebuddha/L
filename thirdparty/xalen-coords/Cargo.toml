@@ -1,0 +1,16 @@
+[package]
+name = "xalen-coords"
+version = "0.6.0"
+edition = "2021"
+license = "Apache-2.0 AND BSD-3-Clause"
+description = "Coordinate frames, precession, nutation, and frame transforms (vendored copy)"
+repository = "https://github.com/vedika-io/xalen-ephemeris"
+
+[lib]
+name = "xalen_coords"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+xalen-time = { path = "../xalen-time" }

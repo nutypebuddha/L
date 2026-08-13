@@ -3,7 +3,7 @@
 //! Measures the O(1) word-indexed search against the O(N×fields) linear-scan
 //! fallback. With the word index, single-token lookups should be ~100× faster.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use athena::formula::{Formula, FormulaRegistry};
 use athena::wheel::Domain;

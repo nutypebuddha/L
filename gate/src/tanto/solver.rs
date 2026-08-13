@@ -162,7 +162,11 @@ fn solve_fall(args: &str) -> Option<String> {
     let verify = {
         let v_expected = (2.0 * G_GRAV * h).sqrt();
         let diff = (v - v_expected).abs();
-        if diff < 0.0001 { "CLOSE" } else { "MISMATCH" }
+        if diff < 0.0001 {
+            "CLOSE"
+        } else {
+            "MISMATCH"
+        }
     };
     Some(format!(
         "=== FREE FALL SOLUTION ===

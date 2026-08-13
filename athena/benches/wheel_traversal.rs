@@ -3,7 +3,7 @@
 //! Measures shortest-path finding, aspect computation, and node lookup
 //! across the 9-node Vedic graha wheel.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use athena::wheel::{Domain, WheelGraph};
 

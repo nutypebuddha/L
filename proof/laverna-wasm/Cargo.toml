@@ -1,7 +1,7 @@
 [package]
 name = "laverna-wasm"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
 description = "WebAssembly bindings for L.ai · Proof (Laverna) — deterministic solve/verify"
 license = "Apache-2.0"
 publish = false

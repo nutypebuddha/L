@@ -8,7 +8,7 @@
 //! the brute-force knapsack enumerator can handle. For bounded knapsack,
 //! use the default `knapsack` shape instead.
 
-use good_lp::{Solution, SolverModel, variable, variables};
+use good_lp::{variable, variables, Solution, SolverModel};
 use std::collections::HashMap;
 
 use super::{Allocation, Item, Schema};
@@ -89,10 +89,10 @@ pub fn solve_milp(schema: &Schema) -> Result<Allocation, String> {
         let item = item_by_id.get(item_id_a.as_str()).unwrap();
         if let Some(reqs) = &item.requires {
             for req in reqs {
-                if let Ok((target_id, _op, _threshold)) = super::parse_prereq(req)
-                    && let Some((_, var_b)) = vars_and_ids.iter().find(|(id, _)| *id == target_id)
-                {
-                    problem = problem.with(*var_a << *var_b);
+                if let Ok((target_id, _op, _threshold)) = super::parse_prereq(req) {
+                    if let Some((_, var_b)) = vars_and_ids.iter().find(|(id, _)| *id == target_id) {
+                        problem = problem.with(*var_a << *var_b);
+                    }
                 }
             }
         }

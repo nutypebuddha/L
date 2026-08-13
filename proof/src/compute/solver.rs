@@ -144,7 +144,11 @@ fn solve_fall(args: &str) -> Option<String> {
     let verify = {
         let v_expected = (2.0 * G_GRAV * h).sqrt();
         let diff = (v - v_expected).abs();
-        if diff < 0.0001 { "CLOSE" } else { "MISMATCH" }
+        if diff < 0.0001 {
+            "CLOSE"
+        } else {
+            "MISMATCH"
+        }
     };
     Some(format!(
         "=== FREE FALL SOLUTION ===\n  formula: t = sqrt(2h/g), v = g*t, KE = 0.5*v^2\n  height       = {} m\n  fall time    = {} s\n  impact vel   = {} m/s\n  KE per kg    = {} J/kg\n  verify: v == sqrt(2gh) => {}",

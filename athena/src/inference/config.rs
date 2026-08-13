@@ -14,7 +14,8 @@ use std::path::PathBuf;
 pub const DEFAULT_MODEL_FILENAME: &str = "qwen2.5-0.5b-instruct-q4_k_m.gguf";
 
 /// Default system prompt for the copilot
-pub const DEFAULT_SYSTEM_PROMPT: &str = "You are Athena's copilot — a helpful reasoning assistant. \
+pub const DEFAULT_SYSTEM_PROMPT: &str =
+    "You are Athena's copilot — a helpful reasoning assistant. \
 You assist with formula suggestions, natural language explanations, and routing hints. \
 You do NOT perform computation — Athena's symbolic engine handles that. \
 Keep responses concise and accurate.";
@@ -25,10 +26,10 @@ pub const DEFAULT_ENDPOINT_URL: &str = "http://127.0.0.1:8080/v1";
 /// The model cache directory: `$XDG_CACHE_HOME/athena/models/`,
 /// falling back to `~/.cache/athena/models/`.
 pub fn model_cache_dir() -> Option<PathBuf> {
-    if let Ok(val) = std::env::var("XDG_CACHE_HOME")
-        && !val.is_empty()
-    {
-        return Some(PathBuf::from(val).join("athena").join("models"));
+    if let Ok(val) = std::env::var("XDG_CACHE_HOME") {
+        if !val.is_empty() {
+            return Some(PathBuf::from(val).join("athena").join("models"));
+        }
     }
     let home = std::env::var("HOME").ok()?;
     Some(PathBuf::from(home).join(".cache/athena/models"))
@@ -42,10 +43,10 @@ pub fn model_search_dirs() -> Vec<PathBuf> {
     let mut dirs = vec![PathBuf::from("./models/")];
     // Tarball bundle: binary and models/ sit side by side, so the bundled
     // model is found no matter which directory athena is invoked from.
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(exe_dir) = exe.parent()
-    {
-        dirs.push(exe_dir.join("models"));
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            dirs.push(exe_dir.join("models"));
+        }
     }
     if let Some(cache) = model_cache_dir() {
         dirs.push(cache);
@@ -187,19 +188,19 @@ impl InferenceConfig {
         if let Some(mt) = m.model.max_tokens {
             self.max_tokens = mt;
         }
-        if let Some(prompt) = &m.prompt
-            && let Some(system) = &prompt.system
-        {
-            self.system_prompt = system.clone();
+        if let Some(prompt) = &m.prompt {
+            if let Some(system) = &prompt.system {
+                self.system_prompt = system.clone();
+            }
         }
     }
 
     /// Apply environment variable overrides.
     fn apply_env(&mut self) {
-        if let Ok(val) = std::env::var("ATHENA_INFERENCE_BACKEND")
-            && let Ok(kind) = val.parse::<BackendKind>()
-        {
-            self.backend = kind;
+        if let Ok(val) = std::env::var("ATHENA_INFERENCE_BACKEND") {
+            if let Ok(kind) = val.parse::<BackendKind>() {
+                self.backend = kind;
+            }
         }
         if let Ok(val) = std::env::var("ATHENA_MODEL_PATH") {
             self.model_path = Some(val);
@@ -210,20 +211,20 @@ impl InferenceConfig {
         if let Ok(val) = std::env::var("ATHENA_API_KEY") {
             self.api_key = Some(val);
         }
-        if let Ok(val) = std::env::var("ATHENA_TEMPERATURE")
-            && let Ok(v) = val.parse::<f64>()
-        {
-            self.temperature = v;
+        if let Ok(val) = std::env::var("ATHENA_TEMPERATURE") {
+            if let Ok(v) = val.parse::<f64>() {
+                self.temperature = v;
+            }
         }
-        if let Ok(val) = std::env::var("ATHENA_MAX_TOKENS")
-            && let Ok(v) = val.parse::<usize>()
-        {
-            self.max_tokens = v;
+        if let Ok(val) = std::env::var("ATHENA_MAX_TOKENS") {
+            if let Ok(v) = val.parse::<usize>() {
+                self.max_tokens = v;
+            }
         }
-        if let Ok(val) = std::env::var("ATHENA_CONTEXT_SIZE")
-            && let Ok(v) = val.parse::<usize>()
-        {
-            self.context_size = v;
+        if let Ok(val) = std::env::var("ATHENA_CONTEXT_SIZE") {
+            if let Ok(v) = val.parse::<usize>() {
+                self.context_size = v;
+            }
         }
         if let Ok(val) = std::env::var("ATHENA_SYSTEM_PROMPT") {
             self.system_prompt = val;
@@ -337,10 +338,10 @@ fn dirs_config_dir() -> Option<PathBuf> {
 
 /// Simple shell-style tilde expansion.
 fn shellexpand(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/")
-        && let Ok(home) = std::env::var("HOME")
-    {
-        return PathBuf::from(home).join(rest);
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
     }
     PathBuf::from(path)
 }

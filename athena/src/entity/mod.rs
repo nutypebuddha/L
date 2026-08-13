@@ -269,25 +269,25 @@ impl SeedEntity {
     /// Build a `VedicClassification` from this seed entity's human-friendly fields.
     pub fn to_vedic_classification(&self) -> VedicClassification {
         let mut vc = VedicClassification::new();
-        if let Some(ref g) = self.graha
-            && let Some(graha) = Graha::parse(g)
-        {
-            vc = vc.with_graha(graha, 0.9);
+        if let Some(ref g) = self.graha {
+            if let Some(graha) = Graha::parse(g) {
+                vc = vc.with_graha(graha, 0.9);
+            }
         }
-        if let Some(ref n) = self.nakshatra
-            && let Some(nak) = Nakshatra::parse(n)
-        {
-            vc = vc.with_nakshatra(nak, 0.8);
+        if let Some(ref n) = self.nakshatra {
+            if let Some(nak) = Nakshatra::parse(n) {
+                vc = vc.with_nakshatra(nak, 0.8);
+            }
         }
-        if let Some(ref g) = self.guna
-            && let Some(guna) = Guna::parse(g)
-        {
-            vc = vc.with_guna(guna, 0.8);
+        if let Some(ref g) = self.guna {
+            if let Some(guna) = Guna::parse(g) {
+                vc = vc.with_guna(guna, 0.8);
+            }
         }
-        if let Some(ref t) = self.tattva
-            && let Some(elem) = VedicElement::parse(t)
-        {
-            vc = vc.with_vedic_element(elem, 0.8);
+        if let Some(ref t) = self.tattva {
+            if let Some(elem) = VedicElement::parse(t) {
+                vc = vc.with_vedic_element(elem, 0.8);
+            }
         }
         vc.confidence = 0.85;
         vc

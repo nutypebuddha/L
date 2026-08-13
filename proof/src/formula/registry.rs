@@ -535,13 +535,13 @@ impl FormulaRegistry {
             .collect();
 
         // Single-token: word index fast path
-        if tokens.len() == 1
-            && let Some(ids) = self.word_index.get(&kw)
-        {
-            let mut hits: Vec<&Formula> =
-                ids.iter().filter_map(|id| self.formulas.get(id)).collect();
-            hits.sort_by(|a, b| a.id.cmp(&b.id));
-            return hits;
+        if tokens.len() == 1 {
+            if let Some(ids) = self.word_index.get(&kw) {
+                let mut hits: Vec<&Formula> =
+                    ids.iter().filter_map(|id| self.formulas.get(id)).collect();
+                hits.sort_by(|a, b| a.id.cmp(&b.id));
+                return hits;
+            }
         }
 
         // Multi-token: check each token against word index, union results

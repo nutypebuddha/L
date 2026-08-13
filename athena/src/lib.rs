@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 //! # Athena
 //!
 //! Relational intelligence engine — formulas, not facts.
@@ -50,8 +51,8 @@ pub mod llm {
         LlmRouteResult, LlmRouter, QueryCategory, RouterIntent, RouterToken,
     };
     pub use crate::inference::{
-        BackendKind, Capability, HealthStatus, InferenceBackend, InferenceError, InferenceRequest,
-        InferenceResponse, config::InferenceConfig,
+        config::InferenceConfig, BackendKind, Capability, HealthStatus, InferenceBackend,
+        InferenceError, InferenceRequest, InferenceResponse,
     };
 }
 
@@ -66,16 +67,16 @@ pub mod prelude {
     pub use crate::gates::{GateOutput, GateResult};
     pub use crate::influence::{DomainInfluence, InfluenceEngine, InfluenceMap};
     pub use crate::ledger::{
-        Event, EventKind, Ledger, record_detailed, record_event, session_ledger,
+        record_detailed, record_event, session_ledger, Event, EventKind, Ledger,
     };
     pub use crate::primitive::{
-        NandDag, NandExpression, and, implies, nand, nor, not, or, xnor, xor,
+        and, implies, nand, nor, not, or, xnor, xor, NandDag, NandExpression,
     };
     pub use crate::shikai::{Ambiguity, Intent, Shikai, ShikaiQuery};
-    pub use crate::tanto::{TantoEnv, evaluate as tanto_evaluate};
+    pub use crate::tanto::{evaluate as tanto_evaluate, TantoEnv};
     pub use crate::wheel::{Aspect, Domain, Node, WheelGraph};
     pub use crate::zanpakuto::{
-        AccessTier, Capability, Identity, Stage, Zanpakuto, guest_identity,
+        guest_identity, AccessTier, Capability, Identity, Stage, Zanpakuto,
     };
 
     pub use crate::error::{LaiError, ReasoningError, ValidationError};

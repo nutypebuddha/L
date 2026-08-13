@@ -11,14 +11,16 @@ members = [
 ]
 
 [workspace.package]
-edition = "2024"
-# MSRV floor is 1.85. The binding reason is NOT hashbrown/indexmap (those are
-# transitive via toml and could be downgraded) — it is the xalen-* ephemeris
-# crates: xalen-vedic, xalen-houses, xalen-ayanamsa, xalen-time, xalen-coords
-# (direct, non-optional deps of `laverna`), plus xalen-stars transitively. They
-# are published as `edition = "2024"` with NO `rust-version` declared, and
-# edition2024 requires rustc >= 1.85. Do NOT try to lower the floor by re-pinning
-# indexmap/hashbrown — the xalen crates cannot move below 1.85.
+edition = "2021"
+# MSRV. The `xalen-*` ephemeris crates (direct deps of `laverna`) are now VENDORED
+# under `thirdparty/` and downgraded to edition 2021 (let-chains rewritten,
+# `LazyLock` swapped for `OnceLock`), so the critical-path ephemeris is no longer
+# tied to edition 2024 or to edition-2024 let-chains (all workspace let-chains
+# were rewritten to nested `if`/`if let`). `idna_adapter` is pinned to 1.1.0
+# (edition 2021) to drop the `icu`/`zerovec` stack — same IDNA output, ~44 fewer
+# deps. The practical floor is nonetheless 1.85: modern transitive crates in the
+# lock (`clap` 4.6, `rand` 0.10, `time` 0.3.55, `getrandom` 0.4, …) adopted
+# edition 2024, stabilized in rustc 1.85.
 rust-version = "1.85"
 license = "Apache-2.0"
 authors = ["nutypebuddha <nutypebuddha@proton.me>"]

@@ -11,8 +11,8 @@
 //! back to the deterministic engine.
 
 use anyhow::Result;
-use serde_json::Value;
 use serde_json::json;
+use serde_json::Value;
 
 use crate::llm::{AgentStep, Llm, Tool};
 use crate::mcp_client::McpClient;

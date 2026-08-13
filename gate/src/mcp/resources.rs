@@ -1,4 +1,4 @@
-use crate::inference::json::{JsonValue, stringify};
+use crate::inference::json::{stringify, JsonValue};
 use crate::kb::facts::KnowledgeBase;
 
 pub fn list_resources(kb: &KnowledgeBase) -> JsonValue {

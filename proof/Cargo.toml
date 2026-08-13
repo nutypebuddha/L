@@ -1,7 +1,7 @@
 [package]
 name = "laverna"
 version = "0.4.2"
-edition = "2024"
+edition.workspace = true
 description = "L.ai — deterministic reasoning engine + per-token validation (NAND-to-verify, CID gates, Tanto compute)"
 authors = ["nutypebuddha <nutypebuddha@proton.me>"]
 license = "Apache-2.0"
@@ -42,11 +42,11 @@ chrono-tz = "0.10"
 # Compute
 vsop87 = "3.0.0"
 astro = "2.0.0"
-xalen-vedic = "0.6"
-xalen-houses = "0.6"
-xalen-ayanamsa = "0.6"
-xalen-time = "0.6"
-xalen-coords = "0.6"
+xalen-vedic = { path = "../thirdparty/xalen-vedic" }
+xalen-houses = { path = "../thirdparty/xalen-houses" }
+xalen-ayanamsa = { path = "../thirdparty/xalen-ayanamsa" }
+xalen-time = { path = "../thirdparty/xalen-time" }
+xalen-coords = { path = "../thirdparty/xalen-coords" }
 
 # Gate (CID) — per-token validation + Tanto compute engine
 cid = { package = "lai-gate", path = "../gate" }

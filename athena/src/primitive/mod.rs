@@ -7,6 +7,6 @@
 //! for backward compatibility.
 
 pub use lai_core::primitive::{
-    ExprNode, NandDag, NandExprError, NandExpression, NandNode, add4, and, bits_to_u8, full_adder,
-    half_adder, implies, nand, nor, not, or, u8_to_bits, xnor, xor,
+    add4, and, bits_to_u8, full_adder, half_adder, implies, nand, nor, not, or, u8_to_bits, xnor,
+    xor, ExprNode, NandDag, NandExprError, NandExpression, NandNode,
 };

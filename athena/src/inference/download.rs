@@ -8,8 +8,8 @@
 //! Tarball installs never hit this path — the bundled `models/` dir next to
 //! the binary is found first by `resolve_model_path`.
 
+use crate::inference::config::{model_cache_dir, InferenceConfig, DEFAULT_MODEL_FILENAME};
 use crate::inference::InferenceError;
-use crate::inference::config::{DEFAULT_MODEL_FILENAME, InferenceConfig, model_cache_dir};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::PathBuf;

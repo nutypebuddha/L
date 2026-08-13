@@ -1,6 +1,6 @@
-use crate::inference::InferenceEngine;
-use crate::inference::json::{JsonValue, stringify};
+use crate::inference::json::{stringify, JsonValue};
 use crate::inference::request::ValidationRequest;
+use crate::inference::InferenceEngine;
 
 pub fn list_tools() -> JsonValue {
     JsonValue::Array(vec![

@@ -6,7 +6,7 @@
 
 use crate::bankai::Bankai;
 
-use super::{Gate, GateOutput, gate_output};
+use super::{gate_output, Gate, GateOutput};
 
 /// Validates claims by attempting to derive them from known formulas.
 pub struct FactGate<'a> {

@@ -1,7 +1,7 @@
 use crate::core::ball::{Ball, TokenCandidate};
 use crate::core::pin::{Gate, PinField};
 use crate::gates::{
-    GateValidator, confidence::ConfidenceGate, fact::FactGate, logic::LogicGate, math::MathGate,
+    confidence::ConfidenceGate, fact::FactGate, logic::LogicGate, math::MathGate, GateValidator,
 };
 use crate::kb::facts::KnowledgeBase;
 

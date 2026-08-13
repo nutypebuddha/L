@@ -5280,7 +5280,11 @@ impl KnowledgeBase {
                 }
                 // Confidence
                 score *= f.confidence;
-                if score > 0.0 { Some((f, score)) } else { None }
+                if score > 0.0 {
+                    Some((f, score))
+                } else {
+                    None
+                }
             })
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));

@@ -184,19 +184,20 @@ fn remember_args(args: &serde_json::Value) -> (String, String) {
     }
     // Recover the single-arbitrary-pair shape: pick the first string-valued
     // field that is not the reserved `key`/`value` names.
-    if key.is_empty()
-        && value.is_empty()
-        && let Some(map) = args.as_object()
-    {
-        // Determinism: iterate keys in sorted order so recovery is stable.
-        let mut pairs: Vec<(&String, &serde_json::Value)> = map.iter().collect();
-        pairs.sort_by(|a, b| a.0.cmp(b.0));
-        for (k, v) in pairs {
-            if k == "key" || k == "value" {
-                continue;
-            }
-            if let Some(s) = v.as_str() {
-                return (k.clone(), s.to_string());
+    if key.is_empty() {
+        if value.is_empty() {
+            if let Some(map) = args.as_object() {
+                // Determinism: iterate keys in sorted order so recovery is stable.
+                let mut pairs: Vec<(&String, &serde_json::Value)> = map.iter().collect();
+                pairs.sort_by(|a, b| a.0.cmp(b.0));
+                for (k, v) in pairs {
+                    if k == "key" || k == "value" {
+                        continue;
+                    }
+                    if let Some(s) = v.as_str() {
+                        return (k.clone(), s.to_string());
+                    }
+                }
             }
         }
     }

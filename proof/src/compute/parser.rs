@@ -948,7 +948,7 @@ mod tests {
         assert_eq!(eval_math(b"5 @ 3", &env), None);
         assert_eq!(eval_math(b"5 3", &env), None); // two numbers, no operator
         assert_eq!(eval_math(b"9.11 <", &env), None); // operator, no RHS
-        // Sanity: complete, well-formed input still works exactly as before.
+                                                      // Sanity: complete, well-formed input still works exactly as before.
         assert_eq!(eval_math(b"2+3", &env), Some(5.0));
         assert_eq!(eval_math(b"(2+3)*4", &env), Some(20.0));
     }

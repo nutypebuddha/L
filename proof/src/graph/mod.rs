@@ -106,12 +106,13 @@ where
             let edge_weight = weight_fn(edge.weight());
             if let (Some(prev_dist), Some(curr_dist)) =
                 (dist_lookup(predecessor), dist_lookup(current))
-                && (prev_dist + edge_weight - curr_dist).abs() < 1e-9
             {
-                path.push(predecessor);
-                current = predecessor;
-                found = true;
-                break;
+                if (prev_dist + edge_weight - curr_dist).abs() < 1e-9 {
+                    path.push(predecessor);
+                    current = predecessor;
+                    found = true;
+                    break;
+                }
             }
         }
         if !found {

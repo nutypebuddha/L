@@ -1,6 +1,6 @@
-use super::TantoEnv;
 use super::math;
 use super::parser;
+use super::TantoEnv;
 
 pub fn evaluate_pipeline(line: &str, env: &TantoEnv) -> Option<f64> {
     let (segments, seg_count) = split_pipeline(line.as_bytes());

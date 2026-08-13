@@ -60,7 +60,11 @@ pub fn preprocess_math_input(input: &str) -> Option<String> {
 
     let processed = preprocess_line(input.as_bytes());
     let s = String::from_utf8(processed).ok()?;
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 #[cfg(test)]

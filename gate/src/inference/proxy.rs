@@ -2,11 +2,11 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-use super::InferenceEngine;
-use super::json::{JsonValue, parse_json, stringify};
+use super::json::{parse_json, stringify, JsonValue};
 use super::request::{ProxyConfig, ValidationRequest};
 use super::result::{CidError, CidResult};
 use super::stream::StreamValidator;
+use super::InferenceEngine;
 
 #[cfg(feature = "proxy")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

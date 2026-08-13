@@ -1,0 +1,17 @@
+[package]
+name = "xalen-vedic"
+version = "0.6.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Vedic astrology computations — nakshatra, dasha, panchang, yoga, dosha (vendored copy)"
+repository = "https://github.com/vedika-io/xalen-ephemeris"
+
+[lib]
+name = "xalen_vedic"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+xalen-ayanamsa = { path = "../xalen-ayanamsa" }
+xalen-coords = { path = "../xalen-coords" }
+xalen-time = { path = "../xalen-time" }

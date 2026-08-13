@@ -2,7 +2,7 @@ mod compact;
 mod server;
 mod tools;
 
-pub use compact::{DEFAULT_LIMIT, Detail, SavingsLedger, compact_data, estimate_tokens};
+pub use compact::{compact_data, estimate_tokens, Detail, SavingsLedger, DEFAULT_LIMIT};
 pub use server::McpHandler;
 pub use tools::{AthenaTool, ToolRegistry};
 
@@ -629,19 +629,20 @@ impl AthenaMCP {
             };
             let s_a = sign_from(sa);
             let s_b = sign_from(sb);
-            if let (Some(sa_sign), Some(sb_sign)) = (s_a, s_b)
-                && let Some(aspect) =
+            if let (Some(sa_sign), Some(sb_sign)) = (s_a, s_b) {
+                if let Some(aspect) =
                     crate::astrology::Aspect::between_sign_indices(sa_sign.index(), sb_sign.index())
-            {
-                return AthenaResponse::ok(serde_json::json!({
-                    "entity_a": sa.name,
-                    "entity_b": sb.name,
-                    "sign_a": format!("{:?}", sa_sign),
-                    "sign_b": format!("{:?}", sb_sign),
-                    "aspect": format!("{:?}", aspect),
-                    "aspect_quality": aspect.quality(),
-                    "arc_distance": Aspect::arc_distance_between(sa_sign.index(), sb_sign.index()),
-                }));
+                {
+                    return AthenaResponse::ok(serde_json::json!({
+                        "entity_a": sa.name,
+                        "entity_b": sb.name,
+                        "sign_a": format!("{:?}", sa_sign),
+                        "sign_b": format!("{:?}", sb_sign),
+                        "aspect": format!("{:?}", aspect),
+                        "aspect_quality": aspect.quality(),
+                        "arc_distance": Aspect::arc_distance_between(sa_sign.index(), sb_sign.index()),
+                    }));
+                }
             }
             let missing = if s_a.is_none() { &from } else { &to };
             return AthenaResponse::err(format!(

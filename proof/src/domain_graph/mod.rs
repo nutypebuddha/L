@@ -1,9 +1,9 @@
 //! # Domain graph — re-exports from lai-core with proof-specific extensions
 
 pub use lai_core::domain::{
-    ALL_DOMAINS, CompositionAspect, CurriculumBand, Direction, Domain, LEVELS_PER_CYCLE, MAX_LEVEL,
-    MasteryLayer, Node, Position, Relationship, UnderstandingAxis, WheelError, WheelGraph,
-    WheelResult,
+    CompositionAspect, CurriculumBand, Direction, Domain, MasteryLayer, Node, Position,
+    Relationship, UnderstandingAxis, WheelError, WheelGraph, WheelResult, ALL_DOMAINS,
+    LEVELS_PER_CYCLE, MAX_LEVEL,
 };
 
 use crate::astrology::Sign;

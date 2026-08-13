@@ -13,7 +13,7 @@
 //!
 //! Pass `detail: "full"` on any tool call to bypass compaction.
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 
 /// Default cap on list-shaped responses (`formula_search`, `entity_list`, ...).
 pub const DEFAULT_LIMIT: usize = 25;

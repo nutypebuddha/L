@@ -38,7 +38,7 @@
 //! ephemeris (e.g. the kind of method change that produced the lagna's 1.4°
 //! gap) now breaks CI instead of shipping.
 
-use laverna::astrology::{ALL_GRAHAS, Graha};
+use laverna::astrology::{Graha, ALL_GRAHAS};
 use laverna::chart::ChartSnapshot;
 use laverna::ephemeris::{julian_day, tropical_longitude};
 
@@ -68,7 +68,11 @@ const TOLERANCE_DEG: f64 = 0.05;
 
 fn norm360(deg: f64) -> f64 {
     let d = deg % 360.0;
-    if d < 0.0 { d + 360.0 } else { d }
+    if d < 0.0 {
+        d + 360.0
+    } else {
+        d
+    }
 }
 
 #[test]

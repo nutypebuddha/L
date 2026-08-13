@@ -1,0 +1,17 @@
+[package]
+name = "xalen-ayanamsa"
+version = "0.6.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Ayanamsa (sidereal precession) systems (vendored copy)"
+repository = "https://github.com/vedika-io/xalen-ephemeris"
+
+[lib]
+name = "xalen_ayanamsa"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+xalen-coords = { path = "../xalen-coords" }
+xalen-stars = { path = "../xalen-stars" }
+xalen-time = { path = "../xalen-time" }

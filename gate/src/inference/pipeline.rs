@@ -6,8 +6,8 @@ use crate::core::pocket::Pocket;
 use crate::economy::budget::Budget;
 use crate::economy::tray::BallEconomy;
 use crate::gates::{
-    GateValidator, confidence::ConfidenceGate, fact::FactGate, formal::FormalGate,
-    logic::LogicGate, math::MathGate,
+    confidence::ConfidenceGate, fact::FactGate, formal::FormalGate, logic::LogicGate,
+    math::MathGate, GateValidator,
 };
 use crate::kb::facts::KnowledgeBase;
 use crate::state::machine::{State, StateMachine};

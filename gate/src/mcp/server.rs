@@ -3,8 +3,8 @@ use std::io::{self, BufRead, Write};
 use super::protocol::{JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 use super::resources;
 use super::tools;
-use crate::inference::InferenceEngine;
 use crate::inference::json::JsonValue;
+use crate::inference::InferenceEngine;
 
 pub fn run() {
     let mut engine = InferenceEngine::new();

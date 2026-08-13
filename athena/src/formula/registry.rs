@@ -385,10 +385,10 @@ impl FormulaRegistry {
             .collect();
 
         // Single-token: word index fast path
-        if tokens.len() == 1
-            && let Some(ids) = self.word_index.get(&kw)
-        {
-            return ids.iter().filter_map(|id| self.formulas.get(id)).collect();
+        if tokens.len() == 1 {
+            if let Some(ids) = self.word_index.get(&kw) {
+                return ids.iter().filter_map(|id| self.formulas.get(id)).collect();
+            }
         }
 
         // Multi-token: check each token against word index, union results

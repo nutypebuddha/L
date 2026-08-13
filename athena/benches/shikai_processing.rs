@@ -6,7 +6,7 @@
 //! Note: Only benchmarks the public `process()` API, not internal helpers
 //! like `infer_domain_from_grammar` (those have dedicated unit tests).
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use athena::formula::FormulaRegistry;
 use athena::shikai::Shikai;

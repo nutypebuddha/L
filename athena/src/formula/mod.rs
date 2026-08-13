@@ -25,8 +25,8 @@ mod glyph;
 mod registry;
 
 pub use glyph::{
-    GLYPH_COUNT, Glyph, GlyphOperator, GlyphResult, MAX_GLYPH, NamedGlyph, OPERATOR_TABLE,
-    apply_operator, binding_power, decompose_bound, is_bound,
+    apply_operator, binding_power, decompose_bound, is_bound, Glyph, GlyphOperator, GlyphResult,
+    NamedGlyph, GLYPH_COUNT, MAX_GLYPH, OPERATOR_TABLE,
 };
 pub use registry::FormulaRegistry;
 

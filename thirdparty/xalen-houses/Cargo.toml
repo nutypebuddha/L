@@ -1,0 +1,17 @@
+[package]
+name = "xalen-houses"
+version = "0.6.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Astrological house systems with polar region handling (vendored copy)"
+repository = "https://github.com/vedika-io/xalen-ephemeris"
+
+[lib]
+name = "xalen_houses"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+xalen-coords = { path = "../xalen-coords" }
+xalen-time = { path = "../xalen-time" }

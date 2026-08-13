@@ -27,7 +27,7 @@ use crate::chart::ChartSnapshot;
 use crate::domain_graph::CompositionAspect;
 use crate::domain_graph::Domain;
 use crate::entity::{
-    DynamicEntity, EntityRegistry, EventRegistry, ShikaiFormRegistry, generate_dynamic_entity,
+    generate_dynamic_entity, DynamicEntity, EntityRegistry, EventRegistry, ShikaiFormRegistry,
 };
 use crate::formula::FormulaRegistry;
 
@@ -355,17 +355,17 @@ impl SettlingMatrix {
             // an occupied sign in the sky get a confidence boost.
             let mut token = token.clone();
             if let Some(ref _chart) = chart {
-                if let Some(sign) = token.western_classification.dominant_sign()
-                    && occupied_signs.contains(&sign)
-                {
-                    // This token's sign matches a graha's actual position — boost
-                    token.confidence = (token.confidence + 0.15).min(1.0);
+                if let Some(sign) = token.western_classification.dominant_sign() {
+                    if occupied_signs.contains(&sign) {
+                        // This token's sign matches a graha's actual position — boost
+                        token.confidence = (token.confidence + 0.15).min(1.0);
+                    }
                 }
                 // Boost if Vedic graha matches a chart graha
-                if let Some(graha) = token.vedic_classification.dominant_graha()
-                    && _active_grahas.contains(&graha)
-                {
-                    token.confidence = (token.confidence + 0.10).min(1.0);
+                if let Some(graha) = token.vedic_classification.dominant_graha() {
+                    if _active_grahas.contains(&graha) {
+                        token.confidence = (token.confidence + 0.10).min(1.0);
+                    }
                 }
             }
 
@@ -392,11 +392,11 @@ impl SettlingMatrix {
         }
 
         // Nudge aggregate classification toward chart's lagna
-        if let Some(ref chart) = chart
-            && let Some(lagna) = chart.lagna
-        {
-            let lagna_sign = Sign::from_index(lagna.index());
-            aggregate_western = aggregate_western.with_sign(lagna_sign, 0.6);
+        if let Some(ref chart) = chart {
+            if let Some(lagna) = chart.lagna {
+                let lagna_sign = Sign::from_index(lagna.index());
+                aggregate_western = aggregate_western.with_sign(lagna_sign, 0.6);
+            }
         }
 
         // Compute aspects between all pairs of tokens that have domain info
@@ -1531,12 +1531,12 @@ impl DescentEngine {
             // Share formulas from same domain
             if right.settled_layer.depth() < 4 {
                 for formula_id in &left.formulas {
-                    if !right.formulas.contains(formula_id)
-                        && let Some(f) = self.formula_registry.get(formula_id)
-                    {
-                        // Only share if formula's domain matches one of right's domains
-                        if right.domains.contains(&f.domain) && right.formulas.len() < 5 {
-                            right.formulas.push(formula_id.clone());
+                    if !right.formulas.contains(formula_id) {
+                        if let Some(f) = self.formula_registry.get(formula_id) {
+                            // Only share if formula's domain matches one of right's domains
+                            if right.domains.contains(&f.domain) && right.formulas.len() < 5 {
+                                right.formulas.push(formula_id.clone());
+                            }
                         }
                     }
                 }
@@ -1564,28 +1564,30 @@ impl DescentEngine {
         let entity_domains: Vec<Option<Domain>> =
             tokens.iter().map(|t| t.domains.first().copied()).collect();
         for i in 0..len {
-            if tokens[i].entity.is_some()
-                && let Some(domain) = entity_domains[i]
-                && let Some(seed) = self
-                    .entity_registry
-                    .search_seeds_ref(domain.full_name_lower())
-                    .first()
-            {
-                let seed_id = seed.id.clone();
-                for (j, token) in tokens.iter_mut().enumerate() {
-                    if i != j
-                        && token.entity.is_none()
-                        && !token.formulas.is_empty()
-                        && token.domains.contains(&domain)
+            if tokens[i].entity.is_some() {
+                if let Some(domain) = entity_domains[i] {
+                    if let Some(seed) = self
+                        .entity_registry
+                        .search_seeds_ref(domain.full_name_lower())
+                        .first()
                     {
-                        token.entity = Some(seed_id.clone());
-                        token.confidence = (token.confidence + 0.2).min(1.0);
-                        token.provenance.push(ProvenanceStep::Unification {
-                            formula_id: token.formulas.first().cloned().unwrap_or_default(),
-                            entity_id: seed_id.clone(),
-                            bound_inputs: vec![("constraint_propagation".to_string(), 1.0)],
-                            output_value: None,
-                        });
+                        let seed_id = seed.id.clone();
+                        for (j, token) in tokens.iter_mut().enumerate() {
+                            if i != j
+                                && token.entity.is_none()
+                                && !token.formulas.is_empty()
+                                && token.domains.contains(&domain)
+                            {
+                                token.entity = Some(seed_id.clone());
+                                token.confidence = (token.confidence + 0.2).min(1.0);
+                                token.provenance.push(ProvenanceStep::Unification {
+                                    formula_id: token.formulas.first().cloned().unwrap_or_default(),
+                                    entity_id: seed_id.clone(),
+                                    bound_inputs: vec![("constraint_propagation".to_string(), 1.0)],
+                                    output_value: None,
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -1779,14 +1781,14 @@ impl DescentEngine {
                     .unwrap_or_default(),
             });
             // Attach formal expression if available
-            if st.formal_expression.is_none()
-                && let Some(expr) = formal_expression_for(&token_lower)
-            {
-                st.formal_expression = Some(expr.to_string());
-                st.provenance.push(ProvenanceStep::FormalExpression {
-                    token: token_lower.clone(),
-                    expression: expr.to_string(),
-                });
+            if st.formal_expression.is_none() {
+                if let Some(expr) = formal_expression_for(&token_lower) {
+                    st.formal_expression = Some(expr.to_string());
+                    st.provenance.push(ProvenanceStep::FormalExpression {
+                        token: token_lower.clone(),
+                        expression: expr.to_string(),
+                    });
+                }
             }
             return true;
         }
@@ -1828,14 +1830,14 @@ impl DescentEngine {
             let sign = sign_from_domain(f.domain);
             st.western_classification.set_sign(sign, 0.9);
             // Attach formal expression if available
-            if st.formal_expression.is_none()
-                && let Some(expr) = formal_expression_for(&token_lower)
-            {
-                st.formal_expression = Some(expr.to_string());
-                st.provenance.push(ProvenanceStep::FormalExpression {
-                    token: token_lower.clone(),
-                    expression: expr.to_string(),
-                });
+            if st.formal_expression.is_none() {
+                if let Some(expr) = formal_expression_for(&token_lower) {
+                    st.formal_expression = Some(expr.to_string());
+                    st.provenance.push(ProvenanceStep::FormalExpression {
+                        token: token_lower.clone(),
+                        expression: expr.to_string(),
+                    });
+                }
             }
             return true;
         }
@@ -1860,29 +1862,29 @@ impl DescentEngine {
                 generate_dynamic_entity(&token_lower, &self.shikai_forms, &self.events)
             })
             .clone();
-        if (!de.forms.is_empty() || !de.events.is_empty())
-            && let Some(graha) = de.vedic_classification.dominant_graha()
-        {
-            let sign = Sign::from_index(graha.index());
-            let domain = crate::domain_graph::from_sign(sign);
-            st.domains.push(domain);
-            st.western_classification.set_sign(sign, 0.7);
-            st.vedic_classification
-                .merge_max_into(&de.vedic_classification);
-            st.confidence = 0.5;
-            return;
+        if !de.forms.is_empty() || !de.events.is_empty() {
+            if let Some(graha) = de.vedic_classification.dominant_graha() {
+                let sign = Sign::from_index(graha.index());
+                let domain = crate::domain_graph::from_sign(sign);
+                st.domains.push(domain);
+                st.western_classification.set_sign(sign, 0.7);
+                st.vedic_classification
+                    .merge_max_into(&de.vedic_classification);
+                st.confidence = 0.5;
+                return;
+            }
         }
 
         // Keyword-based domain matching (shared single-source-of-truth table)
-        if let Some(domain) = domain_for_keyword(&token_lower)
-            && !st.domains.contains(&domain)
-        {
-            st.domains.push(domain);
-            st.provenance.push(ProvenanceStep::DomainClassification {
-                domain: domain.full_name_lower().to_string(),
-                keyword: token_lower.clone(),
-                confidence: 0.4,
-            });
+        if let Some(domain) = domain_for_keyword(&token_lower) {
+            if !st.domains.contains(&domain) {
+                st.domains.push(domain);
+                st.provenance.push(ProvenanceStep::DomainClassification {
+                    domain: domain.full_name_lower().to_string(),
+                    keyword: token_lower.clone(),
+                    confidence: 0.4,
+                });
+            }
         }
 
         // If still no domain, search in formulas
@@ -1922,14 +1924,14 @@ impl DescentEngine {
         }
 
         // Attach formal expression if available for this token
-        if st.formal_expression.is_none()
-            && let Some(expr) = formal_expression_for(&token_lower)
-        {
-            st.formal_expression = Some(expr.to_string());
-            st.provenance.push(ProvenanceStep::FormalExpression {
-                token: token_lower,
-                expression: expr.to_string(),
-            });
+        if st.formal_expression.is_none() {
+            if let Some(expr) = formal_expression_for(&token_lower) {
+                st.formal_expression = Some(expr.to_string());
+                st.provenance.push(ProvenanceStep::FormalExpression {
+                    token: token_lower,
+                    expression: expr.to_string(),
+                });
+            }
         }
     }
 
@@ -2122,10 +2124,10 @@ impl DescentEngine {
                 });
 
                 // If seed has a formula field, add it to formulas list
-                if let Some(ref formula_ref) = seed.formula
-                    && !st.formulas.contains(formula_ref)
-                {
-                    st.formulas.push(formula_ref.clone());
+                if let Some(ref formula_ref) = seed.formula {
+                    if !st.formulas.contains(formula_ref) {
+                        st.formulas.push(formula_ref.clone());
+                    }
                 }
 
                 return true;

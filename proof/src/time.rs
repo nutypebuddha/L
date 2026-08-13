@@ -31,7 +31,9 @@ pub enum TimezoneError {
     )]
     InvalidDatetime(String),
 
-    #[error("conflicting datetime inputs: provide --datetime-utc OR (--datetime + --tz), not both")]
+    #[error(
+        "conflicting datetime inputs: provide --datetime-utc OR (--datetime + --tz), not both"
+    )]
     ConflictingInputs,
 }
 

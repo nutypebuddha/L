@@ -1,0 +1,15 @@
+[package]
+name = "xalen-time"
+version = "0.6.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Astronomical time primitives — JD, delta-T, time scales, calendar conversions (vendored copy)"
+repository = "https://github.com/vedika-io/xalen-ephemeris"
+
+[lib]
+name = "xalen_time"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"

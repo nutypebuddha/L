@@ -161,20 +161,16 @@ mod tests {
 
     #[tokio::test]
     async fn http_request_rejects_bad_scheme() {
-        assert!(
-            http_request("GET", "file:///etc/passwd", None)
-                .await
-                .contains("http://")
-        );
+        assert!(http_request("GET", "file:///etc/passwd", None)
+            .await
+            .contains("http://"));
     }
 
     #[tokio::test]
     async fn http_request_rejects_unsupported_method() {
-        assert!(
-            http_request("PATCH", "https://example.com", None)
-                .await
-                .contains("unsupported method")
-        );
+        assert!(http_request("PATCH", "https://example.com", None)
+            .await
+            .contains("unsupported method"));
     }
 
     #[test]

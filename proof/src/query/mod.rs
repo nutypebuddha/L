@@ -39,11 +39,12 @@ pub fn extract_numerical_values(query: &str) -> Vec<f64> {
                     break;
                 }
             }
-            if !mid_identifier
-                && let Ok(st) = std::str::from_utf8(&bytes[start..i])
-                && let Ok(s) = st.parse::<f64>()
-            {
-                out.push(s);
+            if !mid_identifier {
+                if let Ok(st) = std::str::from_utf8(&bytes[start..i]) {
+                    if let Ok(s) = st.parse::<f64>() {
+                        out.push(s);
+                    }
+                }
             }
         } else {
             i += 1;

@@ -9,10 +9,10 @@ mod edges;
 mod graph;
 mod nodes;
 
-pub use axis::{BleachLayer, CurriculumBand, LEVELS_PER_CYCLE, MAX_LEVEL, UnderstandingAxis};
+pub use axis::{BleachLayer, CurriculumBand, UnderstandingAxis, LEVELS_PER_CYCLE, MAX_LEVEL};
 pub use edges::{Aspect, Relationship};
 pub use graph::WheelGraph;
-pub use nodes::{ALL_DOMAINS, ALL_NODES, Domain, Node};
+pub use nodes::{Domain, Node, ALL_DOMAINS, ALL_NODES};
 
 use thiserror::Error;
 

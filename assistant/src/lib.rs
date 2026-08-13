@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 pub mod actions;
 pub mod agent;
 pub mod apps;

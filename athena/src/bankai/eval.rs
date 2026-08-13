@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::formula::Formula;
-use crate::tanto::{TantoEnv, evaluate as tanto_eval};
+use crate::tanto::{evaluate as tanto_eval, TantoEnv};
 
 use super::BankaiError;
 

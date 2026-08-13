@@ -11,7 +11,7 @@
 //! All patterns are hardcoded as const arrays — no HashMap, no runtime allocation,
 //! fully deterministic.
 
-use super::{Gate, GateOutput, gate_output};
+use super::{gate_output, Gate, GateOutput};
 
 /// A single logic pattern: id, description, whether it's valid or fallacious,
 /// and an optional explanation.

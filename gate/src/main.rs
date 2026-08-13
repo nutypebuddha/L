@@ -8,7 +8,7 @@ use cid::gates::{
     confidence::ConfidenceGate, fact::FactGate, formal::FormalGate, logic::LogicGate,
     math::MathGate,
 };
-use cid::inference::json::{JsonValue, stringify};
+use cid::inference::json::{stringify, JsonValue};
 use cid::inference::{InferenceEngine, ProxyConfig, ProxyServer, ValidationRequest};
 use cid::kb::facts::KnowledgeBase;
 use cid::output::trace::TraceLog;

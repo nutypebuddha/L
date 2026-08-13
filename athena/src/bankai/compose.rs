@@ -13,8 +13,8 @@ use serde::Serialize;
 use crate::formula::{Formula, FormulaRegistry};
 use crate::wheel::{Aspect, Domain, WheelGraph};
 
-use super::BankaiError;
 use super::confidence::{BoundedConfidence, ConfidenceSemiring};
+use super::BankaiError;
 
 /// A composition of formulas across domains.
 #[derive(Debug, Clone, Serialize)]

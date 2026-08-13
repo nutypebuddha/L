@@ -1,5 +1,5 @@
-use super::TantoEnv;
 use super::parser::{eval_math, eval_op_format};
+use super::TantoEnv;
 
 #[derive(Debug, Clone)]
 pub struct VerifyResult {

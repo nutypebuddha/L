@@ -50,7 +50,7 @@ mod tests {
         let mut gyro = GyroState::new();
         gyro.angular_velocity = 1.0; // 1 sign per second
         gyro.update(1.0); // 1 second
-        // Should have precessed
+                          // Should have precessed
         assert!(gyro.orientation.0 > 0.0);
     }
 

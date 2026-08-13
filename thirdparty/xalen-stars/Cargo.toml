@@ -1,0 +1,16 @@
+[package]
+name = "xalen-stars"
+version = "0.6.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Fixed star catalog with precession-corrected positions (vendored copy)"
+repository = "https://github.com/vedika-io/xalen-ephemeris"
+
+[lib]
+name = "xalen_stars"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+xalen-coords = { path = "../xalen-coords" }
+xalen-time = { path = "../xalen-time" }

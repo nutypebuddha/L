@@ -181,7 +181,11 @@ impl Mul<f64> for Vec3 {
 /// Normalize an angle in degrees to [0, 360).
 pub fn norm360(deg: f64) -> f64 {
     let d = deg % 360.0;
-    if d < 0.0 { d + 360.0 } else { d }
+    if d < 0.0 {
+        d + 360.0
+    } else {
+        d
+    }
 }
 
 #[cfg(test)]

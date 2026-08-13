@@ -429,11 +429,11 @@ fn apply_pillar_interactions(pillars: &mut [f64; 7], matrix: &crate::descent::Se
         .collect();
     for i in 0..resolved_pillars.len() {
         for j in (i + 1)..resolved_pillars.len() {
-            if let (Some(pa), Some(pb)) = (resolved_pillars[i], resolved_pillars[j])
-                && pa != pb
-            {
-                pillars[pa.index()] += CO_OCCURRENCE_BONUS;
-                pillars[pb.index()] += CO_OCCURRENCE_BONUS;
+            if let (Some(pa), Some(pb)) = (resolved_pillars[i], resolved_pillars[j]) {
+                if pa != pb {
+                    pillars[pa.index()] += CO_OCCURRENCE_BONUS;
+                    pillars[pb.index()] += CO_OCCURRENCE_BONUS;
+                }
             }
         }
     }
