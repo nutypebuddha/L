@@ -118,8 +118,8 @@ pub fn estimate_tokens(text: &str) -> usize {
     let chars = text.len();
     let words = text.split_whitespace().count();
     // Use whichever is more conservative
-    let by_chars = (chars + 3) / 4;
-    let by_words = (words * 4 + 3) / 4;
+    let by_chars = chars.div_ceil(4);
+    let by_words = (words * 4).div_ceil(4);
     by_chars.max(by_words)
 }
 

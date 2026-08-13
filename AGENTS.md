@@ -44,6 +44,12 @@ cargo test --locked -p laverna --features mcp --test mcp_parity  # 6. CLI/MCP pa
 install it locally or step 3 errors. The two `--test` gates are **separate
 jobs in CI**, not part of `cargo test --workspace`.
 
+### Local dogfood hook (optional)
+
+`git config core.hooksPath .githooks` installs the pre-commit hook that runs
+`lai ping` to confirm the built binary is on PATH (non-fatal — it never blocks
+the commit). Requires `lai` on PATH (`cargo build -p laverna`).
+
 Assistant is gated separately (Termux-only system actions):
 
 ```bash

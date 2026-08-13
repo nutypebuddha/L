@@ -61,10 +61,37 @@ Note: `REPO_ROOT` in export.sh resolves to `proof/` but target dir is workspace 
 
 ## Corpus
 
-- 528 formulas, 214 entities — **embedded at compile time** by `build.rs`.
+- 538 formulas, 222 entities — **embedded at compile time** by `build.rs`.
+  `lai info` is the authoritative live count; update this line if it drifts.
 - Overlay: `~/.laverna/corpus/` or `./corpus/` — user TOML merges over seed.
 - After editing formula TOML: rebuild required (build.rs re-embeds).
 - `corpus lint` catches undeclared variables and missing graha tags (advisory).
+
+## AI / machine interface
+
+Lai is built to be driven by an agent, not just read by a human. Prefer the
+JSON surface over scraping `--help`/text.
+
+- **Bootstrap with `lai info --format json`.** One call returns `version`,
+  `features`, `formulas`, `entities`, `entity_domains`, and `subcommands`
+  (name + one-line description for every subcommand). Discover capabilities
+  from this manifest instead of parsing help text.
+- **`--format json`** is supported by the analysis subcommands (`solve`,
+  `route`, `chart`, `validate`, `optimize`, `build`, `strategize`, `verify`,
+  `formulas`, `entities`, `corpus`, `gate`, …). Parse the JSON; never regex
+  the text form.
+- **Fail-loud is in the JSON.** `validate`/`solve` emit `passed`,
+  `error_count`, `refusals`, `diagnostics`. Out-of-scope input is *refused*,
+  never silently accepted — trust `passed:false`/`refusals`, not absence of
+  output.
+- **Deterministic.** Outputs are sorted by stable key (determinism rule in
+  root AGENTS.md); identical input → byte-identical JSON across runs. Safe to
+  diff or cache.
+- **Native integration: `lai mcp`** speaks JSON-RPC over stdio (the MCP
+  server) for interactive multi-turn sessions; CLI + `--format json` for
+  one-shot calls.
+- **`lai schema <subcommand>`** prints the canonical TOML input template
+  (self-describing input shapes).
 
 ## Known gotchas
 

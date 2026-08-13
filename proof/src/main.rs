@@ -3,7 +3,7 @@
 
 #![recursion_limit = "256"]
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use laverna::prelude::*;
 use laverna::strategy::{
     aggregate_pillars, classify_route_token, synthesize_strategy, StrategyReport, TokenForce,
@@ -862,19 +862,36 @@ fn main() {
                 }
             }
             if format == OutputFormat::Json {
+                // Self-describing manifest for AI agents: one JSON blob enumerates
+                // every subcommand (name + description) so a client can bootstrap
+                // without scraping --help text. Subcommand order is clap's
+                // definition order (deterministic).
+                let subcommands: Vec<_> = Cli::command()
+                    .get_subcommands()
+                    .map(|sc| {
+                        serde_json::json!({
+                            "name": sc.get_name(),
+                            "description": sc
+                                .get_about()
+                                .map(|a| a.to_string())
+                                .unwrap_or_default()
+                        })
+                    })
+                    .collect();
                 let value = serde_json::json!({
                     "version": env!("CARGO_PKG_VERSION"),
                     "edition": 2021,
-                    "features": features.split_whitespace().collect::<Vec<_>>(),
+                    "features": features,
                     "formulas": formula_reg.len(),
                     "entities": entity_reg.seed_count(),
-                    "entity_domains": by_domain
+                    "entity_domains": by_domain,
+                    "subcommands": subcommands
                 });
                 println!("{}", serde_json::to_string(&value).unwrap());
             } else {
                 println!("laverna {}", env!("CARGO_PKG_VERSION"));
                 println!("edition 2021");
-                println!("features: {features}");
+                println!("features: {}", features.join(", "));
                 println!("formulas: {}", formula_reg.len());
                 println!("entities: {}", entity_reg.seed_count());
                 println!("entity domains (graha classification):");
@@ -1576,7 +1593,7 @@ fn build_assistant_engines() -> assistant::engines::Engines {
 
 // ─── Feature Detection ──────────────────────────────────────────────────────
 
-fn collect_features() -> &'static str {
+fn collect_features() -> Vec<&'static str> {
     let mut features = Vec::new();
     if cfg!(feature = "mcp") {
         features.push("mcp");
@@ -1611,9 +1628,9 @@ fn collect_features() -> &'static str {
         features.push("bench");
     }
     if features.is_empty() {
-        "none (minimal)"
+        vec!["none (minimal)"]
     } else {
-        Box::leak(features.join(", ").into_boxed_str())
+        features
     }
 }
 

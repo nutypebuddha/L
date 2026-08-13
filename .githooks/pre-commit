@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Pre-commit dogfood hook for L.ai.
+#
+# The project's thesis is "verify, don't trust" — so it dogfoods its own binary
+# on commit. This hook runs `lai ping` to confirm the built binary is on PATH
+# and responsive. It is deliberately NON-FATAL: it only informs, it never blocks
+# the commit (a missing/unbuilt binary must not stop development).
+#
+# Enable (one-time, per clone) with:
+#   git config core.hooksPath .githooks
+set -u
+
+if command -v lai >/dev/null 2>&1; then
+    if lai ping >/dev/null 2>&1; then
+        echo "pre-commit: lai ping OK (binary on PATH and responsive)"
+    else
+        echo "pre-commit: 'lai' found on PATH but 'lai ping' failed — rebuild with 'cargo build -p laverna'?" >&2
+    fi
+else
+    echo "pre-commit: 'lai' not on PATH — skipping dogfood self-check (build with 'cargo build -p laverna')." >&2
+fi
+
+exit 0
