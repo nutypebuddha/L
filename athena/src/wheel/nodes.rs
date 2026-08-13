@@ -17,7 +17,7 @@
 
 use crate::astrology::Graha;
 use serde::{Deserialize, Serialize};
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 /// Domain is a type alias for Graha — the Vedic planetary domain enum.
 ///
@@ -53,25 +53,27 @@ pub const ALL_DOMAINS: [Domain; 9] = [
     Domain::Ketu,
 ];
 
-/// All 9 nodes with metadata.
-pub fn all_nodes() -> Vec<Node> {
-    ALL_DOMAINS
-        .iter()
-        .enumerate()
-        .map(|(i, &domain)| Node {
-            domain,
-            symbol: domain.symbol(),
-            name: domain.name(),
-            description: domain.archetype(),
-            index: i,
-            opposite: domain.opposite(),
-            trines: domain.trines(),
-        })
-        .collect()
+/// All 9 nodes with metadata, lazily initialized on first access.
+pub fn all_nodes() -> &'static Vec<Node> {
+    ALL_NODES.get_or_init(|| {
+        ALL_DOMAINS
+            .iter()
+            .enumerate()
+            .map(|(i, &domain)| Node {
+                domain,
+                symbol: domain.symbol(),
+                name: domain.name(),
+                description: domain.archetype(),
+                index: i,
+                opposite: domain.opposite(),
+                trines: domain.trines(),
+            })
+            .collect()
+    })
 }
 
 /// Pre-computed node list.
-pub static ALL_NODES: LazyLock<Vec<Node>> = LazyLock::new(all_nodes);
+pub static ALL_NODES: OnceLock<Vec<Node>> = OnceLock::new();
 
 #[cfg(test)]
 mod tests {
@@ -164,7 +166,7 @@ mod tests {
     fn test_node_metadata() {
         let nodes = all_nodes();
         assert_eq!(nodes.len(), 9);
-        for n in &nodes {
+        for n in nodes {
             assert!(!n.symbol.is_empty());
             assert!(!n.name.is_empty());
             assert!(!n.description.is_empty());

@@ -126,7 +126,7 @@ fn navamsa(sign_idx: usize, deg: f64) -> Rashi {
 }
 
 fn hora(sign_idx: usize, deg: f64) -> Rashi {
-    let is_odd = sign_idx.is_multiple_of(2); // 0-indexed: Aries=0=even index but odd sign
+    let is_odd = sign_idx % 2 == 0; // 0-indexed: Aries=0=even index but odd sign
     let first_half = deg < 15.0;
     if is_odd {
         if first_half {
@@ -151,14 +151,14 @@ fn drekkana(sign_idx: usize, deg: f64) -> Rashi {
 
 fn saptamsa(sign_idx: usize, deg: f64) -> Rashi {
     let part = (deg / (30.0 / 7.0)) as usize;
-    let is_odd = sign_idx.is_multiple_of(2);
+    let is_odd = sign_idx % 2 == 0;
     let start = if is_odd { sign_idx } else { sign_idx + 6 };
     Rashi::from_index((start + part) % 12)
 }
 
 fn dasamsa(sign_idx: usize, deg: f64) -> Rashi {
     let part = (deg / 3.0) as usize;
-    let is_odd = sign_idx.is_multiple_of(2);
+    let is_odd = sign_idx % 2 == 0;
     let start = if is_odd { sign_idx } else { sign_idx + 8 };
     Rashi::from_index((start + part) % 12)
 }
@@ -174,7 +174,7 @@ fn trimsamsa(sign_idx: usize, deg: f64) -> Rashi {
     //            Mercury 18-25→Gemini, Venus 25-30→Libra
     // Even signs: Venus 0-5→Taurus, Mercury 5-12→Virgo, Jupiter 12-20→Pisces,
     //             Saturn 20-25→Capricorn, Mars 25-30→Scorpio
-    let is_odd = sign_idx.is_multiple_of(2); // 0-indexed: Aries=0=even index=odd sign
+    let is_odd = sign_idx % 2 == 0; // 0-indexed: Aries=0=even index=odd sign
     if is_odd {
         match deg {
             d if d < 5.0 => Rashi::Mesha,    // Mars → Aries
@@ -231,7 +231,7 @@ fn vimsamsa(sign_idx: usize, deg: f64) -> Rashi {
 /// Even signs: reverse from Cancer (3) — Cancer, Gemini, Taurus, Aries, Pisces...
 /// Each part = 30/24 = 1.25°
 fn chaturvimsamsa(sign_idx: usize, deg: f64) -> Rashi {
-    let is_odd_sign = sign_idx.is_multiple_of(2); // 0-indexed: Aries=0=even idx=odd sign
+    let is_odd_sign = sign_idx % 2 == 0; // 0-indexed: Aries=0=even idx=odd sign
     let part = (deg / 1.25) as usize;
     if is_odd_sign {
         // Odd signs: forward from Leo
@@ -267,7 +267,7 @@ fn bhamsa(sign_idx: usize, deg: f64) -> Rashi {
 /// Even signs: sequential from Libra (6)
 /// Each part = 30/40 = 0.75°
 fn khavedamsa(sign_idx: usize, deg: f64) -> Rashi {
-    let is_odd_sign = sign_idx.is_multiple_of(2); // 0-indexed: Aries=0=even idx=odd sign
+    let is_odd_sign = sign_idx % 2 == 0; // 0-indexed: Aries=0=even idx=odd sign
     let start = if is_odd_sign { 0 } else { 6 }; // Odd: Aries, Even: Libra
     let part = (deg / 0.75) as usize;
     Rashi::from_index((start + part) % 12)

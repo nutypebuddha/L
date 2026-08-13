@@ -155,7 +155,10 @@ impl WheelGraph {
             .map(|edges| {
                 edges
                     .iter()
-                    .filter(|(_, a)| aspect_filter.is_none_or(|filter| *a == filter))
+                    .filter(|(_, a)| {
+                        aspect_filter.is_none()
+                            || aspect_filter.as_ref().is_some_and(|filter| *a == *filter)
+                    })
                     .map(|(d, _)| *d)
                     .collect()
             })

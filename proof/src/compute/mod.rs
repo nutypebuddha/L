@@ -12,13 +12,15 @@ pub mod thinking;
 pub mod verify;
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 pub type TantoEnv = HashMap<String, f64>;
 
 /// Pre-built constant environment. Built once on first access, then cloned
 /// cheaply by `create_env()`.
-static TANTO_ENV: LazyLock<TantoEnv> = LazyLock::new(|| {
+static TANTO_ENV: OnceLock<TantoEnv> = OnceLock::new();
+
+fn build_tanto_env() -> TantoEnv {
     let mut env = TantoEnv::new();
     env.insert("pi".to_string(), std::f64::consts::PI);
     env.insert("e".to_string(), std::f64::consts::E);
@@ -32,10 +34,10 @@ static TANTO_ENV: LazyLock<TantoEnv> = LazyLock::new(|| {
     env.insert("c_squared".to_string(), 89875517873681764.0);
     env.insert("avogadro".to_string(), 6.022e23);
     env
-});
+}
 
 pub fn create_env() -> TantoEnv {
-    TANTO_ENV.clone()
+    TANTO_ENV.get_or_init(build_tanto_env).clone()
 }
 
 pub fn evaluate_expr(expr: &str, env: &TantoEnv) -> Option<f64> {

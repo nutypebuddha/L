@@ -394,7 +394,7 @@ pub fn narayana_dasha_with_nodes(
 /// Whether a 0-based sign index is "odd" in the Jaimini sense.
 /// Odd signs: Aries(0), Gemini(2), Leo(4), Libra(6), Sagittarius(8), Aquarius(10).
 fn is_odd_rashi(sign: usize) -> bool {
-    sign.is_multiple_of(2)
+    sign % 2 == 0
 }
 
 /// Calculate Narayana Dasha period years based on the dasha sign and the

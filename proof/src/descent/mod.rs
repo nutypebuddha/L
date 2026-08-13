@@ -32,7 +32,7 @@ use crate::entity::{
 use crate::formula::FormulaRegistry;
 
 use regex::Regex;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 // ─── Descent Layers ─────────────────────────────────────────────────────────
 
@@ -881,7 +881,9 @@ fn aspect_details(aspect: SignAspect) -> (i32, &'static str) {
 /// Pre-compiled whole-word matchers for `DOMAIN_KEYWORDS`. Each pattern is
 /// `\b<keyword>\b` (regex-escaped) so a keyword must appear as a delimited
 /// word within the token to match.
-static DOMAIN_KEYWORD_RE: LazyLock<Vec<(Regex, Domain)>> = LazyLock::new(|| {
+static DOMAIN_KEYWORD_RE: OnceLock<Vec<(Regex, Domain)>> = OnceLock::new();
+
+fn build_domain_keyword_re() -> Vec<(Regex, Domain)> {
     DOMAIN_KEYWORDS
         .iter()
         .map(|(kw, domain)| {
@@ -890,7 +892,7 @@ static DOMAIN_KEYWORD_RE: LazyLock<Vec<(Regex, Domain)>> = LazyLock::new(|| {
             (re, *domain)
         })
         .collect()
-});
+}
 
 /// Map a token to its structural wheel domain via keyword matching.
 /// Returns `None` if no keyword matches as a whole word — the caller should
@@ -898,6 +900,7 @@ static DOMAIN_KEYWORD_RE: LazyLock<Vec<(Regex, Domain)>> = LazyLock::new(|| {
 pub fn domain_for_keyword(token: &str) -> Option<Domain> {
     let t = token.to_lowercase();
     if let Some(domain) = DOMAIN_KEYWORD_RE
+        .get_or_init(build_domain_keyword_re)
         .iter()
         .find(|(re, _)| re.is_match(&t))
         .map(|(_, domain)| *domain)
@@ -911,6 +914,7 @@ pub fn domain_for_keyword(token: &str) -> Option<Domain> {
     let stemmed = crate::nlp::stem_token(&t);
     if stemmed != t {
         return DOMAIN_KEYWORD_RE
+            .get_or_init(build_domain_keyword_re)
             .iter()
             .find(|(re, _)| re.is_match(&stemmed))
             .map(|(_, domain)| *domain);

@@ -1,11 +1,13 @@
 // ─── Stopwords ───────────────────────────────────────────────────────────────
 
 use std::collections::HashSet;
-use std::sync::LazyLock;
+use std::sync::OnceLock;
 
 /// Common English stopwords that carry little semantic meaning.
 /// Excluded from keyword extraction to reduce noise in classification.
-static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+static STOPWORDS: OnceLock<HashSet<&'static str>> = OnceLock::new();
+
+fn build_stopwords() -> HashSet<&'static str> {
     HashSet::from([
         "a",
         "an",
@@ -158,11 +160,13 @@ static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
         "couldn't",
         "shouldn't",
     ])
-});
+}
 
 /// Pure function: Check if a token is a stopword.
 pub fn is_stopword(token: &str) -> bool {
-    STOPWORDS.contains(token.to_lowercase().as_str())
+    STOPWORDS
+        .get_or_init(build_stopwords)
+        .contains(token.to_lowercase().as_str())
 }
 
 // ─── Stemming (T53) ─────────────────────────────────────────────────────────

@@ -84,7 +84,7 @@ tempfile = "3"
 pprof = { version = "0.14", features = ["criterion", "flamegraph"] }
 
 [features]
-default = ["assistant", "mcp", "websearch", "budget", "milp", "graph"]
+default = ["assistant", "budget", "graph"]
 mcp = ["websearch", "dep:rmcp", "dep:tokio", "athena/mcp", "assistant/mcp"]
 websearch = ["dep:ureq"]
 budget = ["athena/budget"]

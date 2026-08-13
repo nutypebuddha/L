@@ -12,7 +12,7 @@ mod nodes;
 pub use axis::{BleachLayer, CurriculumBand, UnderstandingAxis, LEVELS_PER_CYCLE, MAX_LEVEL};
 pub use edges::{Aspect, Relationship};
 pub use graph::WheelGraph;
-pub use nodes::{Domain, Node, ALL_DOMAINS, ALL_NODES};
+pub use nodes::{all_nodes, Domain, Node, ALL_DOMAINS, ALL_NODES};
 
 use thiserror::Error;
 

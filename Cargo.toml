@@ -10,6 +10,10 @@ members = [
     "assistant",
 ]
 
+# MSRV-aware resolution lives in `.cargo/config.toml` (`[resolver]` is a cargo
+# config key, not a manifest key). With rust-version = 1.75 there, cargo downgrades
+# every transitive dep to its highest release compatible with 1.75.
+
 [workspace.package]
 edition = "2021"
 # MSRV. The `xalen-*` ephemeris crates (direct deps of `laverna`) are now VENDORED
@@ -18,10 +22,9 @@ edition = "2021"
 # tied to edition 2024 or to edition-2024 let-chains (all workspace let-chains
 # were rewritten to nested `if`/`if let`). `idna_adapter` is pinned to 1.1.0
 # (edition 2021) to drop the `icu`/`zerovec` stack — same IDNA output, ~44 fewer
-# deps. The practical floor is nonetheless 1.85: modern transitive crates in the
-# lock (`clap` 4.6, `rand` 0.10, `time` 0.3.55, `getrandom` 0.4, …) adopted
-# edition 2024, stabilized in rustc 1.85.
-rust-version = "1.85"
+# deps. The `[resolver]` MSRV-aware setting above downgrades every transitive
+# crate to its highest release with rust-version <= 1.75; see AGENTS.md MSRV.
+rust-version = "1.75"
 license = "Apache-2.0"
 authors = ["nutypebuddha <nutypebuddha@proton.me>"]
 repository = "https://github.com/nutypebuddha/L"

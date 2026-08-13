@@ -300,7 +300,8 @@ fn closest_aspect(angle: f64, orb: f64) -> Option<TajakaAspect> {
     for asp in &TajakaAspect::ALL {
         let diff = (angle - asp.angle()).abs();
         let diff = if diff > 180.0 { 360.0 - diff } else { diff };
-        if diff <= orb && best.as_ref().is_none_or(|(_, prev)| diff < *prev) {
+        if diff <= orb && (best.is_none() || best.as_ref().map_or(false, |(_, prev)| diff < *prev))
+        {
             best = Some((*asp, diff));
         }
     }
