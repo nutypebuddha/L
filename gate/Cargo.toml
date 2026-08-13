@@ -2,7 +2,7 @@
 name = "lai-gate"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.70"
+rust-version.workspace = true
 authors = ["nutypebuddha <nutypebuddha@proton.me>"]
 description = "L.ai · Gate — deterministic per-token validation layer for LLMs (math, logic, fact, fallacy)"
 license = "Apache-2.0"

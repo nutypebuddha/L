@@ -310,12 +310,12 @@ fn is_combust(chart: &ChartSnapshot, graha: Graha) -> bool {
 /// Uccha bala: strength is proportional to angular distance from this point.
 fn debilitation_longitude(graha: Graha) -> f64 {
     match graha {
-        Graha::Surya => 190.0,      // 10° Tula (180 + 10)
+        Graha::Surya => 190.0,      // 10° Tula (180 + 10) — debilitation
         Graha::Chandra => 213.0,    // 3° Vrishchika (180 + 33)
-        Graha::Mangala => 298.0,    // 28° Makara (270 + 28)
+        Graha::Mangala => 118.0,    // 28° Karka (90 + 28) — debilitation (298 = exalt)
         Graha::Budha => 345.0,      // 15° Meena (330 + 15)
         Graha::Brihaspati => 275.0, // 5° Makara (270 + 5)
-        Graha::Shukra => 357.0,     // 27° Meena (330 + 27)
+        Graha::Shukra => 177.0,     // 27° Kanya (150 + 27) — debilitation (357 = exalt)
         Graha::Shani => 20.0,       // 20° Mesha
         _ => 0.0,
     }
@@ -323,12 +323,13 @@ fn debilitation_longitude(graha: Graha) -> f64 {
 
 /// Uccha bala: continuous positional strength from Shadbala (BPHS).
 /// Returns 0.0 at deep debilitation, 1.0 at deep exaltation.
-/// Formula: |180 - |λ - λ_debil|| / 180, normalized to 0..1.
+/// `dist` is the angular distance (0..180) from the debilitation point;
+/// uccha bala grows linearly with that distance.
 fn uccha_bala(graha: Graha, sidereal_longitude: f64) -> f64 {
     let debil = debilitation_longitude(graha);
     let diff = (sidereal_longitude - debil).abs().rem_euclid(360.0);
     let dist = if diff <= 180.0 { diff } else { 360.0 - diff };
-    1.0 - dist / 180.0
+    dist / 180.0
 }
 
 // ─── Personality Profile ─────────────────────────────────────────────────────
@@ -490,6 +491,13 @@ pub fn derive_personality(chart: &ChartSnapshot) -> PersonalityProfile {
         for w in &mut weights {
             *w /= total;
         }
+    } else {
+        // Empty signal (all weights collapsed to 0): emit a uniform profile
+        // rather than letting argmax silently crown pillar 0 (Spear) with full
+        // confidence. Uniform weights => deterministic, no false dominance.
+        for w in &mut weights {
+            *w = 1.0 / 7.0;
+        }
     }
 
     let dominant_idx = weights
@@ -574,6 +582,7 @@ fn rashi_to_dominant_nakshatra(rashi: Rashi) -> Nakshatra {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::astrology::ALL_GRAHAS;
     use crate::ephemeris;
 
     #[test]
@@ -712,5 +721,59 @@ mod tests {
             let nak = rashi_to_dominant_nakshatra(rashi);
             assert!(!nak.name().is_empty());
         }
+    }
+
+    // ─── T79 + T80 regression lock ──────────────────────────────────────────
+    // uccha_bala must be 0.0 at deep debilitation and 1.0 at the opposite
+    // (exaltation) longitude, for *every* graha. This pins the T79 formula fix
+    // and the T80 corrected debilitation degrees together — fixing one without
+    // the other is what previously left Mangala/Shukra scored backwards.
+    #[test]
+    fn uccha_bala_debilitation_and_exaltation() {
+        for &g in ALL_GRAHAS.iter() {
+            let debil = debilitation_longitude(g);
+            let exalt = (debil + 180.0) % 360.0;
+            assert!(
+                (uccha_bala(g, debil) - 0.0).abs() < 1e-9,
+                "{:?} uccha_bala at debilitation should be 0.0, got {}",
+                g,
+                uccha_bala(g, debil)
+            );
+            assert!(
+                (uccha_bala(g, exalt) - 1.0).abs() < 1e-9,
+                "{:?} uccha_bala at exaltation should be 1.0, got {}",
+                g,
+                uccha_bala(g, exalt)
+            );
+        }
+    }
+
+    #[test]
+    fn debilitation_longitude_correct() {
+        // Corrected BPHS deep-debilitation degrees (T80).
+        assert!((debilitation_longitude(Graha::Mangala) - 118.0).abs() < 1e-9);
+        assert!((debilitation_longitude(Graha::Shukra) - 177.0).abs() < 1e-9);
+        assert!((debilitation_longitude(Graha::Surya) - 190.0).abs() < 1e-9);
+        assert!((debilitation_longitude(Graha::Chandra) - 213.0).abs() < 1e-9);
+        assert!((debilitation_longitude(Graha::Budha) - 345.0).abs() < 1e-9);
+        assert!((debilitation_longitude(Graha::Brihaspati) - 275.0).abs() < 1e-9);
+        assert!((debilitation_longitude(Graha::Shani) - 20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn combust_orb_known_grahas() {
+        // Rahu/Ketu have no classical combustion orb (the `_ => 0.0` arm).
+        assert_eq!(combust_orb(Graha::Rahu), 0.0);
+        assert_eq!(combust_orb(Graha::Ketu), 0.0);
+        assert!(combust_orb(Graha::Chandra) > 0.0);
+        assert!(combust_orb(Graha::Mangala) > 0.0);
+    }
+
+    #[test]
+    fn is_combust_self_case() {
+        // Surya can never be "combust" (self-case guard in is_combust).
+        let jd = ephemeris::julian_day(2026, 7, 7, 12.0);
+        let chart = ChartSnapshot::new(jd);
+        assert!(!is_combust(&chart, Graha::Surya));
     }
 }

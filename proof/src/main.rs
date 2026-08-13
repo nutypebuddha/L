@@ -1590,6 +1590,18 @@ fn collect_features() -> &'static str {
     if cfg!(feature = "llm") {
         features.push("llm");
     }
+    if cfg!(feature = "milp") {
+        features.push("milp");
+    }
+    if cfg!(feature = "graph") {
+        features.push("graph");
+    }
+    if cfg!(feature = "assistant") {
+        features.push("assistant");
+    }
+    if cfg!(feature = "assistant-web") {
+        features.push("assistant-web");
+    }
     // Seed corpus is always embedded in the binary (T35) — surfaced for transparency.
     features.push("embedded-corpus");
     if !corpus_overlay_dirs().is_empty() {
@@ -1986,6 +1998,19 @@ fn bind_inputs(
 
     let n = inputs.len();
     let m = numbers.len();
+    // T85: best_injective enumerates m!/(m-n)! injective assignments. Cap the
+    // candidate-scalar count so a flood of numbers can't trigger a factorial
+    // hang; above the cap we refuse (consistent with the ambiguity-refusal path).
+    const MAX_BIND_SCALARS: usize = 12;
+    if m > MAX_BIND_SCALARS {
+        if explain {
+            eprintln!(
+                "[bind]     REFUSED: too many candidate scalars ({} > {})",
+                m, MAX_BIND_SCALARS
+            );
+        }
+        return None;
+    }
     // A scalar may only bind to an input whose name token is within
     // MAX_BIND_DIST tokens of it. This rejects "topic-word steals": an input
     // whose name appears as the query subject (e.g. "gravity" in "gravity
@@ -2007,18 +2032,35 @@ fn bind_inputs(
                 (Some(a), Some(b)) => unit_eq(a, b) || unit_layer_eq(a, b),
             };
             if ok {
+                // A derived output only fills this input if its unit can actually
+                // be converted into the input's unit. A failed conversion is a
+                // unit-mismatch — refuse this hop (leave it unbound) instead of
+                // silently feeding an unconverted number downstream.
                 let val = match (&in_u, dunit) {
                     (Some(a), Some(b)) if !unit_eq(a, b) => {
-                        laverna::compute::convert::convert_any(*v, b, a).unwrap_or(*v)
+                        match laverna::compute::convert::convert_any(*v, b, a) {
+                            Some(cv) => Some(cv),
+                            None => {
+                                if explain {
+                                    eprintln!(
+                                        "[bind]     REFUSED: cannot convert {} -> {} for input `{}`",
+                                        b, a, inputs[i]
+                                    );
+                                }
+                                None
+                            }
+                        }
                     }
-                    _ => *v,
+                    _ => Some(*v),
                 };
-                bindings[i] = Some(val);
-                if detail {
-                    eprintln!(
-                        "[bind]     input `{}` <- derived `{}` = {} (unit ok)",
-                        inputs[i], inputs[i], val
-                    );
+                if let Some(val) = val {
+                    bindings[i] = Some(val);
+                    if detail {
+                        eprintln!(
+                            "[bind]     input `{}` <- derived `{}` = {} (unit ok)",
+                            inputs[i], inputs[i], val
+                        );
+                    }
                 }
             } else if detail {
                 eprintln!(
@@ -2149,7 +2191,21 @@ fn bind_inputs(
         let in_u = input_types.get(&inputs[inp_i]).cloned().flatten();
         let val = match (&in_u, sc_u) {
             (Some(a), Some(b)) if !unit_eq(a, b) => {
-                laverna::compute::convert::convert_any(raw, b, a).unwrap_or(raw)
+                // Conversion existence was pre-checked by the type gate, so this
+                // almost always succeeds; on the rare mismatch it must refuse the
+                // whole binding rather than emit an unconverted scalar.
+                match laverna::compute::convert::convert_any(raw, b, a) {
+                    Some(cv) => cv,
+                    None => {
+                        if explain {
+                            eprintln!(
+                                "[bind]     REFUSED: cannot convert {} -> {} for input `{}`",
+                                b, a, inputs[inp_i]
+                            );
+                        }
+                        return None;
+                    }
+                }
             }
             _ => raw,
         };
@@ -9870,7 +9926,9 @@ mod binder_tests {
     fn binder_no_inverse_hijack_on_spurious_noun() {
         let chain = bind("a number of 5 patients needed to treat");
         assert!(
-            !chain.iter().any(|a| a.formula_id == "number_needed_to_treat"),
+            !chain
+                .iter()
+                .any(|a| a.formula_id == "number_needed_to_treat"),
             "spurious noun 'number' must not hijack inverse mode"
         );
     }

@@ -92,8 +92,8 @@ cargo build --release -p laverna
 # Start the MCP assistant (stdio transport)
 ./target/release/lai assistant --mcp
 
-# Gate: validate LLM output tokens
-./target/release/lai gate validate "The earth is flat"
+# Gate: validate LLM output tokens (TEXT CONTEXT [DOMAIN])
+./target/release/lai gate validate "The earth is flat" "news article"
 ```
 
 No model? The engine still answers from the verified corpus and tells you it did —
