@@ -9,6 +9,7 @@ use std::sync::{Arc, OnceLock};
 use serde::{Deserialize, Serialize};
 
 use crate::domain_graph::Domain;
+use lai_core::formula::GoldenCase;
 
 use super::{Formula, FormulaError};
 
@@ -243,8 +244,23 @@ struct FormulaEntry {
     formula_type: Option<String>,
     #[serde(default)]
     inputs: Vec<String>,
+    /// Optional aliases per input name (TOML `input_aliases = { size = ["extent"] }`).
+    /// The binder accepts these tokens as substitutes for the declared input name.
+    #[serde(default)]
+    input_aliases: HashMap<String, Vec<String>>,
+    /// Declared unit of each input (TOML `input_types = { size = "bytes" }`).
+    /// `None` (key absent) means dimensionless / untyped.
+    #[serde(default)]
+    input_types: HashMap<String, Option<String>>,
+    /// Known-correct input/output pairs (golden vectors), executed by the corpus
+    /// self-verify test. TOML: `[[formula.golden]] inputs = { size = 13, align = 8 } output = 16`.
+    #[serde(default)]
+    golden: Vec<GoldenCase>,
     #[serde(default)]
     output: String,
+    /// Declared unit / quantity kind of the output (TOML `unit` also accepted).
+    #[serde(default, alias = "unit")]
+    output_unit: Option<String>,
     #[serde(default)]
     expression: String,
     #[serde(default)]
@@ -775,6 +791,9 @@ impl FormulaRegistry {
         );
 
         formula.zodiac = entry.zodiac;
+        formula.input_aliases = entry.input_aliases;
+        formula.input_types = entry.input_types;
+        formula.golden = entry.golden;
         formula.evidence = entry.evidence;
         formula.from_domain = from_domain;
         formula.to_domain = to_domain;
@@ -782,6 +801,7 @@ impl FormulaRegistry {
         formula.source = entry.source;
         formula.confidence = entry.confidence;
         formula.relations = entry.relations;
+        formula.output_unit = entry.output_unit;
 
         Ok(formula)
     }
@@ -1097,7 +1117,7 @@ mod tests {
         // Pin the corpus size so README/docs stats cannot silently drift.
         assert_eq!(
             r.len(),
-            537,
+            538,
             "formula corpus size changed — update README/docs if intentional"
         );
         // Spot-check a few known formulas
@@ -1144,5 +1164,89 @@ mod tests {
         // Wrong arity must be rejected, not silently evaluated.
         let f = r.get("add").unwrap();
         assert_ne!(f.inputs.len(), 1);
+    }
+
+    #[test]
+    fn corpus_golden_vectors() {
+        // Every formula that declares golden vectors must evaluate to its declared
+        // output. This *executes* each formula's `evidence` — turning corpus claims
+        // into verified facts on every CI run. For now the 9 Rust layout formulas
+        // carry vectors; as the annotation grind proceeds, this test covers more.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("formulas");
+        let mut r = FormulaRegistry::new();
+        if dir.exists() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension().is_some_and(|e| e == "toml") {
+                    r.load_from_file(&path)
+                        .unwrap_or_else(|e| panic!("Failed to load {}: {}", path.display(), e));
+                }
+            }
+        }
+        let mut checked = 0usize;
+        let mut total = 0usize;
+        for f in r.all() {
+            total += f.golden.len();
+            for g in &f.golden {
+                let mut env = crate::compute::create_env();
+                for (name, val) in &g.inputs {
+                    env.insert(name.clone(), *val);
+                }
+                let got = crate::compute::evaluate_expr(&f.expression, &env).unwrap_or_else(|| {
+                    panic!("{}: failed to evaluate golden case {:?}", f.id, g.inputs)
+                });
+                assert!(
+                    (got - g.output).abs() < 1e-9,
+                    "{}: golden case {:?} expected {}, got {}",
+                    f.id,
+                    g.inputs,
+                    g.output,
+                    got
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            total > 0,
+            "expected formulas to carry golden vectors (start with the 9 Rust layout formulas)"
+        );
+        assert_eq!(checked, total, "every declared golden vector must evaluate");
+    }
+
+    #[test]
+    fn corpus_type_layer_coverage() {
+        // Tracks the type-layer grind (Phase 6): the number of formulas that carry
+        // golden vectors AND declared input types must keep growing. If it drops
+        // below the floor, the grind regressed — CI catches it.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("formulas");
+        let mut r = FormulaRegistry::new();
+        if dir.exists() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension().is_some_and(|e| e == "toml") {
+                    r.load_from_file(&path)
+                        .unwrap_or_else(|e| panic!("Failed to load {}: {}", path.display(), e));
+                }
+            }
+        }
+        let mut with_golden = 0usize;
+        let mut with_types = 0usize;
+        for f in r.all() {
+            if !f.golden.is_empty() {
+                with_golden += 1;
+            }
+            if f.input_types.values().any(|u| u.is_some()) {
+                with_types += 1;
+            }
+        }
+        // Floor = 9 Rust layout formulas + 6 typed mechanics formulas.
+        assert!(
+            with_golden >= 15,
+            "type-layer grind regressed: only {with_golden} formulas carry golden vectors (floor 15)"
+        );
+        assert!(
+            with_types >= 15,
+            "type-layer grind regressed: only {with_types} formulas declare input types (floor 15)"
+        );
     }
 }

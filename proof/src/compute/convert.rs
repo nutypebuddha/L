@@ -158,6 +158,78 @@ pub fn convert_data(value: f64, from: &str, to: &str) -> Option<f64> {
     }
 }
 
+/// Classify a unit string into a canonical physical layer. Used by the `solve`
+/// binder to decide whether two differently-spelled units (e.g. `kg` vs `g`,
+/// `newtons` vs `N`) are actually the *same quantity* and therefore convertible.
+/// Both `input_types` spellings (`kg`, `m/s`, `newtons`) and `output_unit`
+/// spellings (`newtons`, `joules`, `kg_m_per_s`) map to the same layer so the
+/// binder can chain and compare across the corpus's inconsistent vocabulary.
+pub fn unit_layer(u: &str) -> Option<&'static str> {
+    // Order matters: match compound/ambiguous forms (`m/s`) before the bare
+    // `ms` (millisecond) token.
+    let raw = u.to_lowercase();
+    let u = raw
+        .strip_prefix("per_")
+        .or_else(|| raw.strip_prefix("per "))
+        .unwrap_or(&raw);
+    let u = u.replace(['*', '^', ' ', '_'], "");
+    let base = u.strip_suffix('s').unwrap_or(&u);
+    match base {
+        "kg" | "g" | "mg" | "lb" | "oz" | "t" | "ton" | "pound" | "gram" | "kilogram" => {
+            Some("mass")
+        }
+        "m" | "meter" | "km" | "cm" | "mm" | "nm" | "mi" | "mile" | "inch" | "ft" | "foot"
+        | "yard" | "length" => Some("length"),
+        "s" | "sec" | "second" | "min" | "hr" | "hour" | "day" | "week" | "ms" | "us" | "time" => {
+            Some("time")
+        }
+        "m/s" | "kmh" | "mph" | "kn" | "knot" | "velocity" => Some("velocity"),
+        "m/s2" | "acceleration" => Some("acceleration"),
+        "newton" | "force" => Some("force"),
+        "joule" | "wh" | "kwh" | "cal" | "kcal" | "btu" | "ev" | "energy" => Some("energy"),
+        "watt" | "power" => Some("power"),
+        "kgmps" | "kgm/s" | "momentum" => Some("momentum"),
+        "c" | "celsius" | "f" | "fahrenheit" | "k" | "kelvin" | "temp" | "temperature" => {
+            Some("temperature")
+        }
+        "pa" | "pascal" | "kpa" | "atm" | "psi" | "bar" | "mmhg" | "torr" | "pressure" => {
+            Some("pressure")
+        }
+        "b" | "byte" | "kb" | "mb" | "gb" | "tb" | "bit" | "data" => Some("data"),
+        "rad" | "radian" | "deg" | "degree" | "angle" => Some("angle"),
+        "hz" | "khz" | "hertz" | "frequency" => Some("frequency"),
+        "mol" | "amount" => Some("amount"),
+        "amp" | "ampere" | "a" | "current" => Some("current"),
+        "volt" | "v" | "voltage" => Some("voltage"),
+        "ohm" | "resistance" => Some("resistance"),
+        _ => None,
+    }
+}
+
+/// Convert `value` between two units if they belong to the same physical layer.
+/// Returns `None` when the units are unknown or cross-layer (those must remain a
+/// hard refusal, never a silent guess). The dispatch covers the layers the
+/// binder actually needs to normalize: mass, length, time, velocity, temperature,
+/// pressure, energy, and data.
+pub fn convert_any(value: f64, from: &str, to: &str) -> Option<f64> {
+    let from_layer = unit_layer(from)?;
+    let to_layer = unit_layer(to)?;
+    if from_layer != to_layer {
+        return None;
+    }
+    match from_layer {
+        "temperature" => convert_temperature(value, from, to),
+        "length" => convert_distance(value, from, to),
+        "mass" => convert_weight(value, from, to),
+        "velocity" => convert_speed(value, from, to),
+        "time" => convert_time(value, from, to),
+        "pressure" => convert_pressure(value, from, to),
+        "energy" => convert_energy(value, from, to),
+        "data" => convert_data(value, from, to),
+        _ => None,
+    }
+}
+
 pub fn parse_and_convert(input: &str) -> Option<(f64, String, String)> {
     let input = input.trim();
     let parts: Vec<&str> = input.split_whitespace().collect();

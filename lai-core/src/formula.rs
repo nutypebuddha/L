@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::domain::Domain;
@@ -54,6 +55,19 @@ impl FormulaType {
 /// A single primitive formula definition.
 ///
 /// Every formula is a pure primitive operation with typed inputs,
+/// A known-correct input/output pair attached to a formula (a "golden vector").
+/// Executed by the corpus self-verify test so a formula's `evidence` is verified
+/// rather than merely cited.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GoldenCase {
+    /// Input name → value.
+    #[serde(default)]
+    pub inputs: HashMap<String, f64>,
+    /// Expected evaluated output under the formula's own `expression`.
+    #[serde(default)]
+    pub output: f64,
+}
+
 /// a single output, and an evaluable expression.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Formula {
@@ -71,8 +85,29 @@ pub struct Formula {
     /// Input parameter names.
     pub inputs: Vec<String>,
 
+    /// Optional aliases per input name, used by the binder to match query
+    /// phrasing (e.g. `mass` ↔ `weight`, `velocity` ↔ `speed`). Keyed by input
+    /// name; each value lists alternative tokens accepted for that input.
+    #[serde(default)]
+    pub input_aliases: HashMap<String, Vec<String>>,
+
+    /// Declared unit / quantity kind of each input (e.g. `size: "bytes"`,
+    /// `align: "bytes"`). Keyed by input name; a value of `None` means the input
+    /// is dimensionless / untyped. The binder uses this to make wrong-slot
+    /// binding unrepresentable: a scalar of unit `celsius` can never fill an
+    /// input declared `"bytes"`, and an untyped scalar is accepted by any typed
+    /// input. Compared under normalized-string identity (see `normalize_unit`).
+    #[serde(default)]
+    pub input_types: HashMap<String, Option<String>>,
+
     /// Output parameter name.
     pub output: String,
+
+    /// Declared unit / quantity kind of the output (e.g. `"bytes"`, `"m"`,
+    /// `"kg"`). Lets the renderer show `16 bytes` instead of `16.0000` and
+    /// signals that the value is a discrete quantity, not an arbitrary float.
+    #[serde(default)]
+    pub output_unit: Option<String>,
 
     /// The evaluable expression using Azauchi syntax (src/asauchi).
     /// For math: arithmetic expression like "a + b", "sqrt(x)"
@@ -81,6 +116,13 @@ pub struct Formula {
 
     /// Human-readable description.
     pub description: String,
+
+    /// Known-correct input/output pairs (golden vectors). Executed by the corpus
+    /// self-verify test so each formula's `evidence` is actually checked, not
+    /// merely cited. `inputs` maps an input name to its value; `output` is the
+    /// expected result of evaluating `expression` against those inputs.
+    #[serde(default)]
+    pub golden: Vec<GoldenCase>,
 
     /// Zodiac symbol associations for the wheel classifier.
     /// These replace the old string tags and are used by Zanpakuto
@@ -145,8 +187,12 @@ impl Formula {
             formula_type,
             domain,
             inputs: inputs.into_iter().map(String::from).collect(),
+            input_aliases: HashMap::new(),
+            input_types: HashMap::new(),
             output: output.to_string(),
+            output_unit: None,
             expression: expression.to_string(),
+            golden: Vec::new(),
             description: description.to_string(),
             zodiac: Vec::new(),
             evidence: None,

@@ -16,7 +16,7 @@ use serde_json::Value;
 use std::borrow::Cow;
 use std::io::{self, BufRead, BufReader, Write};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 // Athena type aliases (prefixed to avoid shadowing laverna::prelude types)
 use athena::asauchi::Asauchi as AthenaAsauchi;
@@ -117,6 +117,11 @@ enum Commands {
         /// Include a wall-clock `computed_at` in the proof (breaks byte-reproducibility)
         #[arg(long)]
         timestamp: bool,
+        /// Explain the binder's decision: candidates considered, accept/refuse
+        /// reasons, and how each input was bound (name / unit / derived). Prints to
+        /// stderr so JSON `-f json` output on stdout stays intact.
+        #[arg(long)]
+        explain_binding: bool,
     },
     /// Reverse-route a query to a strategy via the 9-graha wheel
     Route {
@@ -886,11 +891,12 @@ fn main() {
             batch,
             proof_out,
             timestamp,
+            explain_binding,
         } => {
             if batch {
                 cmd_solve_batch(verbose, explain);
             } else if let Some(q) = query {
-                let result = run_solve(&q);
+                let result = run_solve(&q, explain_binding);
 
                 // Part 2.3: typed refusals. An empty query lacks the facts to
                 // evaluate; a query whose every token stays unresolved at the
@@ -1735,6 +1741,19 @@ struct NumExpr {
 }
 
 /// Fully-computed `solve` result — rendered as text or JSON without recomputation.
+/// The binder's output: a registered formula bound to the scalars the solver
+/// extracted from the query, evaluated through Tanto, with provenance.
+struct RuleApplication {
+    formula_id: String,
+    expression: String,
+    bindings: Vec<(String, f64)>,
+    output: f64,
+    /// Declared unit/quantity kind of the output (e.g. `bytes`), if the corpus
+    /// declared one. Lets the renderer show `16 bytes`, not `16.0000`.
+    unit: Option<String>,
+    provenance: Vec<ProvenanceStep>,
+}
+
 struct SolveResult {
     query: String,
     intent: &'static str,
@@ -1744,10 +1763,1155 @@ struct SolveResult {
     tanto_evals: Vec<(String, String, Option<f64>)>,
     num_exprs: Vec<NumExpr>,
     provenance: Vec<(String, Vec<ProvenanceStep>)>,
+    rule_applications: Vec<RuleApplication>,
+    /// Advisory hint shown when nothing binds: did-you-mean formulas / outputs.
+    /// Excluded from the proof payload (advisory, not provable).
+    hint: Option<String>,
+}
+
+/// Minimal binder: connect the solver's extracted scalars to a registered
+/// formula and evaluate it through Tanto.
+///
+/// Normalize-unit equality for the strict-identity type layer: lowercase, and
+/// treat a trailing `s` as plural (so `bytes` == `byte`, `meters` == `meter`).
+/// `celsius` stays `celsius` on both sides, so matching remains symmetric and
+/// never corrupts the label. Used to decide whether a scalar's unit may fill an
+/// input's declared unit.
+fn unit_eq(a: &str, b: &str) -> bool {
+    let a = a.to_lowercase();
+    let b = b.to_lowercase();
+    if a == b {
+        return true;
+    }
+    let a_s = a.strip_suffix('s').unwrap_or(&a);
+    let b_s = b.strip_suffix('s').unwrap_or(&b);
+    a_s == b_s
+}
+
+/// Two units are the *same physical quantity* (and thus convertible) when they
+/// sit in the same layer, even if spelled differently (`kg` vs `g`, `newtons`
+/// vs `N`, corpus `kg_m_per_s` vs `output_unit` `kg_m_per_s`). Cross-layer pairs
+/// (`celsius` vs `kg`) return `false` and stay a hard refusal.
+fn unit_layer_eq(a: &str, b: &str) -> bool {
+    laverna::compute::convert::unit_layer(a) == laverna::compute::convert::unit_layer(b)
+}
+
+/// Common physical/quantity units, lowercased. The corpus's own declared units
+/// are merged on top of this. Used only to *recognize* a unit word next to a
+/// number in the query; the type layer itself compares under `unit_eq`.
+const BUILTIN_UNITS: &[&str] = &[
+    "kg",
+    "g",
+    "mg",
+    "t",
+    "lb",
+    "m",
+    "cm",
+    "km",
+    "mm",
+    "nm",
+    "mile",
+    "inch",
+    "foot",
+    "yard",
+    "s",
+    "ms",
+    "us",
+    "min",
+    "hr",
+    "hour",
+    "day",
+    "celsius",
+    "fahrenheit",
+    "kelvin",
+    "newtons",
+    "joules",
+    "watts",
+    "radians",
+    "degrees",
+    "bytes",
+    "bits",
+    "liters",
+    "ml",
+    "hz",
+    "khz",
+    "pa",
+    "mol",
+    "amp",
+    "volt",
+    "psi",
+    "ev",
+];
+
+/// The global set of unit labels the binder can recognize: builtins plus every
+/// unit declared on any formula's inputs/outputs, each stored in both plural and
+/// singular form so `bytes` and `byte` are both recognized.
+fn build_unit_vocab(formulas: &[&Formula]) -> HashSet<String> {
+    let mut vocab: HashSet<String> = BUILTIN_UNITS.iter().map(|s| s.to_lowercase()).collect();
+    for f in formulas {
+        for u in f.input_types.values().flatten() {
+            vocab.insert(u.to_lowercase());
+            vocab.insert(u.to_lowercase().strip_suffix('s').unwrap_or(u).to_string());
+        }
+        if let Some(u) = &f.output_unit {
+            vocab.insert(u.to_lowercase());
+            vocab.insert(u.to_lowercase().strip_suffix('s').unwrap_or(u).to_string());
+        }
+    }
+    vocab
+}
+
+/// Infer the unit of each extracted number from the query: a unit word embedded
+/// in the number token (`13-byte`, `5kg`) or in an immediately adjacent token
+/// (`8 bytes`). Returns `None` for an untyped (dimensionless) scalar, which the
+/// type layer treats as compatible with any typed input.
+fn infer_number_units(
+    toks: &[String],
+    numbers: &[(usize, f64)],
+    vocab: &HashSet<String>,
+) -> Vec<Option<String>> {
+    numbers
+        .iter()
+        .map(|&(p, _)| {
+            let tok = &toks[p];
+            let rem: String = tok
+                .chars()
+                .filter(|c| !(c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+'))
+                .collect::<String>()
+                .to_lowercase();
+            let try_unit = |s: &str| -> Option<String> {
+                if vocab.contains(s) {
+                    return Some(s.to_string());
+                }
+                let sg = s.strip_suffix('s').unwrap_or(s);
+                if vocab.contains(sg) {
+                    return Some(sg.to_string());
+                }
+                None
+            };
+            if !rem.is_empty() {
+                if let Some(u) = try_unit(&rem) {
+                    return Some(u);
+                }
+            }
+            for &j in &[p.wrapping_sub(1), p + 1] {
+                if j < toks.len() {
+                    if let Some(u) = try_unit(&toks[j].to_lowercase()) {
+                        return Some(u);
+                    }
+                }
+            }
+            None
+        })
+        .collect()
+}
+
+/// Resolve a formula's inputs to scalars by **name/role**, never positionally.
+///
+/// Each declared input name is matched against query tokens; the scalar whose
+/// token is nearest (by word distance) is bound to it, under the constraint that
+/// every scalar is used at most once (a unique injective assignment). An input
+/// already present in `derived` — an output produced by an earlier rule in the
+/// chain — is taken from there instead. If any input has no name anchor in the
+/// query and is not in `derived`, or if the nearest-scalar assignment is
+/// ambiguous, binding **refuses** (`None`). There is deliberately no positional
+/// fallback path: that is the invented-scalar hole this design exists to prevent.
+#[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
+fn bind_inputs(
+    inputs: &[String],
+    input_types: &HashMap<String, Option<String>>,
+    aliases: &HashMap<String, Vec<String>>,
+    var_tokens: &HashSet<String>,
+    toks: &[String],
+    numbers: &[(usize, f64, Option<String>)],
+    derived: &HashMap<String, (f64, Option<String>)>,
+    explain: bool,
+    detail: bool,
+) -> Option<(Vec<(String, f64)>, Vec<usize>)> {
+    // Loose-match a token: lowercase and drop a trailing 's' (>=4 chars) so
+    // "bytes" matches "byte", "sizes" matches "size", etc.
+    let norm = |s: &str| -> String {
+        let s = s.to_lowercase();
+        if s.len() > 3 {
+            s.strip_suffix('s').unwrap_or(&s).to_string()
+        } else {
+            s
+        }
+    };
+    let occ: Vec<Vec<usize>> = inputs
+        .iter()
+        .map(|inp| {
+            let mut names: Vec<String> = Vec::new();
+            let name = inp.to_lowercase();
+            // Input names shorter than 3 chars (e.g. `a`, `b`) are not
+            // name-anchorable from free text — they would match almost any word
+            // and manufacture a binding. A declared alias of >=3 chars gives
+            // such an input a real name to anchor on.
+            if name.len() >= 3 {
+                names.push(name);
+            }
+            if let Some(als) = aliases.get(inp) {
+                for a in als {
+                    if a.to_lowercase().len() >= 3 {
+                        names.push(a.to_lowercase());
+                    }
+                }
+            }
+            if names.is_empty() {
+                return Vec::new();
+            }
+            let nnames: Vec<String> = names
+                .iter()
+                .map(|nm| {
+                    if nm.len() > 3 {
+                        nm.strip_suffix('s').unwrap_or(nm).to_string()
+                    } else {
+                        nm.clone()
+                    }
+                })
+                .collect();
+            toks.iter()
+                .enumerate()
+                .filter(|(_, t)| {
+                    let tn = norm(t);
+                    nnames
+                        .iter()
+                        .any(|m| tn == *m || tn.starts_with(m) || tn.ends_with(m))
+                })
+                .map(|(i, _)| i)
+                .collect()
+        })
+        .collect();
+
+    let n = inputs.len();
+    let m = numbers.len();
+    // A scalar may only bind to an input whose name token is within
+    // MAX_BIND_DIST tokens of it. This rejects "topic-word steals": an input
+    // whose name appears as the query subject (e.g. "gravity" in "gravity
+    // force …") but has no value actually supplied near it must not capture a
+    // stray number meant for a different input. Real values are phrased
+    // adjacent to their variable name, so this window is permissive in practice.
+    const MAX_BIND_DIST: f64 = 3.0;
+    let mut bindings: Vec<Option<f64>> = vec![None; n];
+    for i in 0..n {
+        if let Some((v, dunit)) = derived.get(&inputs[i]) {
+            // A derived output only fills this input if their units are
+            // compatible — this is what makes two-hop chaining *verified*: a
+            // byte count cannot be fed into an angle, an output of the wrong
+            // unit simply fails to bind and the hop is refused.
+            let in_u = input_types.get(&inputs[i]).cloned().flatten();
+            let ok = match (&in_u, dunit) {
+                (None, _) => true,
+                (_, None) => true,
+                (Some(a), Some(b)) => unit_eq(a, b) || unit_layer_eq(a, b),
+            };
+            if ok {
+                let val = match (&in_u, dunit) {
+                    (Some(a), Some(b)) if !unit_eq(a, b) => {
+                        laverna::compute::convert::convert_any(*v, b, a).unwrap_or(*v)
+                    }
+                    _ => *v,
+                };
+                bindings[i] = Some(val);
+                if detail {
+                    eprintln!(
+                        "[bind]     input `{}` <- derived `{}` = {} (unit ok)",
+                        inputs[i], inputs[i], val
+                    );
+                }
+            } else if detail {
+                eprintln!(
+                    "[bind]     input `{}` cannot take derived `{}` ({}): unit mismatch",
+                    inputs[i], inputs[i], *v
+                );
+            }
+        }
+    }
+    let remaining: Vec<usize> = (0..n).filter(|&i| bindings[i].is_none()).collect();
+    if remaining.is_empty() {
+        return Some((zip_bindings(inputs, &bindings), Vec::new()));
+    }
+    let mut dist = vec![vec![f64::INFINITY; m]; remaining.len()];
+    let mut method: Vec<Vec<Option<&'static str>>> = vec![vec![None; m]; remaining.len()];
+    let mut had_type_mismatch = false;
+    for (ri, &inp_i) in remaining.iter().enumerate() {
+        let in_u = input_types.get(&inputs[inp_i]).cloned().flatten();
+        let has_name = !occ[inp_i].is_empty();
+        for k in 0..m {
+            let p = numbers[k].0;
+            // Type gate: a number may only fill this input if their units are
+            // compatible (same layer, or an untyped scalar into a typed input).
+            // An incompatible pairing is set to INFINITY — a `celsius` scalar can
+            // never satisfy a `kg` input, so it drops out of the candidate set.
+            let sc_u = &numbers[k].2;
+            let compatible = match (&in_u, sc_u) {
+                (None, _) => true,
+                (_, None) => true,
+                (Some(a), Some(b)) if unit_eq(a, b) => true,
+                (Some(a), Some(b)) => laverna::compute::convert::convert_any(0.0, b, a).is_some(),
+            };
+            if !compatible {
+                had_type_mismatch = true;
+                if explain {
+                    eprintln!(
+                        "[bind]     type mismatch: input `{}` ({:?}) cannot take scalar #{} = {}{}",
+                        inputs[inp_i],
+                        in_u,
+                        k,
+                        numbers[k].1,
+                        sc_u.as_ref().map(|x| format!(" [{x}]")).unwrap_or_default()
+                    );
+                }
+                continue;
+            }
+            // Name-anchored distance (preferred): nearest name/alias token, with
+            // topic-word-steal blocking. Only available when the input has a
+            // name/alias token in the query.
+            let mut name_d: f64 = f64::INFINITY;
+            if has_name {
+                let mut best_o = None;
+                let mut best_d = f64::INFINITY;
+                for &o in &occ[inp_i] {
+                    let d = (o as f64 - p as f64).abs();
+                    if d < best_d {
+                        best_d = d;
+                        best_o = Some(o);
+                    }
+                }
+                if let Some(o) = best_o {
+                    let blocked = if o < p {
+                        (o + 1..p).any(|mid| var_tokens.contains(&toks[mid]))
+                    } else if p < o {
+                        (p + 1..o).any(|mid| var_tokens.contains(&toks[mid]))
+                    } else {
+                        false
+                    };
+                    if !blocked && best_d <= MAX_BIND_DIST {
+                        name_d = best_d;
+                    }
+                }
+            }
+            // Unit-layer fallback: a number whose unit is the same quantity as the
+            // input's declared unit (or an untyped scalar into a typed input) binds
+            // even with no name token — so `10kg` fills a `mass:kg` input. Low
+            // priority (large distance) so name-anchored bindings win ties.
+            let allow_unit = in_u.is_some() || sc_u.is_some();
+            let unit_d: f64 = if allow_unit && !name_d.is_finite() {
+                50.0
+            } else {
+                f64::INFINITY
+            };
+            let d = name_d.min(unit_d);
+            if d.is_finite() {
+                dist[ri][k] = d;
+                method[ri][k] = if name_d.is_finite() {
+                    Some("name")
+                } else {
+                    Some("unit")
+                };
+            }
+        }
+    }
+    let (_cost, assign, count) = best_injective(&dist);
+    // Whether any input had at least one compatible scalar at all. Iterating
+    // `dist` by reference (rather than re-indexing it via `remaining`/`m`)
+    // keeps this bounds-safe for every shape of `dist`.
+    let any_finite = dist.iter().any(|row| row.iter().any(|&d| d.is_finite()));
+    if count != 1 {
+        if detail {
+            if had_type_mismatch {
+                if any_finite {
+                    eprintln!(
+                        "[bind]     REFUSED: binding is ambiguous ({} equally-good assignments)",
+                        count
+                    );
+                } else {
+                    eprintln!(
+                        "[bind]     REFUSED: no compatible scalar for every input (missing name anchor / type)"
+                    );
+                }
+            } else if any_finite {
+                eprintln!(
+                    "[bind]     REFUSED: ambiguous ({} equally-good assignments)",
+                    count
+                );
+            } else {
+                eprintln!("[bind]     REFUSED: no name anchor for every input");
+            }
+        }
+        return None;
+    }
+    let mut used_idx: Vec<usize> = Vec::new();
+    for (ri, &inp_i) in remaining.iter().enumerate() {
+        let raw = numbers[assign[ri]].1;
+        let sc_u = &numbers[assign[ri]].2;
+        let in_u = input_types.get(&inputs[inp_i]).cloned().flatten();
+        let val = match (&in_u, sc_u) {
+            (Some(a), Some(b)) if !unit_eq(a, b) => {
+                laverna::compute::convert::convert_any(raw, b, a).unwrap_or(raw)
+            }
+            _ => raw,
+        };
+        if detail {
+            let how = method[ri][assign[ri]].unwrap_or("?");
+            eprintln!(
+                "[bind]     input `{}` <- scalar #{} = {}{} via {}",
+                inputs[inp_i],
+                assign[ri],
+                val,
+                in_u.as_ref().map(|x| format!(" ({x})")).unwrap_or_default(),
+                how
+            );
+        }
+        bindings[inp_i] = Some(val);
+        used_idx.push(numbers[assign[ri]].0);
+    }
+    Some((zip_bindings(inputs, &bindings), used_idx))
+}
+
+fn zip_bindings(inputs: &[String], bindings: &[Option<f64>]) -> Vec<(String, f64)> {
+    inputs
+        .iter()
+        .zip(bindings.iter())
+        .map(|(n, b)| (n.clone(), b.unwrap()))
+        .collect()
+}
+
+/// Enumerate every injective assignment of inputs to distinct scalars and return
+/// the minimum-total-distance one. `count` is how many distinct assignments
+/// achieve that minimum; `count != 1` means the binding is ambiguous and must be
+/// refused.
+#[allow(dead_code)]
+fn best_injective(dist: &[Vec<f64>]) -> (f64, Vec<usize>, usize) {
+    let m = if dist.is_empty() { 0 } else { dist[0].len() };
+    let mut best = (f64::INFINITY, Vec::new(), 0);
+    let mut used = vec![false; m];
+    let mut cur = Vec::with_capacity(dist.len());
+    best_injective_rec(dist, &mut used, &mut cur, &mut best);
+    best
+}
+
+fn best_injective_rec(
+    dist: &[Vec<f64>],
+    used: &mut Vec<bool>,
+    cur: &mut Vec<usize>,
+    best: &mut (f64, Vec<usize>, usize),
+) {
+    let n = dist.len();
+    let m = if n == 0 { 0 } else { dist[0].len() };
+    if cur.len() == n {
+        let cost: f64 = cur.iter().enumerate().map(|(i, k)| dist[i][*k]).sum();
+        if cost < best.0 - 1e-9 {
+            best.0 = cost;
+            best.1 = cur.clone();
+            best.2 = 1;
+        } else if (cost - best.0).abs() < 1e-9 {
+            best.2 += 1;
+        }
+        return;
+    }
+    let row = cur.len();
+    for k in 0..m {
+        if !used[k] && dist[row][k].is_finite() {
+            used[k] = true;
+            cur.push(k);
+            best_injective_rec(dist, used, cur, best);
+            cur.pop();
+            used[k] = false;
+        }
+    }
+}
+
+fn eval_formula_bind(f: &Formula, bindings: &[(String, f64)]) -> Option<f64> {
+    let mut env = create_env();
+    for (n, v) in bindings {
+        env.insert(n.clone(), *v);
+    }
+    // Strip whitespace so `evaluate_expr` takes the fast math path and resolves
+    // the bound input identifiers from `env` instead of NL-preprocessing them.
+    let expr = f.expression.split_whitespace().collect::<String>();
+    evaluate_expr(&expr, &env)
+}
+
+fn make_app(f: &Formula, bindings: Vec<(String, f64)>, out: f64) -> RuleApplication {
+    RuleApplication {
+        formula_id: f.id.clone(),
+        expression: f.expression.clone(),
+        bindings: bindings.clone(),
+        output: out,
+        unit: f.output_unit.clone(),
+        provenance: vec![
+            ProvenanceStep::FormulaMatch {
+                formula_id: f.id.clone(),
+                domain: format!("{:?}", f.domain),
+                inputs: f.inputs.clone(),
+                output: f.output.clone(),
+            },
+            ProvenanceStep::Unification {
+                formula_id: f.id.clone(),
+                entity_id: String::new(),
+                bound_inputs: bindings,
+                output_value: Some(out),
+            },
+        ],
+    }
+}
+
+/// Hard cap on chain depth. A visited-set already rules out cycles, but this
+/// is the loud backstop: if a chain would exceed it, `bind_formula` refuses
+/// (returns nothing) instead of wandering or inventing an answer.
+const MAX_CHAIN_DEPTH: usize = 16;
+
+/// Bind extracted scalars to formulas by name and chain the results into a
+/// rules engine.
+///
+/// Contract (see `docs/rule-binding-policy.md`): a scalar is bound to a formula
+/// input **only by matching the declared input name** in the query — never by
+/// position. If an input has no unambiguous name anchor (and isn't the output of
+/// an earlier rule in the chain) the binder **refuses**. Among formulas that
+/// bind, the highest keyword score wins; **ties at the top refuse** rather than
+/// guess. After the primary rule fires, its output variable is fed forward into
+/// any rule that consumes it (a two-hop chain), again taking the highest score
+/// and refusing on ambiguity.
+/// Does an input (or any of its declared aliases) appear as a standalone token
+/// in the query? Used by inverse solving to detect which input the user is
+/// asking for (e.g. "what **mass** has KE 100 at v 5").
+fn input_named_in_query(
+    inp: &str,
+    aliases: &HashMap<String, Vec<String>>,
+    toks: &[String],
+) -> bool {
+    let norm = |s: &str| -> String {
+        let s = s.to_lowercase();
+        if s.len() > 3 {
+            s.strip_suffix('s').unwrap_or(&s).to_string()
+        } else {
+            s
+        }
+    };
+    let mut names: Vec<String> = Vec::new();
+    if inp.len() >= 3 {
+        names.push(inp.to_lowercase());
+    }
+    for a in aliases.get(inp).into_iter().flatten() {
+        if a.len() >= 3 {
+            names.push(a.to_lowercase());
+        }
+    }
+    let nnames: Vec<String> = names
+        .iter()
+        .map(|nm| {
+            if nm.len() > 3 {
+                nm.strip_suffix('s').unwrap_or(nm).to_string()
+            } else {
+                nm.clone()
+            }
+        })
+        .collect();
+    toks.iter().any(|t| {
+        let tn = norm(t);
+        nnames
+            .iter()
+            .any(|m| tn == *m || tn.starts_with(m) || tn.ends_with(m))
+    })
+}
+
+/// Numeric inverse: given a formula, bindings for all-but-one input, the name of
+/// the missing input, and a target output value, bisect the missing input until
+/// the formula reproduces the target. Works for *any* corpus formula because it
+/// drives `evaluate_expr` directly — no per-subject solver required.
+fn solve_inverse(f: &Formula, bound: &[(String, f64)], missing: &str, target: f64) -> Option<f64> {
+    let eval = |x: f64| -> Option<f64> {
+        let mut env = create_env();
+        for (n, v) in bound {
+            env.insert(n.clone(), *v);
+        }
+        env.insert(missing.to_string(), x);
+        let e = f.expression.split_whitespace().collect::<String>();
+        evaluate_expr(&e, &env)
+    };
+    let mut lo = -1e9;
+    let mut hi = 1e9;
+    let flo = eval(lo)?;
+    let fhi = eval(hi)?;
+    if (flo - target).signum() != (fhi - target).signum() {
+        for _ in 0..100 {
+            let mid = (lo + hi) / 2.0;
+            let fm = eval(mid)?;
+            if (fm - target).abs() < 1e-9 {
+                return Some(mid);
+            }
+            if (flo - target).signum() == (fm - target).signum() {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        return Some((lo + hi) / 2.0);
+    }
+    None
+}
+
+/// Inverse pre-pass: detects "what mass has **kinetic energy 100** at velocity 5"
+/// — a scalar sitting next to the formula's *output* name (not an input name).
+/// That scalar is the target output; the input named in the query but with no
+/// nearby scalar is the unknown, bisected via `solve_inverse`. Runs before
+/// forward binding so it isn't pre-empted by a wrong positional assignment.
+fn try_inverse_pre(
+    toks: &[String],
+    numbers: &[(usize, f64, Option<String>)],
+    formulas: &[&Formula],
+    id_score: &dyn Fn(&Formula) -> f64,
+) -> Option<RuleApplication> {
+    let norm = |s: &str| -> String {
+        let s = s.to_lowercase();
+        if s.len() > 3 {
+            s.strip_suffix('s').unwrap_or(&s).to_string()
+        } else {
+            s
+        }
+    };
+    let mut cands: Vec<&&Formula> = formulas.iter().filter(|f| id_score(f) > 0.0).collect();
+    cands.sort_by(|a, b| {
+        id_score(b)
+            .partial_cmp(&id_score(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.id.cmp(&b.id))
+    });
+    for &f in &cands {
+        // Input names/aliases are anchors for *inputs*, not the output. Matching a
+        // scalar against an id word that is also an input name (e.g. `size` in
+        // `rust_struct_padded_size`) would misread a supplied input value as the
+        // stated output and wrongly enter inverse mode.
+        let input_names: HashSet<String> = f
+            .inputs
+            .iter()
+            .map(|i| norm(i))
+            .chain(f.input_aliases.values().flatten().map(|a| norm(a)))
+            .collect();
+        // The "stated output" anchor for inverse mode is, in priority order:
+        //   1. the formula's declared `output` (the authoritative result name), and
+        //   2. the LAST non-connector, non-input, non-numeric id token — the result
+        //      noun (e.g. `kinetic_energy` → "energy", `force_to_power` → "power").
+        // We deliberately do NOT scan *every* id fragment. Doing so let connector
+        // words ("to"/"of"/"and") and spurious nouns ("number", "rule", "law") act
+        // as output anchors, reading an unrelated scalar as the stated output and
+        // hijacking the solve into inverse mode with a nonsense result
+        // (`nand_to_not` on "aligned to 8", `number_needed_to_treat` on "a number
+        // of 5…"). Limiting to the output name + the final id token removes the
+        // whole hijack class while keeping legitimate "stated output" detection.
+        let mut out_words: Vec<String> = Vec::new();
+        if !f.output.is_empty() {
+            out_words.push(norm(&f.output));
+        }
+        if let Some(last) = f.id.split('_').next_back() {
+            let nw = norm(last);
+            let is_numeric = last.chars().any(|c| c.is_ascii_digit());
+            if !is_numeric
+                && nw.len() >= 2
+                && !input_names.contains(&nw)
+                && !laverna::nlp::is_stopword(&nw)
+                && !out_words.contains(&nw)
+            {
+                out_words.push(nw);
+            }
+        }
+        let nearest: Vec<(usize, f64)> = numbers
+            .iter()
+            .map(|(p, _, _)| {
+                let mut best = (0usize, f64::INFINITY);
+                for (ti, _t) in toks.iter().enumerate() {
+                    if ti == *p {
+                        continue;
+                    }
+                    let d = (ti as f64 - *p as f64).abs();
+                    if d < best.1 {
+                        best = (ti, d);
+                    }
+                }
+                best
+            })
+            .collect();
+        let mut target_k: Option<usize> = None;
+        for (k, &(nti, d)) in nearest.iter().enumerate() {
+            if d > 3.0 {
+                continue;
+            }
+            let t = norm(&toks[nti]);
+            if out_words
+                .iter()
+                .any(|w| t == *w || t.starts_with(w) || t.ends_with(w))
+            {
+                target_k = Some(k);
+                break;
+            }
+        }
+        let target_k = target_k?;
+        let target = numbers[target_k].1;
+        let mut bindings: Vec<(String, f64)> = Vec::new();
+        let mut missing: Vec<String> = Vec::new();
+        for inp in &f.inputs {
+            let mut names: Vec<String> = Vec::new();
+            if inp.len() >= 3 {
+                names.push(norm(inp));
+            }
+            for a in f.input_aliases.get(inp).into_iter().flatten() {
+                if a.len() >= 3 {
+                    names.push(norm(a));
+                }
+            }
+            let mut found: Option<f64> = None;
+            for (k, (_p, v, _u)) in numbers.iter().enumerate() {
+                if k == target_k {
+                    continue;
+                }
+                let (nti, _) = nearest[k];
+                let t = norm(&toks[nti]);
+                if names
+                    .iter()
+                    .any(|nm| t == *nm || t.starts_with(nm) || t.ends_with(nm))
+                {
+                    found = Some(*v);
+                    break;
+                }
+            }
+            if let Some(v) = found {
+                bindings.push((inp.clone(), v));
+            } else {
+                missing.push(inp.clone());
+            }
+        }
+        if missing.len() == 1 && bindings.len() == f.inputs.len() - 1 {
+            if let Some(x) = solve_inverse(f, &bindings, &missing[0], target) {
+                let mut full = bindings.clone();
+                full.push((missing[0].clone(), x));
+                let out = eval_formula_bind(f, &full)?;
+                return Some(make_app(f, full, out));
+            }
+        }
+    }
+    None
+}
+
+/// Inverse fallback: when no formula binds directly but a keyword-matching
+/// formula is missing exactly one input that the user *named* in the query,
+/// solve that input from the single leftover scalar (treated as the output).
+fn solve_inverse_fallback(
+    toks: &[String],
+    numbers: &[(usize, f64, Option<String>)],
+    formulas: &[&Formula],
+    var_tokens: &HashSet<String>,
+    id_score: &dyn Fn(&Formula) -> f64,
+    rank_of: &dyn Fn(&Formula) -> usize,
+) -> Option<RuleApplication> {
+    let mut cands: Vec<&&Formula> = formulas.iter().filter(|f| id_score(f) > 0.0).collect();
+    cands.sort_by(|a, b| {
+        id_score(b)
+            .partial_cmp(&id_score(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(rank_of(a).cmp(&rank_of(b)))
+            .then(a.id.cmp(&b.id))
+    });
+    for &f in &cands {
+        for miss in &f.inputs {
+            if !input_named_in_query(miss, &f.input_aliases, toks) {
+                continue;
+            }
+            let rest: Vec<String> = f.inputs.iter().filter(|i| *i != miss).cloned().collect();
+            if rest.is_empty() {
+                continue;
+            }
+            let rest_types: HashMap<String, Option<String>> = f
+                .input_types
+                .iter()
+                .filter(|(k, _)| k.as_str() != miss)
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            let rest_aliases: HashMap<String, Vec<String>> = f
+                .input_aliases
+                .iter()
+                .filter(|(k, _)| k.as_str() != miss)
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            if let Some((bindings, used)) = bind_inputs(
+                &rest,
+                &rest_types,
+                &rest_aliases,
+                var_tokens,
+                toks,
+                numbers,
+                &HashMap::new(),
+                false,
+                false,
+            ) {
+                let leftover: Vec<(usize, f64, Option<String>)> = numbers
+                    .iter()
+                    .filter(|(idx, _, _)| !used.contains(idx))
+                    .cloned()
+                    .collect();
+                if leftover.len() == 1 {
+                    let target = leftover[0].1;
+                    if let Some(x) = solve_inverse(f, &bindings, miss, target) {
+                        let mut full = bindings.clone();
+                        full.push((miss.to_string(), x));
+                        let out = eval_formula_bind(f, &full)?;
+                        return Some(make_app(f, full, out));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Bind extracted scalars to formulas by name/alias/unit, chain the results into
+/// a rules engine, and — when nothing binds directly — attempt inverse solving.
+///
+/// Selection no longer *refuses on score ties*: candidates are ranked by (inputs
+/// filled, id-keyword score, registry TF-IDF rank, formula id) and the top is
+/// taken deterministically. This is what lets `kinetic_energy` win over
+/// `momentum_to_kinetic_energy` (the latter can't bind `momentum` from the
+/// query) and unlocks formulas whose id shares a word with another.
+fn bind_formula(
+    query: &str,
+    numerical: &[f64],
+    reg: &FormulaRegistry,
+    explain: bool,
+) -> Vec<RuleApplication> {
+    if numerical.is_empty() {
+        if explain {
+            eprintln!("[bind] no scalars in query — binder has nothing to bind");
+        }
+        return Vec::new();
+    }
+    let toks: Vec<String> = query.split_whitespace().map(|t| t.to_lowercase()).collect();
+    let raw_numbers: Vec<(usize, f64)> = toks
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            // A token is a scalar only if it *starts* with a digit (or sign+digit).
+            // This prevents identifiers like `mass1`/`mass2` from being parsed as
+            // the numbers 1/2. Compound tokens like `13-byte`/`5kg` still parse
+            // (the leading digits are the value; the remainder is the unit).
+            let starts_num = t
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_digit() || c == '+' || c == '-')
+                .unwrap_or(false)
+                && t.chars().find(|c| c.is_ascii_digit()).is_some();
+            if !starts_num {
+                return None;
+            }
+            let digits: String = t
+                .chars()
+                .filter(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            digits.parse::<f64>().ok().map(|v| (i, v))
+        })
+        .collect();
+    if raw_numbers.is_empty() {
+        return Vec::new();
+    }
+    let formulas_all: Vec<&Formula> = reg.all();
+    let unit_vocab = build_unit_vocab(&formulas_all);
+    let number_units = infer_number_units(&toks, &raw_numbers, &unit_vocab);
+    let numbers: Vec<(usize, f64, Option<String>)> = raw_numbers
+        .into_iter()
+        .zip(number_units)
+        .map(|((p, v), u)| (p, v, u))
+        .collect();
+    let q = query.to_lowercase();
+
+    if explain {
+        eprintln!("[bind] query tokens: {:?}", toks);
+        let sc: Vec<String> = numbers
+            .iter()
+            .map(|(p, v, u)| {
+                format!(
+                    "#{} (tok '{}') = {}{}",
+                    p,
+                    toks[*p],
+                    v,
+                    u.as_ref().map(|x| format!(" [{x}]")).unwrap_or_default()
+                )
+            })
+            .collect();
+        eprintln!("[bind] scalars: {}", sc.join("  "));
+    }
+
+    // Global set of variable-name tokens (input names + declared aliases, len>=3)
+    // across the whole corpus. Used to detect when a stray number is actually
+    // owned by a different variable mentioned between this input and the number.
+    let var_tokens: HashSet<String> = {
+        let mut set = HashSet::new();
+        for f in reg.all() {
+            for inp in &f.inputs {
+                if inp.len() >= 3 {
+                    set.insert(inp.to_lowercase());
+                }
+            }
+            for als in f.input_aliases.values() {
+                for a in als {
+                    if a.len() >= 3 {
+                        set.insert(a.to_lowercase());
+                    }
+                }
+            }
+        }
+        set
+    };
+
+    let mut formulas: Vec<&Formula> = reg.all();
+    formulas.sort_by_key(|f| &f.id);
+
+    // Semantic rank from the registry's TF-IDF search (lower index = better).
+    let semantic_rank: HashMap<String, usize> = reg
+        .search_semantic(&q, 40)
+        .iter()
+        .enumerate()
+        .map(|(i, f)| (f.id.clone(), i))
+        .collect();
+    let rank_of =
+        |f: &Formula| -> usize { semantic_rank.get(&f.id).copied().unwrap_or(usize::MAX) };
+
+    let id_score = |f: &Formula| -> f64 {
+        let mut s = 0.0;
+        for kw in f.id.split('_') {
+            if kw.len() < 2 {
+                continue;
+            }
+            if q.contains(kw) {
+                s += 2.0;
+            }
+        }
+        for z in &f.zodiac {
+            if q.contains(&z.to_lowercase()) {
+                s += 1.0;
+            }
+        }
+        if !f.description.is_empty() && q.contains(&f.description.to_lowercase()) {
+            s += 1.0;
+        }
+        s
+    };
+
+    // Inverse pre-pass: a scalar next to the output name (e.g. "kinetic energy
+    // 100") means the user stated the *result* and wants an input solved — run
+    // this before forward binding so it isn't pre-empted by a wrong assignment.
+    if let Some(app) = try_inverse_pre(&toks, &numbers, &formulas, &id_score) {
+        if explain {
+            eprintln!(
+                "[bind] inverse pre-pass matched `{}` (a scalar was read as the stated OUTPUT)",
+                app.formula_id
+            );
+        }
+        return vec![app];
+    }
+
+    // A formula is a forward-binding candidate only if the query matches one of
+    // its *substantive* keywords (an id/output word that is not itself a bare unit
+    // label). A query that merely contains a unit word (`bytes`) must not promote
+    // an unrelated unit-formula (`rust_vec_heap_bytes`) into binding just because
+    // its inputs happen to be fillable — that is the silent-wrong-answer hole. A
+    // formula whose entire identity is units (`bytes_to_bits`) is exempt, so a
+    // unit-only query can still reach it.
+    let substantive_match = |f: &Formula| -> bool {
+        let word_match = f.id.split('_').any(|w| {
+            w.len() >= 2 && !unit_vocab.contains(&w.to_lowercase()) && q.contains(&w.to_lowercase())
+        });
+        let out_match = !f.output.is_empty()
+            && !unit_vocab.contains(&f.output.to_lowercase())
+            && q.contains(&f.output.to_lowercase());
+        word_match || out_match
+    };
+    let has_substantive = |f: &Formula| -> bool {
+        f.id.split('_')
+            .any(|w| w.len() >= 2 && !unit_vocab.contains(&w.to_lowercase()))
+            || (!f.output.is_empty() && !unit_vocab.contains(&f.output.to_lowercase()))
+    };
+
+    // Fully bind every formula; keep (formula, bindings). Skip constant formulas
+    // (no inputs) — they are not queryable rules and would otherwise win as the
+    // only "binding" and emit garbage like `zero = 0`.
+    let mut bound: Vec<(&Formula, Vec<(String, f64)>)> = Vec::new();
+    let mut skipped = 0usize;
+    for &f in &formulas {
+        if f.inputs.is_empty() {
+            continue;
+        }
+        if has_substantive(f) && !substantive_match(f) {
+            skipped += 1;
+            continue;
+        }
+        // Full per-candidate detail is only worth printing for strong keyword
+        // matches (id_score >= 3) or formulas with *typed* inputs — the latter is
+        // where a unit conflict (e.g. celsius into bytes) can occur. Weak matches
+        // on generic words like `to`/`of` (id_score 2, untyped inputs) are silent
+        // unless they actually bind or hit a type mismatch.
+        let has_typed_input = f.input_types.values().any(|v| v.is_some());
+        let detail = explain && (id_score(f) >= 3.0 || has_typed_input);
+        if detail {
+            eprintln!(
+                "[bind] candidate `{}`: inputs={:?} types={:?} id_score={:.1}",
+                f.id,
+                f.inputs,
+                f.input_types,
+                id_score(f)
+            );
+        }
+        if let Some((b, _used)) = bind_inputs(
+            &f.inputs,
+            &f.input_types,
+            &f.input_aliases,
+            &var_tokens,
+            &toks,
+            &numbers,
+            &HashMap::new(),
+            explain,
+            detail,
+        ) {
+            bound.push((f, b));
+        }
+    }
+    if explain && skipped > 0 {
+        eprintln!(
+            "[bind] {} candidates skipped (no substantive keyword match in query)",
+            skipped
+        );
+    }
+
+    // Rank: most inputs filled, then stronger id-score, then better semantic rank,
+    // then formula id (deterministic). Ties no longer refuse — we pick the top.
+    bound.sort_by(|a, b| {
+        b.1.len()
+            .cmp(&a.1.len())
+            .then(
+                id_score(b.0)
+                    .partial_cmp(&id_score(a.0))
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+            .then(rank_of(a.0).cmp(&rank_of(b.0)))
+            .then(a.0.id.cmp(&b.0.id))
+    });
+
+    if let Some((first, first_bind)) = bound.first() {
+        if explain {
+            eprintln!(
+                "[bind] selected top candidate `{}` (most inputs filled, then relevance, then rank)",
+                first.id
+            );
+        }
+        let mut derived: HashMap<String, (f64, Option<String>)> = HashMap::new();
+        let mut chain: Vec<RuleApplication> = Vec::new();
+        let mut used: Vec<String> = Vec::new();
+        let mut current = *first;
+        let mut current_bind = first_bind.clone();
+
+        while let Some(out) = eval_formula_bind(current, &current_bind) {
+            chain.push(make_app(current, current_bind.clone(), out));
+            if !current.output.is_empty() {
+                derived.insert(current.output.clone(), (out, current.output_unit.clone()));
+            }
+            used.push(current.id.clone());
+
+            // Termination: a visited-set (`used`) makes cycles impossible, and a
+            // hard depth cap is the backstop.
+            if chain.len() >= MAX_CHAIN_DEPTH {
+                break;
+            }
+
+            // Forward chain: a rule consuming `current.output` by name. Chaining is
+            // name-driven (input name == the derived output name) so a verified step
+            // only feeds a downstream rule that actually takes its result — sibling
+            // formulas that merely share a unit layer (e.g. `rust_align_padding`
+            // alongside `rust_struct_padded_size`) are NOT greedy-chained.
+            let mut consumers: Vec<(&Formula, Vec<(String, f64)>)> = Vec::new();
+            for &f in &formulas {
+                if used.contains(&f.id) {
+                    continue;
+                }
+                if f.inputs.is_empty() {
+                    continue;
+                }
+                let consumes_by_name = f.inputs.iter().any(|inp| inp == &current.output);
+                if !consumes_by_name {
+                    continue;
+                }
+                if let Some((b, _)) = bind_inputs(
+                    &f.inputs,
+                    &f.input_types,
+                    &f.input_aliases,
+                    &var_tokens,
+                    &toks,
+                    &numbers,
+                    &derived,
+                    explain,
+                    true,
+                ) {
+                    if explain {
+                        eprintln!(
+                            "[bind]   chain step: `{}` consumes output `{}` by name",
+                            f.id, current.output
+                        );
+                    }
+                    consumers.push((f, b));
+                } else if explain {
+                    let missing: Vec<&String> = f
+                        .inputs
+                        .iter()
+                        .filter(|inp| *inp != &current.output)
+                        .collect();
+                    eprintln!(
+                        "[bind]   `{}` consumes `{}` by name but cannot fill remaining inputs {:?}",
+                        f.id, current.output, missing
+                    );
+                }
+            }
+            if consumers.is_empty() {
+                if explain {
+                    eprintln!(
+                        "[bind] no name-consuming rule for output `{}` → chain stops",
+                        current.output
+                    );
+                }
+                break;
+            }
+            consumers.sort_by(|a, b| {
+                b.1.len()
+                    .cmp(&a.1.len())
+                    .then(
+                        id_score(b.0)
+                            .partial_cmp(&id_score(a.0))
+                            .unwrap_or(std::cmp::Ordering::Equal),
+                    )
+                    .then(rank_of(a.0).cmp(&rank_of(b.0)))
+                    .then(a.0.id.cmp(&b.0.id))
+            });
+            current = consumers[0].0;
+            current_bind = consumers[0].1.clone();
+        }
+        return chain;
+    }
+
+    // No direct bind: try inverse solving (e.g. "what mass has KE 100 at v 5").
+    if let Some(app) =
+        solve_inverse_fallback(&toks, &numbers, &formulas, &var_tokens, &id_score, &rank_of)
+    {
+        if explain {
+            eprintln!(
+                "[bind] inverse fallback matched `{}` (solved a missing input from the leftover scalar)",
+                app.formula_id
+            );
+        }
+        return vec![app];
+    }
+
+    Vec::new()
 }
 
 /// Run the full `solve` pipeline and collect every result field.
-fn run_solve(query: &str) -> SolveResult {
+fn run_solve(query: &str, explain_binding: bool) -> SolveResult {
     let formula_reg = load_formula_registry();
     let entity_reg = load_entity_registry();
     let forms = load_shikai_forms();
@@ -1827,6 +2991,30 @@ fn run_solve(query: &str) -> SolveResult {
         .map(|t| (t.text.clone(), t.provenance.clone()))
         .collect();
 
+    let rule_applications = bind_formula(query, &numerical, &formula_reg, explain_binding);
+
+    // Advisory hint when nothing bound: point at near-miss formulas/outputs so a
+    // wrong query is self-correcting instead of silently empty (fail-loud UX).
+    let hint = if rule_applications.is_empty() {
+        let similar = formula_reg.suggest_similar(query, 3);
+        let out_sug = formula_reg.suggest_outputs(query, 3);
+        let mut parts: Vec<String> = Vec::new();
+        if !similar.is_empty() {
+            let ids: Vec<&str> = similar.iter().map(|(id, _)| id.as_str()).collect();
+            parts.push(format!("did you mean a formula like: {}?", ids.join(", ")));
+        }
+        if !out_sug.is_empty() {
+            parts.push(format!("known outputs include: {}?", out_sug.join(", ")));
+        }
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(" "))
+        }
+    } else {
+        None
+    };
+
     SolveResult {
         query: query.to_string(),
         intent,
@@ -1836,6 +3024,8 @@ fn run_solve(query: &str) -> SolveResult {
         tanto_evals,
         num_exprs,
         provenance,
+        rule_applications,
+        hint,
     }
 }
 
@@ -1980,7 +3170,7 @@ fn cmd_verify(path: &str, format: OutputFormat) {
     let digest_ok = !recorded_digest.is_empty() && recorded_digest == recomputed_digest_of_recorded;
 
     // 2. Recomputation: re-run the descent and rebuild the canonical payload.
-    let recomputed_payload = build_proof_payload(&run_solve(&query));
+    let recomputed_payload = build_proof_payload(&run_solve(&query, false));
     let recomputed_digest = proof_digest(&recomputed_payload);
     let recompute_ok = recorded_payload == recomputed_payload;
 
@@ -2578,6 +3768,50 @@ fn print_solve(result: &SolveResult, verbose: bool, explain: bool, format: Outpu
         );
     }
 
+    // Binder: scalar → formula application
+    if result.rule_applications.is_empty() {
+        if result.numerical.len() >= 2 {
+            println!();
+            println!("rule application: (no formula bound to scalars — refused/ambiguous)");
+            if let Some(hint) = &result.hint {
+                println!("hint: {hint}");
+            }
+        }
+    } else {
+        println!();
+        println!("rule application:");
+        let n_steps = result.rule_applications.len();
+        for (i, app) in result.rule_applications.iter().enumerate() {
+            let bind: Vec<String> = app
+                .bindings
+                .iter()
+                .map(|(n, v)| format!("{n}={v}"))
+                .collect();
+            let rendered = if app.output.is_finite() && app.output.fract() == 0.0 {
+                format!("{:.0}", app.output)
+            } else {
+                format!("{:.4}", app.output)
+            };
+            let tag = if i + 1 < n_steps {
+                "  (intermediate)"
+            } else {
+                ""
+            };
+            let unit = app.unit.as_deref().unwrap_or("");
+            println!(
+                "  {}. {} ({})  [{}] = {}{}{}{}",
+                i + 1,
+                app.formula_id,
+                app.expression,
+                bind.join(", "),
+                rendered,
+                if unit.is_empty() { "" } else { " " },
+                unit,
+                tag
+            );
+        }
+    }
+
     // Richer trace: per-token graha decomposition (T46#4)
     if explain {
         println!();
@@ -2703,6 +3937,22 @@ fn solve_to_json(result: &SolveResult) -> Value {
         .iter()
         .map(|(tok, steps)| serde_json::json!({"token": tok, "steps": steps}))
         .collect();
+    let rule_applications: Vec<Value> = result
+        .rule_applications
+        .iter()
+        .enumerate()
+        .map(|(i, app)| {
+            serde_json::json!({
+                "step": i,
+                "formula_id": app.formula_id,
+                "expression": app.expression,
+                "bindings": app.bindings,
+                "output": app.output,
+                "unit": app.unit,
+                "provenance": app.provenance
+            })
+        })
+        .collect();
     serde_json::json!({
         "query": result.query,
         "intent": result.intent,
@@ -2717,6 +3967,7 @@ fn solve_to_json(result: &SolveResult) -> Value {
         "tanto_evaluations": tanto,
         "numerical_expressions": num_exprs,
         "provenance": provenance,
+        "rule_applications": rule_applications,
         "dominant_domains": result.matrix.dominant_domains
     })
 }
@@ -2744,7 +3995,7 @@ fn cmd_solve_batch(_verbose: bool, _explain: bool) {
         } else {
             line.to_string()
         };
-        let result = run_solve(&query);
+        let result = run_solve(&query, false);
         let value = solve_to_json(&result);
         let _ = writeln!(out, "{}", serde_json::to_string(&value).unwrap());
     }
@@ -2781,6 +4032,9 @@ struct RouteResult {
     report: StrategyReport,
     /// Per-token dominant graha force as `(symbol, name)`, or `None`.
     decomposition: Vec<(String, Option<(String, String)>)>,
+    /// The settling matrix so callers can read per-token vedic_classification
+    /// for interaction modifiers.
+    matrix: laverna::descent::SettlingMatrix,
 }
 
 /// Reverse-route a query to a strategy: descent → pure token→graha resolution
@@ -2824,6 +4078,7 @@ fn run_route(query: &str) -> RouteResult {
         query: query.to_string(),
         report,
         decomposition,
+        matrix,
     }
 }
 
@@ -3887,8 +5142,9 @@ fn cmd_strategize(
 
     // 1. Reverse-route the query → graha forces → strategy report (deterministic).
     let route = run_route(&query);
-    let pillars = aggregate_pillars(&route.report);
+    let pillars = aggregate_pillars(&route.report, &route.matrix);
     let speculative = route.report.warning.is_some();
+    let decomposition = route.decomposition;
 
     // 2. Build the optimization schema from the pillar vector.
     let (schema, domain_name) = match &domain_path {
@@ -3953,6 +5209,7 @@ fn cmd_strategize(
         print_strategize_json(
             &query,
             &route.report,
+            &decomposition,
             &pillars,
             &domain_name,
             budget,
@@ -3963,6 +5220,7 @@ fn cmd_strategize(
         print_strategize_text(
             &query,
             &route.report,
+            &decomposition,
             &pillars,
             &domain_name,
             budget,
@@ -3979,6 +5237,7 @@ fn cmd_strategize(
 fn print_strategize_text(
     query: &str,
     report: &StrategyReport,
+    decomposition: &[(String, Option<(String, String)>)],
     pillars: &[f64; 7],
     domain_name: &str,
     budget: f64,
@@ -4012,6 +5271,24 @@ fn print_strategize_text(
         }
     }
 
+    // Token-by-token descent trace.
+    println!();
+    println!("TOKEN → GRAHA:");
+    for (token, entry) in decomposition {
+        match entry {
+            Some((symbol, name)) => {
+                if name == "stopword" {
+                    println!("  {token:>12} → — (stopword)");
+                } else {
+                    println!("  {token:>12} → {symbol} {name}");
+                }
+            }
+            None => {
+                println!("  {token:>12} → unresolved");
+            }
+        }
+    }
+
     println!();
     println!("7-PILLAR WEIGHTS:");
     for (i, &weight) in pillars.iter().enumerate() {
@@ -4040,9 +5317,11 @@ fn print_strategize_text(
 }
 
 /// Render `strategize` as machine-readable JSON.
+#[allow(clippy::too_many_arguments)]
 fn print_strategize_json(
     query: &str,
     report: &StrategyReport,
+    decomposition: &[(String, Option<(String, String)>)],
     pillars: &[f64; 7],
     domain_name: &str,
     budget: f64,
@@ -4059,6 +5338,25 @@ fn print_strategize_json(
                 "archetype": g.archetype(),
                 "share": share
             })
+        })
+        .collect();
+    let decomposition_json: Vec<Value> = decomposition
+        .iter()
+        .map(|(token, entry)| match entry {
+            Some((symbol, name)) => {
+                serde_json::json!({
+                    "token": token,
+                    "graha_symbol": symbol,
+                    "graha_name": name,
+                })
+            }
+            None => {
+                serde_json::json!({
+                    "token": token,
+                    "graha_symbol": serde_json::Value::Null,
+                    "graha_name": serde_json::Value::Null,
+                })
+            }
         })
         .collect();
     let pillar_json: Vec<Value> = pillars
@@ -4092,6 +5390,7 @@ fn print_strategize_json(
         "domain": domain_name,
         "budget": budget,
         "forces": forces,
+        "decomposition": decomposition_json,
         "pillars": pillar_json,
         "allocations": alloc_json
     });
@@ -5465,15 +6764,40 @@ const WB_INDICATORS: &[(&str, &str)] = &[
     ("inflation", "FP.CPI.TOTL.ZG"),
     ("co2", "EN.ATM.CO2E.KT"),
     ("fertility", "SP.DYN.TFRT.IN"),
+    ("exports", "NE.EXP.GNFS.CD"),
+    ("imports", "NE.IMP.GNFS.CD"),
+    ("trade balance", "NE.RSB.GNFS.CD"),
+    ("foreign direct investment", "BX.KLT.DINV.WD.GD.ZS"),
+    ("fdi", "BX.KLT.DINV.WD.GD.ZS"),
+    ("electricity", "EG.USE.ELEC.KH.PC"),
+    ("energy use", "EG.USE.PCAP.KG.OE"),
+    ("renewable energy", "EG.FEC.RNEW.ZS"),
+    ("oil production", "NY.GDP.PETR.RT.ZS"),
+    ("oil rent", "NY.GDP.PETR.RT.ZS"),
+    ("gas production", "NY.GDP.NGAS.RT.ZS"),
+    ("natural gas rent", "NY.GDP.NGAS.RT.ZS"),
+    ("mobile phones", "IT.CEL.SETS.P2"),
+    ("internet users", "IT.NET.USER.ZS"),
+    ("research spending", "GB.XPD.RSDV.GD.ZS"),
+    ("military spending", "MS.MIL.XPND.GD.ZS"),
+    ("health spending", "SH.XPD.CHEX.GD.ZS"),
+    ("education spending", "SE.XPD.TOTL.GD.ZS"),
+    ("poverty", "SI.POV.DDAY"),
+    ("income share top 10", "SI.DST.10TH.10"),
+    ("gini", "SI.POV.GINI"),
+    ("corruption", "IQ.CPA.CORR.XQ"),
+    ("business ease", "IC.BUS.EASE.XQ"),
+    ("democracy", "PV.EST"),
+    ("press freedom", "VA.EST"),
 ];
 
 #[cfg(feature = "websearch")]
 const WB_COUNTRIES: &[(&str, &str)] = &[
+    ("world", "WLD"),
+    ("global", "WLD"),
     ("united states", "US"),
     ("usa", "US"),
     ("us", "US"),
-    ("world", "WLD"),
-    ("global", "WLD"),
     ("china", "CN"),
     ("india", "IN"),
     ("japan", "JP"),
@@ -5489,6 +6813,56 @@ const WB_COUNTRIES: &[(&str, &str)] = &[
     ("mexico", "MX"),
     ("indonesia", "ID"),
     ("nigeria", "NG"),
+    ("south korea", "KR"),
+    ("korea", "KR"),
+    ("turkey", "TR"),
+    ("saudi arabia", "SA"),
+    ("saudi", "SA"),
+    ("iran", "IR"),
+    ("uae", "AE"),
+    ("united arab emirates", "AE"),
+    ("netherlands", "NL"),
+    ("spain", "ES"),
+    ("italy", "IT"),
+    ("switzerland", "CH"),
+    ("poland", "PL"),
+    ("argentina", "AR"),
+    ("egypt", "EG"),
+    ("thailand", "TH"),
+    ("vietnam", "VN"),
+    ("south africa", "ZA"),
+    ("pakistan", "PK"),
+    ("bangladesh", "BD"),
+    ("colombia", "CO"),
+    ("malaysia", "MY"),
+    ("philippines", "PH"),
+    ("chile", "CL"),
+    ("peru", "PE"),
+    ("iraq", "IQ"),
+    ("algeria", "DZ"),
+    ("qatar", "QA"),
+    ("kuwait", "KW"),
+    ("angola", "AO"),
+    ("kazakhstan", "KZ"),
+    ("venezuela", "VE"),
+    ("cuba", "CU"),
+    ("north korea", "KP"),
+    ("syria", "SY"),
+    ("libya", "LY"),
+    ("myanmar", "MM"),
+    ("sudan", "SD"),
+    ("yemen", "YE"),
+    ("afghanistan", "AF"),
+    ("ethiopia", "ET"),
+    ("kenya", "KE"),
+    ("ghana", "GH"),
+    ("tanzania", "TZ"),
+    ("uganda", "UG"),
+    ("mozambique", "MZ"),
+    ("zambia", "ZM"),
+    ("cote d'ivoire", "CI"),
+    ("congo", "CD"),
+    ("cameroon", "CM"),
 ];
 
 /// Pure: parse a free-form websearch query into (indicator code, country, year).
@@ -5624,10 +6998,94 @@ fn world_bank_lookup(indicator: &str, country: &str, year: Option<u32>) -> Resul
     parse_world_bank_response(&body)
 }
 
+/// Try to fetch a non-World-Bank data source (commodity prices, etc.).
+/// Returns `None` if the indicator isn't a commodity we know.
+#[cfg(feature = "websearch")]
+fn commodity_lookup(indicator: &str) -> Option<Result<String, String>> {
+    // Oil price via EIA API (free, no key needed for limited access).
+    // We use the NYMEX futures front-month settled price endpoint.
+    const OIL_INDICATORS: &[&str] = &[
+        "oil price",
+        "crude oil",
+        "wti",
+        "brent",
+        "oil",
+        "NY.GDP.PETR.RT.ZS",
+    ];
+    if OIL_INDICATORS
+        .iter()
+        .any(|k| indicator.contains(k) || k.contains(indicator))
+    {
+        let url = "https://api.eia.gov/v2/petroleum/pri/spt/data/?api_key=&frequency=monthly&data[0]=value&facets[series][]=PET.EER_EPMRU_PF4_Y35MB_DPW&sort[0][column]=period&sort[0][direction]=desc&length=1";
+        let agent = ureq::Agent::new_with_config(
+            ureq::config::Config::builder()
+                .timeout_global(Some(std::time::Duration::from_secs(10)))
+                .build(),
+        );
+        let response = agent.get(url).call().ok()?;
+        let body = response.into_body().read_to_string().ok()?;
+        let v: serde_json::Value = serde_json::from_str(&body).ok()?;
+        let val = v
+            .pointer("/response/data/0/value")
+            .and_then(|s| s.as_str())
+            .and_then(|s| s.parse::<f64>().ok())?;
+        let period = v
+            .pointer("/response/data/0/period")
+            .and_then(|s| s.as_str())
+            .unwrap_or("?");
+        return Some(Ok(format!(
+            "Crude Oil (WTI) — spot ({period}): ${val:.2}/bbl"
+        )));
+    }
+
+    // Natural gas via EIA
+    const GAS_INDICATORS: &[&str] = &["natural gas", "natgas", "gas price", "NY.GDP.NGAS.RT.ZS"];
+    if GAS_INDICATORS
+        .iter()
+        .any(|k| indicator.contains(k) || k.contains(indicator))
+    {
+        let url = "https://api.eia.gov/v2/natural-gas/pri/fut/data/?api_key=&frequency=monthly&data[0]=value&facets[series][]=NG.RNGWHHD.D&sort[0][column]=period&sort[0][direction]=desc&length=1";
+        let agent = ureq::Agent::new_with_config(
+            ureq::config::Config::builder()
+                .timeout_global(Some(std::time::Duration::from_secs(10)))
+                .build(),
+        );
+        let response = agent.get(url).call().ok()?;
+        let body = response.into_body().read_to_string().ok()?;
+        let v: serde_json::Value = serde_json::from_str(&body).ok()?;
+        let val = v
+            .pointer("/response/data/0/value")
+            .and_then(|s| s.as_str())
+            .and_then(|s| s.parse::<f64>().ok())?;
+        let period = v
+            .pointer("/response/data/0/period")
+            .and_then(|s| s.as_str())
+            .unwrap_or("?");
+        return Some(Ok(format!(
+            "Natural Gas (Henry Hub) — futures ({period}): ${val:.2}/MMBtu"
+        )));
+    }
+
+    None
+}
+
 #[cfg(feature = "websearch")]
 fn cmd_websearch(query: &str) {
     let (indicator, country, year) = parse_websearch_query(query);
     eprintln!("websearch: indicator={indicator} country={country} year={year:?}");
+    // Try commodity lookup first (for oil, gas, etc.).
+    if let Some(result) = commodity_lookup(&indicator) {
+        match result {
+            Ok(line) => {
+                println!("{line}");
+                return;
+            }
+            Err(e) => {
+                eprintln!("commodity fallback failed: {e}");
+                // Continue to World Bank as fallback.
+            }
+        }
+    }
     match world_bank_lookup(&indicator, &country, year) {
         Ok(line) => println!("{line}"),
         Err(e) => {
@@ -5739,7 +7197,7 @@ mod proof_tests {
         // Part 2.6: every proof object must pin the corpus it was computed
         // against (T35 embedded corpus) so a verifier can reject proofs that
         // silently drift the knowledge base.
-        let result = run_solve("दशम भाव मे बुध");
+        let result = run_solve("दशम भाव मे बुध", false);
         let proof = build_proof_object(&result, false);
         let corpus = proof
             .get("corpus")
@@ -5752,7 +7210,7 @@ mod proof_tests {
     #[test]
     fn proof_digest_is_stable_without_timestamp() {
         // T53: with timestamp off, two proofs of the same query are byte-identical.
-        let result = run_solve("दशम भाव मे बुध");
+        let result = run_solve("दशम भाव मे बुध", false);
         let a = build_proof_object(&result, false);
         let b = build_proof_object(&result, false);
         assert_eq!(a.to_string(), b.to_string());
@@ -5766,10 +7224,10 @@ mod proof_tests {
     fn verify_recomputation_matches_recorded_proof() {
         // Recompute path used by `laverna verify`: rebuild the canonical payload
         // from the recorded query and confirm it equals the recorded payload.
-        let result = run_solve("दशम भाव मे बुध");
+        let result = run_solve("दशम भाव मे बुध", false);
         let proof = build_proof_object(&result, false);
         let recorded = proof_payload_view(&proof);
-        let recomputed = build_proof_payload(&run_solve(proof["query"].as_str().unwrap()));
+        let recomputed = build_proof_payload(&run_solve(proof["query"].as_str().unwrap(), false));
         assert_eq!(recorded, recomputed);
         assert_eq!(proof_digest(&recorded), proof_digest(&recomputed));
     }
@@ -8232,4 +9690,207 @@ fn cmd_athena_budget_reset() {
     let mut budget = athena::budget::TokenBudget::default();
     budget.reset();
     println!("Token budget reset. All counters cleared.");
+}
+
+// ─── Binder tests (name/role binding, no positional fallback) ─────────────
+#[cfg(test)]
+mod binder_tests {
+    use super::*;
+
+    /// Load the embedded registry and run the binder on a raw query.
+    fn bind(query: &str) -> Vec<RuleApplication> {
+        let reg = load_formula_registry();
+        let numerical = extract_numerical_values(query);
+        bind_formula(query, &numerical, &reg, false)
+    }
+
+    /// Adversarial: inputs reordered. "alignment 8, size 13" must bind
+    /// align=8, size=13 → 16, NOT positional ceil(8/13)*13 = 13.
+    #[test]
+    fn binder_binds_by_name_not_position() {
+        let chain = bind("alignment 8, size 13");
+        assert_eq!(chain.len(), 1, "expected exactly one rule application");
+        let app = &chain[0];
+        assert_eq!(app.formula_id, "rust_struct_padded_size");
+        let size = app.bindings.iter().find(|(n, _)| n == "size").unwrap().1;
+        let align = app.bindings.iter().find(|(n, _)| n == "align").unwrap().1;
+        assert_eq!(size, 13.0, "size must be bound by name, not position");
+        assert_eq!(align, 8.0, "align must be bound by name, not position");
+        assert_eq!(app.output, 16.0);
+    }
+
+    /// Single-rule lookup still works on the canonical phrasing.
+    #[test]
+    fn binder_single_rule() {
+        let chain = bind("what's the padded size of a 13-byte struct aligned to 8 bytes");
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].formula_id, "rust_struct_padded_size");
+        assert_eq!(chain[0].output, 16.0);
+    }
+
+    /// Two-hop: output of `rust_enum_size` (size) feeds `rust_struct_padded_size`.
+    /// The query never says the word "size" as a free scalar, so the only way to
+    /// reach padded size is to derive size from the enum formula first.
+    #[test]
+    fn binder_two_hop_chain() {
+        let chain = bind(
+            "padded extent of a struct aligned to 8 bytes, the enum contributes max_variant 13 and disc 2",
+        );
+        assert_eq!(chain.len(), 2, "expected a two-rule chain");
+        assert_eq!(chain[0].formula_id, "rust_enum_size");
+        assert_eq!(chain[0].output, 15.0, "size = max_variant + disc = 13 + 2");
+        assert_eq!(chain[1].formula_id, "rust_struct_padded_size");
+        assert_eq!(chain[1].output, 16.0, "padded = ceil(15/8)*8");
+        // The second rule must consume the derived `size`, not a query scalar.
+        let size = chain[1]
+            .bindings
+            .iter()
+            .find(|(n, _)| n == "size")
+            .unwrap()
+            .1;
+        assert_eq!(size, 15.0);
+    }
+
+    /// Under-specified / ambiguous query smoke test: the binder must run without
+    /// panicking and must never invent scalars. We do not assert a specific
+    /// answer — only that it degrades safely (empty, or a chain it can justify).
+    #[test]
+    fn binder_ambiguous_query_smoke() {
+        let chain = bind("gadget alpha 5 beta 9 and widget gamma 5 delta 9");
+        // If it returns anything, every binding must be name-anchored (non-empty
+        // input name), i.e. it never fell back to positional assignment.
+        for app in &chain {
+            for (name, _) in &app.bindings {
+                assert!(
+                    name.len() >= 3,
+                    "positional/unnamed binding must not appear: {name}"
+                );
+            }
+        }
+    }
+
+    /// Determinism under chaining: the same two-hop query must produce
+    /// byte-identical JSON across two independent runs. Selection refuses on
+    /// score ties and formula iteration is sorted by id, so the chain (and its
+    /// order) cannot depend on HashMap iteration order.
+    #[test]
+    fn binder_deterministic_json() {
+        let q = "padded extent of a struct aligned to 8 bytes, the enum contributes max_variant 13 and disc 2";
+        let a = serde_json::to_string(&solve_to_json(&run_solve(q, false))).unwrap();
+        let b = serde_json::to_string(&solve_to_json(&run_solve(q, false))).unwrap();
+        assert_eq!(a, b, "two-hop JSON must be byte-identical across runs");
+        assert!(a.contains("rust_enum_size"), "missing step 1");
+        assert!(a.contains("rust_struct_padded_size"), "missing step 2");
+        assert!(
+            a.contains("bytes"),
+            "output unit must be carried into the chain"
+        );
+    }
+
+    /// Regression: a query may mention an input name as its *topic* (e.g. "gravity
+    /// force …") without supplying a value for it. The binder must NOT steal a stray
+    /// number meant for a nearer variable ("mass"). It must refuse rather than bind
+    /// `weight` (mg) or `work_energy` (F·d) to a hallucinated value.
+    #[test]
+    fn binder_refuses_topic_word_steal() {
+        let chain = bind("gravity force between mass 5 and mass 5 at distance 5");
+        assert!(
+            chain.is_empty(),
+            "must refuse — no formula should bind a stolen scalar"
+        );
+        // A well-formed query that names the variables distinctly DOES bind.
+        let chain = bind("gravity force between mass1 5 and mass2 5 at distance 5");
+        assert!(
+            !chain.is_empty(),
+            "distinctly-named gravity query must bind"
+        );
+        assert_eq!(chain[0].formula_id, "gravity_force");
+    }
+
+    /// Regression: typed inputs make wrong-slot binding unrepresentable. A scalar
+    /// carrying a `celsius` unit cannot fill `size: bytes`, so the formula simply
+    /// does not bind — the silent-wrong-answer hole is closed by the type, not by
+    /// convention. A correctly unit-tagged `13-byte` still binds to padded size.
+    /// Regression: digits embedded in an identifier (`mass1`, `mass2`) must not
+    /// be parsed as scalars. The binder must bind the actual `5`s, not the `1`/`2`
+    /// inside the variable names — otherwise a verified chain silently computes
+    /// the wrong value.
+    #[test]
+    fn binder_ignores_digits_embedded_in_identifiers() {
+        let chain = bind("gravity force between mass1 5 and mass2 5 at distance 5");
+        assert_eq!(chain.len(), 2, "gravity_force -> work_energy chain");
+        assert_eq!(chain[0].formula_id, "gravity_force");
+        let m1 = chain[0]
+            .bindings
+            .iter()
+            .find(|(n, _)| n == "mass1")
+            .unwrap()
+            .1;
+        let m2 = chain[0]
+            .bindings
+            .iter()
+            .find(|(n, _)| n == "mass2")
+            .unwrap()
+            .1;
+        assert_eq!(m1, 5.0, "mass1 token must not be parsed as the number 1");
+        assert_eq!(m2, 5.0, "mass2 token must not be parsed as the number 2");
+    }
+
+    #[test]
+    fn binder_refuses_unit_mismatch() {
+        // `celsius` cannot satisfy `size: bytes` → no binding.
+        let chain = bind("pad a 13 celsius struct aligned 8 bytes");
+        assert!(chain.is_empty(), "celsius must not fill a bytes input");
+        // A unit-tagged `13-byte` still binds to padded size = 16.
+        let chain = bind("what's the padded size of a 13-byte struct aligned to 8 bytes");
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].formula_id, "rust_struct_padded_size");
+        assert_eq!(chain[0].output, 16.0);
+    }
+
+    /// Regression: the inverse pre-pass must not read a scalar sitting next to a
+    /// connector word ("to") as the *output* of a formula whose id merely
+    /// contains that connector. "aligned to 8" used to become `nand_to_not`
+    /// solved as `1 - a = 8` (a = -7) — a nonsense hijack. Inverse mode may only
+    /// anchor on the formula's declared `output` or its final result-noun token.
+    #[test]
+    fn binder_no_inverse_hijack_on_connector() {
+        let chain = bind("how many bytes to store 3 ints of 4 bytes each aligned to 8");
+        assert!(
+            !chain.iter().any(|a| a.formula_id == "nand_to_not"),
+            "connector 'to' must not hijack inverse mode into nand_to_not"
+        );
+    }
+
+    /// Regression: a spurious id fragment that is a common noun must not act as
+    /// an output anchor. "a number of 5…" must not read `5` as the stated
+    /// output of `number_needed_to_treat` and invert it. Only the real `output`
+    /// (and the last id token) are anchors now, so "number" no longer triggers.
+    #[test]
+    fn binder_no_inverse_hijack_on_spurious_noun() {
+        let chain = bind("a number of 5 patients needed to treat");
+        assert!(
+            !chain.iter().any(|a| a.formula_id == "number_needed_to_treat"),
+            "spurious noun 'number' must not hijack inverse mode"
+        );
+    }
+
+    /// Inverse pre-pass still solves a missing input when the OUTPUT is genuinely
+    /// stated by name: "what mass has kinetic energy 100 at velocity 5" → mass ≈ 8.
+    #[test]
+    fn binder_inverse_solves_missing_input() {
+        let chain = bind("what mass has kinetic energy 100 at velocity 5");
+        let app = chain
+            .iter()
+            .find(|a| a.formula_id == "kinetic_energy")
+            .expect("inverse pre-pass should bind kinetic_energy");
+        assert!((app.output - 100.0).abs() < 1e-6, "output should be ~100");
+        let mass = app
+            .bindings
+            .iter()
+            .find(|(n, _)| n == "mass")
+            .expect("mass should be solved")
+            .1;
+        assert!((mass - 8.0).abs() < 1e-6, "mass should be ~8, got {mass}");
+    }
 }

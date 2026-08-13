@@ -399,14 +399,41 @@ pub fn parse_query_intent(query: &str) -> &'static str {
 
 /// Pure function: Extract numerical values from query text.
 pub fn extract_numerical_values(query: &str) -> Vec<f64> {
-    query
-        .split_whitespace()
-        .filter_map(|word| {
-            word.trim_matches(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
-                .parse::<f64>()
-                .ok()
-        })
-        .collect()
+    let mut out = Vec::new();
+    let bytes = query.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_digit() {
+            // Only treat this as a scalar if it starts a token (the preceding
+            // char is not an identifier character). This stops identifiers like
+            // `mass1` from yielding the number 1.
+            let mid_identifier = i > 0 && bytes[i - 1].is_ascii_alphanumeric();
+            let start = i;
+            i += 1;
+            let mut saw_dot = false;
+            while i < bytes.len() {
+                let b = bytes[i];
+                if b.is_ascii_digit() {
+                    i += 1;
+                } else if b == b'.' && !saw_dot {
+                    saw_dot = true;
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+            if !mid_identifier {
+                if let Ok(st) = std::str::from_utf8(&bytes[start..i]) {
+                    if let Ok(s) = st.parse::<f64>() {
+                        out.push(s);
+                    }
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    out
 }
 
 /// Pure function: Determine domain from query keywords.

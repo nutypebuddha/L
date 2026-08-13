@@ -352,19 +352,117 @@ pub fn domain_to_pillar(graha: Domain) -> Option<Pillar> {
     }
 }
 
-/// Aggregate a `StrategyReport`'s per-graha shares into a normalized 7-pillar
-/// objective vector. Each graha's `share` (already in `[0,1]`, summing to 1.0
-/// over resolved grahas) is added into its pillar bucket. Pillars that no graha
-/// resolved to stay at 0.0.
+/// Threshold for considering a secondary graha in a token's vedic classification
+/// as a meaningful co-presence (a "conjunction" proxy).
+const CONJUNCTION_THRESHOLD: f64 = 0.2;
+
+/// Bonus applied to a pillar when its graha co-occurs with another graha's
+/// pillar within the same token (conjunction proxy).
+const CONJUNCTION_BONUS: f64 = 0.04;
+
+/// Smaller bonus when different tokens in the same query map to different
+/// grahas (weaker "aspect" proxy).
+const CO_OCCURRENCE_BONUS: f64 = 0.02;
+
+/// Apply graha interaction modifiers to an in-progress pillar weight array.
+///
+/// Since `strategize` has no chart positions, we proxy interactions using:
+/// - **Token-level co-presence**: when a single token's `vedic_classification`
+///   carries multiple grahas above `CONJUNCTION_THRESHOLD`, we apply a
+///   conjunction-like bonus between those grahas' pillars.
+/// - **Query-level co-occurrence**: when two different tokens resolve to
+///   distinct grahas, we apply a weaker co-occurrence bonus.
+///
+/// The matrix is passed in so we can read per-token `vedic_classification`
+/// vectors beyond `dominant_graha_of`.
+fn apply_pillar_interactions(pillars: &mut [f64; 7], matrix: &crate::descent::SettlingMatrix) {
+    // Phase 1: token-level co-presence (conjunction proxy).
+    for token in &matrix.tokens {
+        if crate::nlp::is_stopword(&token.text) {
+            continue;
+        }
+        let vc = &token.vedic_classification;
+        // Collect all grahas above threshold.
+        let present: Vec<Domain> = Domain::all()
+            .iter()
+            .filter(|&&g| vc.grahas[g.index()] >= CONJUNCTION_THRESHOLD)
+            .copied()
+            .collect();
+        if present.len() < 2 {
+            continue;
+        }
+        // Every pair of co-present grahas gets a conjunction bonus.
+        for i in 0..present.len() {
+            for j in (i + 1)..present.len() {
+                let ga = present[i];
+                let gb = present[j];
+                if let (Some(pa), Some(pb)) = (domain_to_pillar(ga), domain_to_pillar(gb)) {
+                    pillars[pa.index()] += CONJUNCTION_BONUS;
+                    pillars[pb.index()] += CONJUNCTION_BONUS;
+                }
+                // If one side is Rahu/Ketu, distribute to all pillars.
+                if domain_to_pillar(ga).is_none() {
+                    let dist = CONJUNCTION_BONUS / 7.0;
+                    for w in pillars.iter_mut() {
+                        *w += dist;
+                    }
+                }
+                if domain_to_pillar(gb).is_none() {
+                    let dist = CONJUNCTION_BONUS / 7.0;
+                    for w in pillars.iter_mut() {
+                        *w += dist;
+                    }
+                }
+            }
+        }
+    }
+
+    // Phase 2: query-level co-occurrence (weaker aspect proxy).
+    let resolved_pillars: Vec<Option<Pillar>> = matrix
+        .tokens
+        .iter()
+        .filter(|t| !crate::nlp::is_stopword(&t.text))
+        .map(|t| {
+            let dominant = crate::strategy::dominant_graha_of(t);
+            dominant.and_then(domain_to_pillar)
+        })
+        .collect();
+    for i in 0..resolved_pillars.len() {
+        for j in (i + 1)..resolved_pillars.len() {
+            if let (Some(pa), Some(pb)) = (resolved_pillars[i], resolved_pillars[j]) {
+                if pa != pb {
+                    pillars[pa.index()] += CO_OCCURRENCE_BONUS;
+                    pillars[pb.index()] += CO_OCCURRENCE_BONUS;
+                }
+            }
+        }
+    }
+}
+
+/// Aggregate a `StrategyReport`'s per-graha shares into a 7-pillar objective
+/// vector. Each graha's `share` (already in `[0,1]`, summing to 1.0 over
+/// resolved grahas) is added into its pillar bucket. Pillars that no graha
+/// resolved to stay at their base value (0.0 before interactions).
+///
+/// Then applies graha interaction modifiers (conjunction/co-occurrence proxies)
+/// as additive bonuses. The result is NOT re-normalized — the caller's optimizer
+/// receives the raw weight vector as-is.
 ///
 /// Pure + deterministic. The result feeds the optimizer as `objective.weights`.
-pub fn aggregate_pillars(report: &StrategyReport) -> [f64; 7] {
+pub fn aggregate_pillars(
+    report: &StrategyReport,
+    matrix: &crate::descent::SettlingMatrix,
+) -> [f64; 7] {
     let mut pillars = [0.0f64; 7];
     for (graha, _weight, share) in &report.ranked {
         if let Some(pillar) = domain_to_pillar(*graha) {
             pillars[pillar.index()] += *share;
         }
     }
+
+    // Apply graha interaction modifiers (conjunction/co-occurrence proxies).
+    apply_pillar_interactions(&mut pillars, matrix);
+
     pillars
 }
 
@@ -502,7 +600,8 @@ mod tests {
             resolved(Domain::Brihaspati, 1.0),
         ];
         let report = synthesize_strategy("how to architect", &forces);
-        let pillars = aggregate_pillars(&report);
+        let empty_matrix = crate::descent::SettlingMatrix::new(Vec::new());
+        let pillars = aggregate_pillars(&report, &empty_matrix);
 
         let total: f64 = pillars.iter().sum();
         assert!(
@@ -525,7 +624,8 @@ mod tests {
             resolved(Domain::Shani, 2.0),
         ];
         let report = synthesize_strategy("x", &forces);
-        let pillars = aggregate_pillars(&report);
+        let empty_matrix = crate::descent::SettlingMatrix::new(Vec::new());
+        let pillars = aggregate_pillars(&report, &empty_matrix);
         // Shani=Stone is 2/4 = 0.5; Rahu/Ketu contribute nothing.
         assert!((pillars[Pillar::Stone.index()] - 0.5).abs() < 1e-9);
         let total: f64 = pillars.iter().sum();

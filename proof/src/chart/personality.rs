@@ -268,6 +268,69 @@ fn pillar_name_for_graha(graha: Graha) -> &'static str {
         })
 }
 
+// ─── Combustion (graha too close to Surya → penalised) ──────────────────────
+
+/// BPHS/Surya Siddhanta standard combustion orbs for each graha.
+fn combust_orb(graha: Graha) -> f64 {
+    match graha {
+        Graha::Chandra => 12.0,
+        Graha::Mangala => 17.0,
+        Graha::Budha => 14.0,
+        Graha::Brihaspati => 11.0,
+        Graha::Shukra => 10.0,
+        Graha::Shani => 15.0,
+        _ => 0.0,
+    }
+}
+
+/// Angular separation between two grahas in degrees (sidereal longitude).
+/// Uses `rem_euclid` because Rust's `%` is truncated remainder (wrong for
+/// negative floats on a circular domain).
+fn graha_separation(chart: &ChartSnapshot, a: Graha, b: Graha) -> Option<f64> {
+    let pos_a = chart.graha_position(a)?;
+    let pos_b = chart.graha_position(b)?;
+    let diff = (pos_a.sidereal - pos_b.sidereal).rem_euclid(360.0);
+    Some(if diff <= 180.0 { diff } else { 360.0 - diff })
+}
+
+/// True if `graha` is combust — conjunct Surya within its classical orb.
+fn is_combust(chart: &ChartSnapshot, graha: Graha) -> bool {
+    if graha == Graha::Surya {
+        return false;
+    }
+    let orb = combust_orb(graha);
+    graha_separation(chart, graha, Graha::Surya)
+        .map(|sep| sep <= orb)
+        .unwrap_or(false)
+}
+
+// ─── Uccha Bala (Shadbala positional strength) ───────────────────────────────
+
+/// Deep-debilitation longitude for each graha (BPHS Shadbala chapter).
+/// Uccha bala: strength is proportional to angular distance from this point.
+fn debilitation_longitude(graha: Graha) -> f64 {
+    match graha {
+        Graha::Surya => 190.0,      // 10° Tula (180 + 10)
+        Graha::Chandra => 213.0,    // 3° Vrishchika (180 + 33)
+        Graha::Mangala => 298.0,    // 28° Makara (270 + 28)
+        Graha::Budha => 345.0,      // 15° Meena (330 + 15)
+        Graha::Brihaspati => 275.0, // 5° Makara (270 + 5)
+        Graha::Shukra => 357.0,     // 27° Meena (330 + 27)
+        Graha::Shani => 20.0,       // 20° Mesha
+        _ => 0.0,
+    }
+}
+
+/// Uccha bala: continuous positional strength from Shadbala (BPHS).
+/// Returns 0.0 at deep debilitation, 1.0 at deep exaltation.
+/// Formula: |180 - |λ - λ_debil|| / 180, normalized to 0..1.
+fn uccha_bala(graha: Graha, sidereal_longitude: f64) -> f64 {
+    let debil = debilitation_longitude(graha);
+    let diff = (sidereal_longitude - debil).abs().rem_euclid(360.0);
+    let dist = if diff <= 180.0 { diff } else { 360.0 - diff };
+    1.0 - dist / 180.0
+}
+
 // ─── Personality Profile ─────────────────────────────────────────────────────
 
 /// A personality derived from a birth chart.
@@ -307,13 +370,26 @@ impl PersonalityProfile {
 /// Pure computation — same input, same output.
 ///
 /// 1. Base weights: each classical graha contributes 0.1 to its pillar.
-/// 2. Aspect modifiers: conjunction strengthens, opposition forces trade-off.
-/// 3. Normalize to sum = 1.0.
-/// 4. Select dominant pillar.
-/// 5. Select archetype from dominant graha's nakshatra (or lagna).
+/// 2. Placement modifier: uccha bala (Shadbala positional strength).
+/// 3. Conjunction count bonus.
+/// 4. Aspect modifiers: conjunction strengthens, opposition forces trade-off.
+///    Combustion: conjunct Surya within classical orb → penalty on combust graha only.
+/// 5. Normalize to sum = 1.0.
+/// 6. Select dominant pillar.
+/// 7. Select archetype from dominant graha's nakshatra (or lagna).
 pub fn derive_personality(chart: &ChartSnapshot) -> PersonalityProfile {
     let mut weights = [0.1_f64; 7];
 
+    // Placement modifier: uccha bala (continuous Shadbala strength per graha).
+    // Replaces the old 4-tier dignity + synthetic rashi_offset approach (T62 fix).
+    // Uccha bala is a continuous function of real longitude, so ties are measure-zero.
+    for pos in &chart.graha_positions {
+        if let Some(pillar) = graha_to_pillar(pos.graha) {
+            weights[pillar.index()] += uccha_bala(pos.graha, pos.sidereal) * 0.06;
+        }
+    }
+
+    // Conjunction count: grahas conjuncting a given graha add a small bonus.
     for pos in &chart.graha_positions {
         if let Some(pillar) = graha_to_pillar(pos.graha) {
             let conj_count = chart
@@ -345,27 +421,52 @@ pub fn derive_personality(chart: &ChartSnapshot) -> PersonalityProfile {
             seen_pairs.insert((a, b));
 
             if let Some(aspect) = chart.aspect_between(a, b) {
-                let modifier_val = aspect_modifier_value(aspect);
-
-                if let (Some(p_a), Some(p_b)) = (graha_to_pillar(a), graha_to_pillar(b)) {
-                    weights[p_a.index()] += modifier_val;
-                    weights[p_b.index()] += modifier_val;
-                } else if let Some(p) = graha_to_pillar(a) {
-                    weights[p.index()] += modifier_val * 0.7;
-                    let distributed = modifier_val * 0.3 / 7.0;
-                    for w in &mut weights {
-                        *w += distributed;
-                    }
-                } else if let Some(p) = graha_to_pillar(b) {
-                    weights[p.index()] += modifier_val * 0.7;
-                    let distributed = modifier_val * 0.3 / 7.0;
-                    for w in &mut weights {
-                        *w += distributed;
+                // Determine modifier value and which grahas are affected.
+                let (modifier_val, applied_to, reason) = if aspect == Aspect::Conjunction {
+                    // Combustion: only Surya conjunctions can trigger combustion logic.
+                    // If a non-Surya graha is conjunct Surya within its classical orb,
+                    // the combust graha is penalised, not Surya.
+                    if a == Graha::Surya || b == Graha::Surya {
+                        let combust_target = if a == Graha::Surya { b } else { a };
+                        if is_combust(chart, combust_target) {
+                            let reason = format!(
+                                "{} combust — conjunct Surya within classical orb → penalty",
+                                pillar_name_for_graha(combust_target)
+                            );
+                            (-0.06, vec![combust_target], reason)
+                        } else {
+                            (
+                                aspect_modifier_value(aspect),
+                                vec![a, b],
+                                aspect_modifier_reason(aspect, a, b),
+                            )
+                        }
+                    } else {
+                        // Non-Surya conjunction: normal conjunction bonus.
+                        (
+                            aspect_modifier_value(aspect),
+                            vec![a, b],
+                            aspect_modifier_reason(aspect, a, b),
+                        )
                     }
                 } else {
-                    let distributed = modifier_val / 7.0;
-                    for w in &mut weights {
-                        *w += distributed;
+                    (
+                        aspect_modifier_value(aspect),
+                        vec![a, b],
+                        aspect_modifier_reason(aspect, a, b),
+                    )
+                };
+
+                // Apply modifier to affected grahas only.
+                for &graha in &applied_to {
+                    if let Some(p) = graha_to_pillar(graha) {
+                        weights[p.index()] += modifier_val;
+                    } else {
+                        // Non-pillar graha (Rahu/Ketu): distribute to all pillars.
+                        let distributed = modifier_val / 7.0;
+                        for w in &mut weights {
+                            *w += distributed;
+                        }
                     }
                 }
 
@@ -374,20 +475,21 @@ pub fn derive_personality(chart: &ChartSnapshot) -> PersonalityProfile {
                     graha_b: b,
                     aspect,
                     modifier: modifier_val,
-                    reason: aspect_modifier_reason(aspect, a, b),
+                    reason,
                 });
             }
         }
     }
 
+    // Clamp weights to [0, 1] before normalizing to prevent inflation (T64 fix).
+    for w in &mut weights {
+        *w = w.clamp(0.0, 1.0);
+    }
     let total: f64 = weights.iter().sum();
     if total > 0.0 {
         for w in &mut weights {
             *w /= total;
         }
-    }
-    for w in &mut weights {
-        *w = w.clamp(0.0, 1.0);
     }
 
     let dominant_idx = weights

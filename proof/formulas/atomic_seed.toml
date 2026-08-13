@@ -1225,10 +1225,21 @@ tags = ["mechanics", "energy", "kinetic", "fundamental", "earth", "motion"]
 domain = "shukra"
 level = 1
 inputs = ["mass", "velocity"]
+input_types = { mass = "kg", velocity = "m/s" }
+input_aliases = { mass = ["weight"], velocity = ["speed"] }
 output = "kinetic_energy"
+output_unit = "joules"
 expression = "0.5 * mass * velocity^2"
 description = "Kinetic energy: KE = ½mv² — energy of motion, quadratic in velocity"
 evidence = "Work-energy theorem: ∫F·dx = ∫m(dv/dt)v dt = ½mv²"
+
+[[formula.golden]]
+inputs = { mass = 10, velocity = 5 }
+output = 125
+
+[[formula.golden]]
+inputs = { mass = 2, velocity = 3 }
+output = 9
 
 [[formula]]
 id = "momentum"
@@ -1236,10 +1247,20 @@ tags = ["mechanics", "momentum", "fundamental", "earth", "motion"]
 domain = "shukra"
 level = 1
 inputs = ["mass", "velocity"]
+input_types = { mass = "kg", velocity = "m/s" }
 output = "momentum"
+output_unit = "kg_m_per_s"
 expression = "mass * velocity"
 description = "Linear momentum: p = mv — quantity of motion, conserved in closed systems"
 evidence = "Newton, Principia, Definition II — conserved by Noether space-translation symmetry"
+
+[[formula.golden]]
+inputs = { mass = 10, velocity = 5 }
+output = 50
+
+[[formula.golden]]
+inputs = { mass = 4, velocity = 2 }
+output = 8
 
 [[formula]]
 id = "momentum_to_kinetic_energy"
@@ -1291,10 +1312,41 @@ tags = ["mechanics", "force", "gravity", "fundamental", "earth"]
 domain = "shukra"
 level = 1
 inputs = ["mass", "gravity"]
+input_types = { mass = "kg", gravity = "m/s^2" }
 output = "weight"
+output_unit = "newtons"
 expression = "mass * gravity"
 description = "Weight: W = mg — gravitational force on a mass"
 evidence = "Newton's second law with a = g"
+
+[[formula.golden]]
+inputs = { mass = 10, gravity = 9.8 }
+output = 98
+
+[[formula.golden]]
+inputs = { mass = 5, gravity = 9.8 }
+output = 49
+
+[[formula]]
+id = "gravity_force"
+tags = ["mechanics", "force", "gravity", "newton", "fundamental", "earth"]
+domain = "shukra"
+level = 1
+inputs = ["mass1", "mass2", "distance"]
+input_types = { mass1 = "kg", mass2 = "kg", distance = "m" }
+output = "force"
+output_unit = "newtons"
+expression = "6.674e-11 * mass1 * mass2 / distance^2"
+description = "Newton's law of universal gravitation: F = G·m₁m₂/r² — force between two bodies"
+evidence = "Newton's law of universal gravitation, G ≈ 6.674×10⁻¹¹ N·m²/kg²"
+
+[[formula.golden]]
+inputs = { mass1 = 5, mass2 = 5, distance = 5 }
+output = 6.674e-11
+
+[[formula.golden]]
+inputs = { mass1 = 100, mass2 = 100, distance = 10 }
+output = 6.674e-9
 
 [[formula]]
 id = "force_to_power"
@@ -1302,10 +1354,20 @@ tags = ["mechanics", "power", "work", "time"]
 domain = "shukra"
 level = 3
 inputs = ["force", "distance", "time"]
+input_types = { force = "newtons", distance = "m", time = "s" }
 output = "power"
+output_unit = "watts"
 expression = "force * distance / time"
 description = "Power from force: P = F × d / t — work per unit time"
 evidence = "Power definition: P = W/t = F·d/t — work done per unit time"
+
+[[formula.golden]]
+inputs = { force = 10, distance = 5, time = 2 }
+output = 25
+
+[[formula.golden]]
+inputs = { force = 20, distance = 4, time = 8 }
+output = 10
 
 [[formula]]
 id = "work_energy"
@@ -1313,10 +1375,20 @@ tags = ["mechanics", "energy", "work", "force"]
 domain = "shukra"
 level = 1
 inputs = ["force", "distance"]
+input_types = { force = "newtons", distance = "m" }
 output = "work"
+output_unit = "joules"
 expression = "force * distance"
 description = "Work from force: W = F × d — mechanical work"
 evidence = "Work-energy theorem: W = F·d = ∫F·dx — work as force applied through distance"
+
+[[formula.golden]]
+inputs = { force = 10, distance = 5 }
+output = 50
+
+[[formula.golden]]
+inputs = { force = 7, distance = 3 }
+output = 21
 # ♋ Cancer — Earth & Environment — Atomic Formulas
 # Cardinal Water | 4th House | Ruler: Moon | Exaltation: Jupiter | Fall: Mars | Detriment: Saturn
 # Element: Water (fluid, cycles, tides, nurturing, protection, intuition, memory, flow)
