@@ -188,14 +188,14 @@ impl ProxyServer {
         let validated_text = result.validated_text.clone();
         let original_text = result.original_text.clone();
         let confidence = result.confidence;
-        let passed = result.passed;
+        let verdict = result.verdict().as_str().to_string();
         let fix_count = result.fix_count() as f64;
 
         let response = JsonValue::Object(vec![
             ("validated_text".to_string(), JsonValue::Str(validated_text)),
             ("original_text".to_string(), JsonValue::Str(original_text)),
             ("confidence".to_string(), JsonValue::Number(confidence)),
-            ("passed".to_string(), JsonValue::Bool(passed)),
+            ("verdict".to_string(), JsonValue::Str(verdict)),
             ("fix_count".to_string(), JsonValue::Number(fix_count)),
         ]);
 
@@ -220,6 +220,7 @@ impl ProxyServer {
             .validate(request)
             .map_err(|e| CidError::LlmError(format!("Validation failed: {}", e)))?;
 
+        let verdict = result.verdict().as_str().to_string();
         let response = JsonValue::Object(vec![
             (
                 "response".to_string(),
@@ -229,7 +230,7 @@ impl ProxyServer {
                 "confidence".to_string(),
                 JsonValue::Number(result.confidence),
             ),
-            ("validated".to_string(), JsonValue::Bool(result.passed)),
+            ("verdict".to_string(), JsonValue::Str(verdict)),
             ("model".to_string(), JsonValue::Str(model.to_string())),
         ]);
 

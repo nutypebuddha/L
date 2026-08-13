@@ -235,6 +235,7 @@ pub fn call_tool(
             match engine.validate(request) {
                 Ok(result) => {
                     let fix_count = result.fix_count();
+                    let verdict = result.verdict().as_str().to_string();
                     Ok(stringify(&JsonValue::Object(vec![
                         (
                             "validated_text".to_string(),
@@ -248,7 +249,7 @@ pub fn call_tool(
                             "confidence".to_string(),
                             JsonValue::Number(result.confidence),
                         ),
-                        ("passed".to_string(), JsonValue::Bool(result.passed)),
+                        ("verdict".to_string(), JsonValue::Str(verdict)),
                         ("fix_count".to_string(), JsonValue::Number(fix_count as f64)),
                         ("cost_usd".to_string(), JsonValue::Number(result.cost_usd)),
                     ])))

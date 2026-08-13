@@ -84,6 +84,12 @@ JSON surface over scraping `--help`/text.
   `error_count`, `refusals`, `diagnostics`. Out-of-scope input is *refused*,
   never silently accepted — trust `passed:false`/`refusals`, not absence of
   output.
+- **`gate validate` verdict is a stable enum, not a bool (Item 3).** The JSON
+  carries `verdict` (`ok` | `corrected` | `failed` | `unevaluable`) and
+  `fix_count`; the old `passed: bool` is gone. Branch on `verdict` — a
+  `corrected` claim is one L silently fixed (do not report it as passing),
+  `failed` is wrong-and-unfixable, `unevaluable` means L had nothing to judge
+  against. A `corrected`/`failed` claim is never `ok`.
 - **Refusals are a stable enum, not prose (Item 1).** `solve` JSON carries
   `"refusals": [{"refused": {"kind": "...", ...}}]`. Branch on `kind`
   (`ambiguous` | `no_name_anchor` | `unit_mismatch` | `search_too_large`) — the

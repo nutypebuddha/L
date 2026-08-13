@@ -7523,7 +7523,7 @@ fn cmd_gate_validate(text: &str, context: &str, domain: Option<&str>, format: Ou
                     "validated_text": result.validated_text,
                     "original_text": result.original_text,
                     "confidence": result.confidence,
-                    "passed": result.passed,
+                    "verdict": result.verdict().as_str(),
                     "fix_count": result.fix_count(),
                     "state": format!("{:?}", result.state),
                     "cost_usd": result.cost_usd,
@@ -7532,7 +7532,7 @@ fn cmd_gate_validate(text: &str, context: &str, domain: Option<&str>, format: Ou
             } else {
                 println!("Validated: {}", result.validated_text);
                 println!("Confidence: {:.4}", result.confidence);
-                println!("Passed: {}", result.passed);
+                println!("Verdict: {}", result.verdict().as_str());
                 println!("Fixes: {}", result.fix_count());
                 println!("State: {:?}", result.state);
                 println!("Cost: ${:.6}", result.cost_usd);

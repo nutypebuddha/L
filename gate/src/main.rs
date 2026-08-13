@@ -179,7 +179,7 @@ fn main() {
                     Ok(result) => {
                         let validated_text = result.validated_text.clone();
                         let confidence = result.confidence;
-                        let passed = result.passed;
+                        let verdict = result.verdict().as_str().to_string();
                         let fix_count = result.fix_count() as f64;
 
                         println!(
@@ -187,7 +187,7 @@ fn main() {
                             stringify(&JsonValue::Object(vec![
                                 ("validated_text".to_string(), JsonValue::Str(validated_text)),
                                 ("confidence".to_string(), JsonValue::Number(confidence)),
-                                ("passed".to_string(), JsonValue::Bool(passed)),
+                                ("verdict".to_string(), JsonValue::Str(verdict)),
                                 ("fix_count".to_string(), JsonValue::Number(fix_count)),
                             ]))
                         );
@@ -433,7 +433,7 @@ fn process_line(line: &str, device: &mut CIDDevice) -> String {
                     let mut output = String::new();
                     output.push_str(&format!("Validated: {}\n", result.validated_text));
                     output.push_str(&format!("Confidence: {:.4}\n", result.confidence));
-                    output.push_str(&format!("Passed: {}\n", result.passed));
+                    output.push_str(&format!("Verdict: {}\n", result.verdict().as_str()));
                     output.push_str(&format!("Fixes: {}\n", result.fix_count()));
                     output.push_str(&format!("State: {:?}\n", result.state));
                     output.push_str(&format!("Cost: ${:.6}\n", result.cost_usd));

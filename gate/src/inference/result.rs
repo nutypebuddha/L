@@ -2,6 +2,36 @@ use crate::core::ball::GateResult;
 use crate::core::pin::Gate;
 use crate::state::machine::State;
 
+/// Stable, machine-classifiable outcome of a validation (Item 3). Replaces the
+/// `passed: bool` that conflated three distinct states — the caller could read
+/// `passed: true` and confidently report success even when L had silently
+/// *corrected* the claim (`fix_count > 0`) or could not evaluate it at all.
+///
+/// `passed` is retained only as an internal field; `verdict` is the contract.
+/// `ok` and `corrected` mean the claim is now in a good state, `failed` means it
+/// is wrong and L could not make it pass, `unevaluable` means L had nothing to
+/// judge it against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidationVerdict {
+    Ok,
+    Corrected,
+    Failed,
+    Unevaluable,
+}
+
+impl ValidationVerdict {
+    /// Stable string form (Item 3 contract). Lowercase, never changes — callers
+    /// branch on this, not on any surrounding prose.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ValidationVerdict::Ok => "ok",
+            ValidationVerdict::Corrected => "corrected",
+            ValidationVerdict::Failed => "failed",
+            ValidationVerdict::Unevaluable => "unevaluable",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ValidationResult {
     pub validated_text: String,
@@ -13,6 +43,25 @@ pub struct ValidationResult {
     pub gate_scores: Vec<GateScore>,
     pub state: State,
     pub cost_usd: f64,
+}
+
+impl ValidationResult {
+    /// Derive the stable verdict from the (internal) `passed` flag, the applied
+    /// fixes, and whether any gate actually ran. This is what callers must read;
+    /// it can never be the silent `passed: true`-with-fixes trap, because a
+    /// corrected claim is always reported as `corrected`.
+    pub fn verdict(&self) -> ValidationVerdict {
+        if self.gate_scores.is_empty() {
+            return ValidationVerdict::Unevaluable;
+        }
+        if !self.passed {
+            return ValidationVerdict::Failed;
+        }
+        if self.fix_count() > 0 {
+            return ValidationVerdict::Corrected;
+        }
+        ValidationVerdict::Ok
+    }
 }
 
 impl ValidationResult {
@@ -189,3 +238,52 @@ impl std::fmt::Display for CidError {
 impl std::error::Error for CidError {}
 
 pub type CidResult<T> = Result<T, CidError>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::pin::Gate;
+
+    fn with_gate() -> ValidationResult {
+        ValidationResult::new("x")
+            .with_gate_scores(vec![GateScore::passed(Gate::Math, 0.9, "ok")])
+    }
+
+    #[test]
+    fn verdict_unevaluable_without_gates() {
+        // L had nothing to judge the claim against.
+        let r = ValidationResult::new("x");
+        assert_eq!(r.verdict(), ValidationVerdict::Unevaluable);
+    }
+
+    #[test]
+    fn verdict_ok_when_passed_no_fixes() {
+        let r = with_gate().with_passed(true);
+        assert_eq!(r.verdict(), ValidationVerdict::Ok);
+    }
+
+    #[test]
+    fn verdict_corrected_when_passed_with_fixes() {
+        // The historical trap: `passed: true` while L silently corrected the claim.
+        // The verdict can never be `ok` here — it must report `corrected`.
+        let r = with_gate()
+            .with_passed(true)
+            .with_fixes(vec![TokenFix::new("2+2=5", "2+2=4", "arithmetic", 0.9)]);
+        assert_eq!(r.verdict(), ValidationVerdict::Corrected);
+        assert_eq!(r.fix_count(), 1);
+    }
+
+    #[test]
+    fn verdict_failed_when_not_passed() {
+        let r = with_gate().with_passed(false);
+        assert_eq!(r.verdict(), ValidationVerdict::Failed);
+    }
+
+    #[test]
+    fn verdict_as_str_is_stable_api() {
+        assert_eq!(ValidationVerdict::Ok.as_str(), "ok");
+        assert_eq!(ValidationVerdict::Corrected.as_str(), "corrected");
+        assert_eq!(ValidationVerdict::Failed.as_str(), "failed");
+        assert_eq!(ValidationVerdict::Unevaluable.as_str(), "unevaluable");
+    }
+}

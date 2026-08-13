@@ -71,7 +71,7 @@ const VALIDATION_SCHEMA: &str = r#"{
     "validated_text": { "type": "string" },
     "original_text": { "type": "string" },
     "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
-    "passed": { "type": "boolean" },
+    "verdict": { "type": "string", "enum": ["ok", "corrected", "failed", "unevaluable"] },
     "fix_count": { "type": "integer" },
     "gate_scores": {
       "type": "array",
