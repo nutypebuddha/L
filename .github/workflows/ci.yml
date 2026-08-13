@@ -41,19 +41,19 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Check clippy (workspace)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Check licenses, bans, advisories
         run: cargo deny check
 
       - name: Run tests (workspace)
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: Swiss-Ephemeris oracle gate
-        run: cargo test -p laverna --test swiss_oracle
+        run: cargo test --locked -p laverna --test swiss_oracle
 
       - name: CLI/MCP parity gate
-        run: cargo test -p laverna --features mcp --test mcp_parity
+        run: cargo test --locked -p laverna --features mcp --test mcp_parity
 
   assistant-termux:
     name: Assistant (termux feature gate)
@@ -83,9 +83,9 @@ jobs:
         with:
           tool: wasm-bindgen-cli
       - name: Build proof WASM
-        run: cargo build --release --target wasm32-unknown-unknown -p laverna-wasm
+        run: cargo build --locked --release --target wasm32-unknown-unknown -p laverna-wasm
       - name: Build gate WASM
-        run: cargo build --release --target wasm32-unknown-unknown -p lai-gate-wasm
+        run: cargo build --locked --release --target wasm32-unknown-unknown -p lai-gate-wasm
       - name: Generate bindings
         run: |
           wasm-bindgen target/wasm32-unknown-unknown/release/laverna_wasm.wasm --out-dir proof/laverna-wasm/www --target web
@@ -154,7 +154,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Build static x86_64-musl release
         run: |
-          cargo build --release --target x86_64-unknown-linux-musl \
+          cargo build --locked --release --target x86_64-unknown-linux-musl \
             --features "mcp websearch budget llm milp graph assistant-web"
       - name: Verify binary exists and is statically linked
         run: |

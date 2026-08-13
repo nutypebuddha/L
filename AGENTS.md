@@ -33,11 +33,11 @@ Run in this order. CI fails on any warning (`RUSTFLAGS="-D warnings"`):
 
 ```bash
 cargo fmt -- --check                                          # 1. formatting
-cargo clippy --workspace --all-targets -- -D warnings         # 2. lints
+cargo clippy --locked --workspace --all-targets -- -D warnings  # 2. lints
 cargo deny check                                              # 3. license/bans/advisory (needs cargo-deny)
-cargo test --workspace                                        # 4. tests (default features)
-cargo test -p laverna --test swiss_oracle                    # 5. Swiss-ephemeris oracle gate
-cargo test -p laverna --features mcp --test mcp_parity        # 6. CLI/MCP parity gate
+cargo test --locked --workspace                               # 4. tests (default features)
+cargo test --locked -p laverna --test swiss_oracle            # 5. Swiss-ephemeris oracle gate
+cargo test --locked -p laverna --features mcp --test mcp_parity  # 6. CLI/MCP parity gate
 ```
 
 `cargo-deny` is a separate tool (CI installs it via `taiki-e/install-action`);
@@ -122,12 +122,12 @@ cargo build --release -p laverna
 cd bridge && npm ci || npm install        # bridge (Node) — separate from Cargo
 
 # WASM crates build with cargo; generating JS bindings needs wasm-bindgen-cli:
-cargo build --release --target wasm32-unknown-unknown -p laverna-wasm
-cargo build --release --target wasm32-unknown-unknown -p lai-gate-wasm
+cargo build --locked --release --target wasm32-unknown-unknown -p laverna-wasm
+cargo build --locked --release --target wasm32-unknown-unknown -p lai-gate-wasm
 wasm-bindgen target/wasm32-unknown-unknown/release/laverna_wasm.wasm --out-dir proof/laverna-wasm/www --target web
 
 # Static release (CI does this for tags): musl + assistant-web, verified statically linked
-cargo build --release --target x86_64-unknown-linux-musl -p laverna \
+cargo build --locked --release --target x86_64-unknown-linux-musl -p laverna \
   --features "mcp websearch budget llm milp graph assistant-web"
 proof/scripts/export.sh                    # equivalent; copies to /sdcard/Download/Laverna/bin/
 ```
@@ -157,6 +157,12 @@ Release profile is aggressive (`opt-level="z"`, `lto="fat"`, `panic="abort"`,
 - `CARGO_BUILD_JOBS` is not hardcoded — set per-invocation.
 - Check disk before building: `df -h / | tail -1` (abort if < 2 GB).
 - Development is on Android/Termux (proot); the repo root is the checkout dir.
+- MSRV is 1.85, pinned by the `xalen-*` ephemeris crates (edition 2024, single
+  publisher `Zayn111666`/Vedika Intelligence, no `rust-version`) — direct deps of
+  `laverna` in the chart-computation critical path. Exact versions are locked by
+  the committed `Cargo.lock` + `--locked` CI; do not re-pin indexmap/hashbrown to
+  "lower" the MSRV. Replacing the thin ones (`mean_obliquity`, `gmst`,
+  `local_sidereal_time`, `J2000_JD`) is mostly arithmetic already owned in-tree.
 
 ## License
 

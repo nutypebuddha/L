@@ -1,5 +1,14 @@
 # Laverna — cargo-deny configuration
 # Mirrors Athena's policy: permissive licenses only, Linux-only targets
+#
+# Supply-chain note: `laverna` depends directly on five `xalen-*` ephemeris
+# crates (xalen-vedic, xalen-houses, xalen-ayanamsa, xalen-time, xalen-coords;
+# xalen-stars transitively). All are edition 2024 with NO rust-version declared
+# and a single publisher (Vedika Intelligence / Zayn111666) — laverna is their
+# only public reverse-dependency. They are the immovable MSRV floor (rustc >= 1.85)
+# and a single-maintainer risk in the chart-computation critical path. Exact
+# versions are pinned by the committed Cargo.lock + `--locked` in CI; do not try
+# to lower the MSRV by re-pinning indexmap/hashbrown.
 
 [graph]
 targets = [
