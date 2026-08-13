@@ -66,9 +66,9 @@ jobs:
       - name: Check formatting (assistant, termux)
         run: cargo fmt -p assistant -- --check
       - name: Check clippy (assistant, termux)
-        run: cargo clippy -p assistant --features termux --all-targets -- -D warnings
+        run: cargo clippy --locked -p assistant --features termux --all-targets -- -D warnings
       - name: Run tests (assistant, termux)
-        run: cargo test -p assistant --features termux
+        run: cargo test --locked -p assistant --features termux
 
   wasm-build:
     name: WASM build (proof + gate)
@@ -164,25 +164,43 @@ jobs:
           if readelf -d "$bin" | grep -q NEEDED; then
             echo "::error::$bin is dynamically linked"; exit 1
           fi
-      - name: Bundle llama engine
+      - name: Stage binary
         run: |
-          mkdir -p dist/bin/llama dist/bin/models
+          mkdir -p dist/bin
           cp target/x86_64-unknown-linux-musl/release/lai dist/bin/lai-x86_64
-          cp -rL bin/llama/. dist/bin/llama/
-          [ -f bin/models/.gitkeep ] && cp bin/models/.gitkeep dist/bin/models/
-          tar -C dist -czf lai-x86_64-bundle.tar.gz bin
+      - name: Bundle llama engine (optional)
+        # `bin/` is gitignored and never in the repo, so the llama bundle is
+        # optional. Guard it so the bare binary + checksum always upload (T90).
+        run: |
+          mkdir -p dist/bin/models
+          if [ -d bin/llama ]; then
+            mkdir -p dist/bin/llama
+            cp -rL bin/llama/. dist/bin/llama/
+            [ -f bin/models/.gitkeep ] && cp bin/models/.gitkeep dist/bin/models/
+            tar -C dist -czf lai-x86_64-bundle.tar.gz bin
+            echo "Bundled optional llama engine."
+          else
+            echo "bin/llama not present in checkout — skipping optional llama bundle (binary only)."
+          fi
       - name: Generate SHA256 checksums
         run: |
           cd dist/bin
           sha256sum lai-x86_64 > lai-x86_64.sha256
           cd ../..
-          sha256sum lai-x86_64-bundle.tar.gz > lai-x86_64-bundle.tar.gz.sha256
-      - name: Upload release assets
+          if [ -f lai-x86_64-bundle.tar.gz ]; then
+            sha256sum lai-x86_64-bundle.tar.gz > lai-x86_64-bundle.tar.gz.sha256
+          fi
+      - name: Upload release binary + checksum
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/bin/lai-x86_64
             dist/bin/lai-x86_64.sha256
+      - name: Upload optional llama bundle
+        if: hashFiles('lai-x86_64-bundle.tar.gz') != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
             lai-x86_64-bundle.tar.gz
             lai-x86_64-bundle.tar.gz.sha256
 
@@ -199,7 +217,7 @@ jobs:
           tool: cross
       - name: Build static aarch64-musl release
         run: |
-          cross build --release --target aarch64-unknown-linux-musl \
+          cross build --locked --release --target aarch64-unknown-linux-musl \
             --features "mcp websearch budget llm milp graph assistant-web" \
             -p laverna
       - name: Verify binary exists
