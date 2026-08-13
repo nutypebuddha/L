@@ -3343,6 +3343,40 @@ fn run_solve(query: &str, explain_binding: Option<ExplainBindingMode>) -> SolveR
 
 /// Build the *hashed payload* of a proof object: every provable field, with no
 /// `digest` and no wall-clock `computed_at` (T52/T53). Keys serialize in a
+/// Determinism receipt (Item 5): the exact binary version, the feature flags it
+/// was built with, and the content hash of the corpus it reasoned over. Lets an
+/// agent tell whether two runs used the *same knowledge base and build* before
+/// trusting that their proofs are comparable — a proof built from a different
+/// corpus hash or feature set is NOT the same proof even with an identical digest
+/// over the rest.
+fn determinism_receipt() -> serde_json::Value {
+    let feature_cfgs: &[(&str, bool)] = &[
+        ("assistant", cfg!(feature = "assistant")),
+        ("mcp", cfg!(feature = "mcp")),
+        ("websearch", cfg!(feature = "websearch")),
+        ("budget", cfg!(feature = "budget")),
+        ("milp", cfg!(feature = "milp")),
+        ("graph", cfg!(feature = "graph")),
+        ("llm", cfg!(feature = "llm")),
+        ("bench", cfg!(feature = "bench")),
+        ("assistant-web", cfg!(feature = "assistant-web")),
+        ("embedded-corpus", true),
+    ];
+    let mut features: Vec<&str> = feature_cfgs
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(f, _)| *f)
+        .collect();
+    // Sort so the receipt is byte-stable regardless of cfg! ordering.
+    features.sort_unstable();
+    serde_json::json!({
+        "laverna_version": env!("CARGO_PKG_VERSION"),
+        "features": features,
+        "corpus_version": CORPUS_VERSION,
+        "corpus_content_hash": CORPUS_CONTENT_HASH
+    })
+}
+
 /// canonical, sorted order because `serde_json::Value` is backed by a `BTreeMap`
 /// (no `preserve_order` feature), so the same result always yields identical
 /// bytes — the precondition for a content digest to mean anything.
@@ -3390,6 +3424,7 @@ fn build_proof_payload(result: &SolveResult) -> serde_json::Value {
             "version": CORPUS_VERSION,
             "content_hash": CORPUS_CONTENT_HASH
         },
+        "determinism_receipt": determinism_receipt(),
         "descent": {
             "resolution_score": result.matrix.resolution_score * 100.0,
             "average_depth": result.matrix.average_depth,
@@ -4295,7 +4330,8 @@ fn solve_to_json(result: &SolveResult, include_trace: bool) -> Value {
         "provenance": provenance,
         "rule_applications": rule_applications,
         "refusals": refusals,
-        "dominant_domains": result.matrix.dominant_domains
+        "dominant_domains": result.matrix.dominant_domains,
+        "determinism_receipt": determinism_receipt()
     });
     // Item 2: when `--explain-binding=json` was requested, attach the structured
     // binder trace as a first-class field of the solve document — so a caller can
@@ -7575,6 +7611,48 @@ mod proof_tests {
         assert_eq!(corpus["version"], CORPUS_VERSION);
         assert_eq!(corpus["content_hash"], CORPUS_CONTENT_HASH);
         assert!(!CORPUS_CONTENT_HASH.is_empty());
+    }
+
+    /// Item 5: every proof JSON carries a determinism receipt — binary version,
+    /// build feature flags, and the corpus content hash — so an agent can tell
+    /// whether two runs reasoned over the same knowledge base before comparing
+    /// their proofs.
+    #[test]
+    fn determinism_receipt_in_proof() {
+        let result = run_solve("दशम भाव मे बुध", None);
+        let proof = build_proof_object(&result, false);
+        let r = proof
+            .get("determinism_receipt")
+            .expect("proof must carry a determinism_receipt");
+        assert_eq!(
+            r["laverna_version"].as_str().unwrap(),
+            env!("CARGO_PKG_VERSION")
+        );
+        let features = r["features"].as_array().expect("features must be a list");
+        assert!(
+            features
+                .iter()
+                .any(|f| f.as_str() == Some("embedded-corpus")),
+            "receipt must record that the corpus is embedded"
+        );
+        assert_eq!(r["corpus_version"].as_str().unwrap(), CORPUS_VERSION);
+        assert_eq!(
+            r["corpus_content_hash"].as_str().unwrap(),
+            CORPUS_CONTENT_HASH
+        );
+        assert!(!r["corpus_content_hash"].as_str().unwrap().is_empty());
+    }
+
+    /// Item 5: the `solve -f json` document also carries the receipt, so an agent
+    /// reading the one-shot JSON (not just `--proof-out`) still gets the receipt.
+    #[test]
+    fn solve_json_carries_determinism_receipt() {
+        let q = "padded extent of a struct aligned to 8 bytes";
+        let v = solve_to_json(&run_solve(q, None), false);
+        assert!(
+            v.get("determinism_receipt").is_some(),
+            "solve JSON must carry determinism_receipt"
+        );
     }
 
     #[test]

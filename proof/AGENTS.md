@@ -114,8 +114,17 @@ JSON surface over scraping `--help`/text.
    Use this to answer "why did it read N as input X" — `method` is `name`/`unit`/
    `derived`, `anchored_by` is the query token, `tie_count > 1` means the binding
    was effectively arbitrary (arbitrary → treat the binding as low-trust). The
-   `=text` mode (or no value) prints the human prose to stderr and omits the
-   field from JSON, so `-f json` stdout stays clean.
+    `=text` mode (or no value) prints the human prose to stderr and omits the
+    field from JSON, so `-f json` stdout stays clean.
+- **Determinism receipt (Item 5).** Every proof JSON (`solve -f json` and
+   `solve --proof-out`) carries `determinism_receipt`:
+   `{laverna_version, features:[…], corpus_version, corpus_content_hash}`.
+   `features` lists the cargo feature flags the binary was built with (plus
+   `embedded-corpus`); `corpus_content_hash` pins the knowledge base. Before
+   trusting two proofs as comparable, compare their receipts — a different
+   `corpus_content_hash` or `features` set means the runs reasoned over a
+   different build/KB even if the rest of the proof matches. The receipt is part
+   of the hashed payload, so it is also covered by `digest`.
 - **Deterministic.** Outputs are sorted by stable key (determinism rule in
   root AGENTS.md); identical input → byte-identical JSON across runs. Safe to
   diff or cache.
