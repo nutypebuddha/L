@@ -56,10 +56,18 @@ impl Pipeline {
         }
 
         // Per-pin cost accounting: charge the cumulative cost of every enabled
-        // pin for this validation batch. Previously only a single token was
-        // charged regardless of how many gates actually ran.
+        // pin for this validation batch. The spend is the enforcement point — if
+        // the operation cannot afford its configured pin cost, refuse to validate
+        // rather than proceeding and billing after the fact. This closes the
+        // partial-exhaustion gap where `is_exhausted()` was false (some cost
+        // remained) yet the pin cost did not fit.
         let pin_cost = self.pin_field.total_cost();
-        self.budget.spend_cost(pin_cost);
+        if !self.budget.spend_cost(pin_cost) {
+            return Err(CidError::BudgetExhausted {
+                remaining_tokens: self.budget.remaining_tokens(),
+                remaining_cost: self.budget.remaining_cost(),
+            });
+        }
 
         let _effective_domain = domain.or(request.domain.as_deref()).unwrap_or("general");
 
@@ -190,5 +198,44 @@ impl Pipeline {
 impl Default for Pipeline {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Pipeline;
+    use crate::economy::budget::Budget;
+    use crate::inference::request::ValidationRequest;
+    use crate::inference::result::CidError;
+
+    fn request(text: &str) -> ValidationRequest {
+        ValidationRequest::new(text, "")
+    }
+
+    #[test]
+    fn validation_proceeds_when_budget_affords_pin_cost() {
+        let mut pipeline = Pipeline::new();
+        // Default budget (max_cost_usd = 10.0) comfortably covers the default
+        // PinField total cost (~0.0075).
+        let res = pipeline
+            .validate(&request("2 + 3 = 5"), None)
+            .expect("affordable validation must succeed");
+        assert!(res.passed);
+    }
+
+    #[test]
+    fn validation_refuses_when_budget_cannot_afford_pin_cost() {
+        let mut pipeline = Pipeline::new().with_budget(Budget::new(1_000_000, 0.001));
+        // The default PinField total cost (~0.0075) exceeds the 0.001 cost
+        // ceiling. `is_exhausted()` is still false (some cost remains), so only
+        // the `spend_cost()` return value guards this path — proving the budget
+        // cannot be bypassed.
+        let err = pipeline
+            .validate(&request("2 + 3 = 5"), None)
+            .expect_err("unaffordable validation must be refused");
+        assert!(
+            matches!(err, CidError::BudgetExhausted { .. }),
+            "expected BudgetExhausted, got {err}"
+        );
     }
 }

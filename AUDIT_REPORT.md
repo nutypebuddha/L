@@ -84,7 +84,7 @@ targeted tests pass.
 |------|---------------|--------|
 | Gate parser limits | `tant/parser` (`input_size_limit`, `depth_limit`, `node_limit`, `op_format_token_limit`, `normal_parse_ok`) | size / depth / nodes / tokens |
 | Gate unification + threshold + unevaluable | `gates::tests` (`unified_path_runs_each_pin_once`, `all_required_pins_pass_validates`, `false_equation_rejected`, `contradiction_is_fail_not_unevaluable`, `high_threshold_makes_valid_unevaluable`, `disabled_pins_skipped`) | single source of truth |
-| Proof envelope | `verify::envelope::tests` (`deterministic_replay`, `serde_roundtrip`, `mutation_detected`, `property_valid_proofs_verify_tampered_fail`) | deterministic hash, tamper detection, fuzz |
+| Proof envelope | `verify::envelope::tests` (`deterministic_replay`, `serde_roundtrip`, `mutation_detected`, `property_valid_proofs_verify_tampered_fail`) | deterministic hash, tamper detection, property |
 | Verifier→envelope | `verify::verifier::tests` (`verifier_emits_sealed_envelope_for_true_claim`, `verifier_emits_refused_envelope_for_false_claim`) | integration |
 | Proof compute parser limits | `compute::parser::tests::parser_limits_bound_input_and_depth` | depth / size guards |
 

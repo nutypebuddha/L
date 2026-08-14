@@ -24,7 +24,7 @@ use crate::digest::{sha256_hex, to_hex};
 use serde::{Deserialize, Serialize};
 
 /// Version of the *proof envelope format* (distinct from the engine version).
-/// Bump when the signed-payload shape changes so old verifiers reject new
+/// Bump when the sealed-payload shape changes so old verifiers reject new
 /// envelopes instead of misreading them.
 pub const PROOF_ENVELOPE_VERSION: u32 = 1;
 
@@ -55,9 +55,12 @@ impl ProofVerdict {
 
 /// A stable, versioned, tamper-evident proof object.
 ///
-/// Every field except `proof_hash` is part of the signed payload. `seal()`
-/// computes `proof_hash`; `verify_integrity()` re-derives it and returns
-/// `false` on any mutation.
+/// Every field except `proof_hash` is part of the sealed (hashed) payload.
+/// `seal()` computes the `proof_hash` integrity digest; `verify_integrity()`
+/// re-derives it and returns `false` on any mutation. The `proof_hash` is
+/// tamper-evidence, not cryptographic authenticity — it commits to the exact
+/// bytes produced by this engine, but confers no digital signature or proof of
+/// origin.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProofEnvelope {
     /// Envelope/proof-format version (`PROOF_ENVELOPE_VERSION`).
@@ -83,10 +86,10 @@ pub struct ProofEnvelope {
     pub proof_hash: String,
 }
 
-/// The subset of [`ProofEnvelope`] that is cryptographically signed. Keeping it
+/// The subset of [`ProofEnvelope`] committed by the integrity hash. Keeping it
 /// as a dedicated struct guarantees the canonical byte order is single-sourced.
 #[derive(Serialize)]
-struct SignedPayload<'a> {
+struct SealedPayload<'a> {
     proof_version: u32,
     engine_version: &'a str,
     input_hash: &'a str,
@@ -98,13 +101,13 @@ struct SignedPayload<'a> {
 }
 
 impl ProofEnvelope {
-    /// Canonical, deterministic JSON of the signed payload. Assumptions are
+    /// Canonical, deterministic JSON of the sealed payload. Assumptions are
     /// sorted so equivalent envelopes hash identically regardless of insertion
     /// order (determinism rule: sort by stable key before aggregating).
-    fn signed_json(&self) -> String {
+    fn sealed_json(&self) -> String {
         let mut assumptions = self.assumptions.clone();
         assumptions.sort();
-        let payload = SignedPayload {
+        let payload = SealedPayload {
             proof_version: self.proof_version,
             engine_version: &self.engine_version,
             input_hash: &self.input_hash,
@@ -117,12 +120,12 @@ impl ProofEnvelope {
         // `serde_json::to_string` serializes struct fields in declaration order,
         // which is itself stable; combined with sorted assumptions this is a
         // fully deterministic digest input.
-        serde_json::to_string(&payload).expect("ProofEnvelope signed payload must serialize")
+        serde_json::to_string(&payload).expect("ProofEnvelope sealed payload must serialize")
     }
 
     /// Compute and store the `proof_hash` for this envelope in place.
     pub fn seal(&mut self) {
-        self.proof_hash = sha256_hex(self.signed_json().as_bytes());
+        self.proof_hash = sha256_hex(self.sealed_json().as_bytes());
     }
 
     /// Build a sealed envelope (computes `proof_hash`).
@@ -150,13 +153,13 @@ impl ProofEnvelope {
     }
 
     /// True iff the stored `proof_hash` matches the re-derived digest of the
-    /// signed payload. This is the single integrity check: any field mutation
+    /// sealed payload. This is the single integrity check: any field mutation
     /// (including swapping `derivation`) makes it return `false`.
     pub fn verify_integrity(&self) -> bool {
         if self.proof_hash.is_empty() {
             return false;
         }
-        sha256_hex(self.signed_json().as_bytes()) == self.proof_hash
+        sha256_hex(self.sealed_json().as_bytes()) == self.proof_hash
     }
 
     /// Short, stable fingerprint for logging/tracing (first 16 hex chars).
@@ -259,12 +262,12 @@ mod tests {
         assert!(!a.verify_integrity());
     }
 
-    /// Property / fuzz: for many varied inputs, a freshly sealed envelope always
+    /// Property test: for many varied inputs, a freshly sealed envelope always
     /// verifies, and a single-character mutation of the result always fails.
     #[test]
     fn property_valid_proofs_verify_tampered_fail() {
-        // Tiny deterministic PRNG (xorshift) — no external deps, still a real
-        // fuzz over varied inputs.
+        // Tiny deterministic PRNG (xorshift) — no external deps, drives property
+        // coverage over varied inputs.
         let mut seed: u64 = 0x9E37_79B9_7F4A_7C15;
         let mut next = || {
             seed ^= seed << 13;
