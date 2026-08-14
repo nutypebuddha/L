@@ -10,6 +10,7 @@
 
 use crate::validation::{fallacy_gate, logic_gate, math_gate};
 use crate::verify::diagnostics::{Diagnostic, DiagnosticGate, DiagnosticReport};
+use crate::verify::envelope::{ProofEnvelope, ProofVerdict};
 
 /// What kind of proposal the LLM submitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -89,6 +90,55 @@ pub fn verify_expression(input: &str) -> DiagnosticReport {
         claimed_confidence: None,
     };
     verify_proposal(&proposal)
+}
+
+/// Trusted entry point that produces a sealed [`ProofEnvelope`] for a claim.
+///
+/// This is the single place where the Verifier's decision becomes a
+/// machine-checkable, tamper-evident artifact. `corpus_hash` and `assumptions`
+/// are supplied by the caller (the corpus-integrity reference lives in the
+/// binary/main surface, not in this pure module); the verifier never invents
+/// them. The `verdict` is derived strictly from the deterministic
+/// `DiagnosticReport`: `passed && refusals.empty()` → `Accepted`, a non-empty
+/// refusal set → `Refused`, otherwise (errors present) → `Refused`. A claim
+/// that could not be decided would map to `Unevaluable`; the current verifier
+/// is decisive, so it maps to `Refused`/`Accepted` only.
+pub fn verify_proposal_envelope(
+    claim: &str,
+    kind: ProposalKind,
+    corpus_hash: &[u8],
+    assumptions: Vec<String>,
+) -> ProofEnvelope {
+    let proposal = LlmProposal {
+        original_query: String::new(),
+        formalized: claim.to_string(),
+        kind,
+        claimed_confidence: None,
+    };
+    let report = verify_proposal(&proposal);
+    let verdict = if report.refusals.is_empty() && report.passed {
+        ProofVerdict::Accepted
+    } else {
+        ProofVerdict::Refused
+    };
+    let derivation = report
+        .diagnostics
+        .iter()
+        .map(|d| format!("[{}] {}: {}", d.gate, d.severity, d.message))
+        .collect::<Vec<_>>()
+        .join("\n");
+    ProofEnvelope::new(
+        claim,
+        &crate::digest::to_hex(corpus_hash),
+        assumptions,
+        derivation,
+        if report.passed {
+            "claim verified".to_string()
+        } else {
+            "claim rejected".to_string()
+        },
+        verdict,
+    )
 }
 
 // ── Gate implementations ──────────────────────────────────────────────
@@ -715,5 +765,42 @@ mod tests {
             let report = verify_expression(e);
             assert!(!report.passed, "{e} must NOT pass");
         }
+    }
+
+    #[test]
+    fn verifier_emits_sealed_envelope_for_true_claim() {
+        let env = verify_proposal_envelope(
+            "2 + 3 = 5",
+            ProposalKind::Arithmetic,
+            b"corpus-seed",
+            vec!["arithmetic closure".to_string()],
+        );
+        // Sealed and internally consistent.
+        assert!(env.verify_integrity());
+        assert_eq!(env.verdict, ProofVerdict::Accepted);
+        // Replaying produces a deterministic, identical hash.
+        let env2 = verify_proposal_envelope(
+            "2 + 3 = 5",
+            ProposalKind::Arithmetic,
+            b"corpus-seed",
+            vec!["arithmetic closure".to_string()],
+        );
+        assert_eq!(env.proof_hash, env2.proof_hash);
+    }
+
+    #[test]
+    fn verifier_emits_refused_envelope_for_false_claim() {
+        let env = verify_proposal_envelope(
+            "2 + 3 = 6",
+            ProposalKind::Arithmetic,
+            b"corpus-seed",
+            vec!["arithmetic closure".to_string()],
+        );
+        assert!(env.verify_integrity());
+        assert_eq!(env.verdict, ProofVerdict::Refused);
+        // Tampering with the verdict without re-sealing is detected.
+        let mut tampered = env;
+        tampered.verdict = ProofVerdict::Accepted;
+        assert!(!tampered.verify_integrity());
     }
 }

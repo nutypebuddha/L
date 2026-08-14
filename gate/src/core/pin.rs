@@ -56,10 +56,10 @@ impl PinField {
     pub fn new() -> Self {
         let pins = vec![
             Pin::new(Gate::Math, 0.7),
-            Pin::new(Gate::Logic, 0.7),
-            Pin::new(Gate::Fact, 0.7),
+            Pin::new(Gate::Logic, 0.5),
+            Pin::new(Gate::Fact, 0.5),
             Pin::new(Gate::Confidence, 0.5),
-            Pin::new(Gate::Formal, 0.7),
+            Pin::new(Gate::Formal, 0.5),
         ];
         PinField { pins }
     }

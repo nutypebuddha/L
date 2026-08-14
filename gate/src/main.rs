@@ -1,13 +1,8 @@
 use cid::core::ball::{Ball, TokenCandidate};
-use cid::core::pin::{Gate, PinField};
+use cid::core::pin::PinField;
 use cid::core::pocket::Pocket;
 use cid::economy::budget::Budget;
 use cid::economy::tray::BallEconomy;
-use cid::gates::GateValidator;
-use cid::gates::{
-    confidence::ConfidenceGate, fact::FactGate, formal::FormalGate, logic::LogicGate,
-    math::MathGate,
-};
 use cid::inference::json::{stringify, JsonValue};
 use cid::inference::{InferenceEngine, ProxyConfig, ProxyServer, ValidationRequest};
 use cid::kb::facts::KnowledgeBase;
@@ -43,23 +38,7 @@ impl CIDDevice {
         let logit = (hash % 1000) as f64 / 1000.0;
         let candidate = TokenCandidate::new(hash, token, logit);
         let mut ball = Ball::new(candidate);
-
-        for pin in self.pin_field.pins.iter() {
-            if !pin.enabled {
-                continue;
-            }
-
-            let result = match pin.gate {
-                Gate::Math => MathGate::new().validate(&mut ball, context),
-                Gate::Logic => LogicGate::new().validate(&mut ball, context),
-                Gate::Fact => FactGate::new(&self.kb).validate(&mut ball, context),
-                Gate::Confidence => ConfidenceGate::new(pin.threshold).validate(&mut ball, context),
-                Gate::Formal => FormalGate::new().validate(&mut ball, context),
-            };
-
-            ball.add_result(result);
-        }
-
+        cid::gates::validate_candidate(&mut ball, &self.pin_field.pins, context, token, &self.kb);
         ball
     }
 
@@ -368,22 +347,13 @@ fn process_line(line: &str, device: &mut CIDDevice) -> String {
                 let logit = (hash % 1000) as f64 / 1000.0;
                 let candidate = TokenCandidate::new(hash, token, logit);
                 let mut ball = Ball::new(candidate);
-
-                for pin in device.pin_field.pins.iter() {
-                    if !pin.enabled {
-                        continue;
-                    }
-                    let result = match pin.gate {
-                        Gate::Math => MathGate::new().validate(&mut ball, context),
-                        Gate::Logic => LogicGate::new().validate(&mut ball, context),
-                        Gate::Fact => FactGate::new(&device.kb).validate(&mut ball, context),
-                        Gate::Confidence => {
-                            ConfidenceGate::new(pin.threshold).validate(&mut ball, context)
-                        }
-                        Gate::Formal => FormalGate::new().validate(&mut ball, context),
-                    };
-                    ball.add_result(result);
-                }
+                cid::gates::validate_candidate(
+                    &mut ball,
+                    &device.pin_field.pins,
+                    context,
+                    token,
+                    &device.kb,
+                );
                 candidates.push(ball);
             }
 

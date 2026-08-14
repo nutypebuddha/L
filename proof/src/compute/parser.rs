@@ -254,6 +254,15 @@ impl CmpOp {
     }
 }
 
+/// Resource limits applied to every Tanto parse, bounding both the input we
+/// will lex and the AST nesting we will descend into. These are the
+/// defense-in-depth guard against pathological LLM/agent-supplied proposals:
+/// a malformed or adversarial expression can no longer drive unbounded lexing
+/// or stack-deep recursion.
+const MAX_INPUT_BYTES: usize = 1 << 22; // 4 MiB — far beyond any legitimate expression
+const MAX_TOKENS: usize = 1 << 20; // 1,048,576 tokens
+const MAX_DEPTH: usize = 256; // parenthesis/expression nesting depth
+
 struct Parser<'a> {
     tokens: Vec<Token>,
     pos: usize,
@@ -263,6 +272,8 @@ struct Parser<'a> {
     /// `parse_math` for corpus expression validation where a concrete finite
     /// value is irrelevant.
     structural: bool,
+    /// Current parenthesis/expression nesting depth (see `MAX_DEPTH`).
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -272,6 +283,7 @@ impl<'a> Parser<'a> {
             pos: 0,
             env,
             structural: false,
+            depth: 0,
         }
     }
 
@@ -281,6 +293,7 @@ impl<'a> Parser<'a> {
             pos: 0,
             env,
             structural: true,
+            depth: 0,
         }
     }
 
@@ -302,6 +315,10 @@ impl<'a> Parser<'a> {
     /// correctly rejects as malformed rather than silently accepting a
     /// Python-style chained comparison this grammar was never designed for.
     fn parse_expr(&mut self) -> Option<f64> {
+        if self.depth >= MAX_DEPTH {
+            return None;
+        }
+        self.depth += 1;
         let left = self.parse_additive()?;
         let op = match self.peek() {
             Some(Token::Lt) => CmpOp::Lt,
@@ -579,6 +596,9 @@ fn eval_func(name: &str, args: &[f64]) -> Option<f64> {
 /// does not regress any of them — it just stops a truncated prefix from
 /// masquerading as a complete answer.
 pub fn eval_math(input: &[u8], env: &TantoEnv) -> Option<f64> {
+    if input.len() > MAX_INPUT_BYTES {
+        return None;
+    }
     let mut lexer = Lexer::new(input);
     let mut tokens = Vec::new();
     while let Some(tok) = lexer.next_token() {
@@ -596,6 +616,9 @@ pub fn eval_math(input: &[u8], env: &TantoEnv) -> Option<f64> {
     if tokens.is_empty() {
         return None;
     }
+    if tokens.len() > MAX_TOKENS {
+        return None;
+    }
     let mut parser = Parser::new(tokens, env);
     let val = parser.parse_expr()?;
     if parser.pos != parser.tokens.len() {
@@ -611,6 +634,9 @@ pub fn eval_math(input: &[u8], env: &TantoEnv) -> Option<f64> {
 /// expressions without false-positiving on legitimate free variables or
 /// division-by-zero special cases.
 pub fn parse_math(input: &[u8], env: &TantoEnv) -> Option<()> {
+    if input.len() > MAX_INPUT_BYTES {
+        return None;
+    }
     let mut lexer = Lexer::new(input);
     let mut tokens = Vec::new();
     while let Some(tok) = lexer.next_token() {
@@ -620,6 +646,9 @@ pub fn parse_math(input: &[u8], env: &TantoEnv) -> Option<()> {
         return None;
     }
     if tokens.is_empty() {
+        return None;
+    }
+    if tokens.len() > MAX_TOKENS {
         return None;
     }
     let mut parser = Parser::new_structural(tokens, env);
@@ -951,5 +980,22 @@ mod tests {
                                                       // Sanity: complete, well-formed input still works exactly as before.
         assert_eq!(eval_math(b"2+3", &env), Some(5.0));
         assert_eq!(eval_math(b"(2+3)*4", &env), Some(20.0));
+    }
+
+    #[test]
+    fn parser_limits_bound_input_and_depth() {
+        let env = TantoEnv::new();
+        // Normal expressions still parse.
+        assert_eq!(eval_math(b"2 + 3 * 4", &env), Some(14.0));
+        assert_eq!(parse_math(b"2 + 3 * 4", &env), Some(()));
+
+        // Pathological parenthesis nesting is rejected (depth guard), not
+        // allowed to drive unbounded recursion.
+        let deep = format!("{} 1 {}", "(".repeat(4096), ")".repeat(4096));
+        assert_eq!(eval_math(deep.as_bytes(), &env), None);
+
+        // Oversized input is rejected before lexing.
+        let huge = format!("1 + {}", "1 + ".repeat(8_000_000));
+        assert_eq!(eval_math(huge.as_bytes(), &env), None);
     }
 }

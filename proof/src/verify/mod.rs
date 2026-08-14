@@ -1,4 +1,5 @@
 pub mod diagnostics;
+pub mod envelope;
 pub mod protocol;
 pub mod verifier;
 

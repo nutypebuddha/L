@@ -4,15 +4,70 @@
 use crate::tanto::math;
 use crate::tanto::TantoEnv;
 
+/// Deterministic resource limits for the recursive-descent parser.
+///
+/// These bounds exist so that untrusted input — the parser is on the
+/// Gate/proposal side of the trust boundary — can never trigger unbounded
+/// recursion (stack exhaustion) or unbounded node expansion (heap exhaustion)
+/// regardless of how maliciously shaped the expression is. Every limit is
+/// enforced in exactly one place: [`Parser::over_limits`].
+#[derive(Debug, Clone, Copy)]
+pub struct ParserLimits {
+    /// Maximum number of input bytes accepted before parsing is refused.
+    pub max_input_bytes: usize,
+    /// Maximum number of whitespace-delimited tokens in op-format input.
+    pub max_tokens: usize,
+    /// Maximum AST nesting depth (recursion depth of `parse_expr`).
+    pub max_depth: usize,
+    /// Maximum number of AST nodes produced while parsing.
+    pub max_nodes: usize,
+}
+
+impl Default for ParserLimits {
+    fn default() -> Self {
+        ParserLimits {
+            max_input_bytes: 1 << 22, // 4 MiB
+            max_tokens: 1 << 18,      // 262_144 tokens
+            max_depth: 256,
+            max_nodes: 1 << 20, // 1_048_576 nodes
+        }
+    }
+}
+
 pub struct Parser<'a> {
     pub bytes: &'a [u8],
     pub pos: usize,
     pub env: &'a TantoEnv,
+    pub limits: ParserLimits,
+    depth: usize,
+    nodes: usize,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(bytes: &'a [u8], env: &'a TantoEnv) -> Self {
-        Parser { bytes, pos: 0, env }
+        Parser::with_limits(bytes, env, ParserLimits::default())
+    }
+
+    pub fn with_limits(bytes: &'a [u8], env: &'a TantoEnv, limits: ParserLimits) -> Self {
+        Parser {
+            bytes,
+            pos: 0,
+            env,
+            limits,
+            depth: 0,
+            nodes: 0,
+        }
+    }
+
+    /// True if the current parse has exceeded any configured resource limit.
+    /// This is the single enforcement point for all parser limits.
+    fn over_limits(&self) -> bool {
+        self.depth > self.limits.max_depth || self.nodes > self.limits.max_nodes
+    }
+
+    fn bump_node(&mut self) -> bool {
+        self.nodes += 1;
+        !self.over_limits()
     }
 
     pub fn peek(&self) -> Option<u8> {
@@ -42,10 +97,19 @@ impl<'a> Parser<'a> {
     }
 
     pub fn parse_expr(&mut self) -> Option<f64> {
-        self.parse_add_sub()
+        if self.depth + 1 > self.limits.max_depth {
+            return None;
+        }
+        self.depth += 1;
+        let r = self.parse_add_sub();
+        self.depth -= 1;
+        r
     }
 
     fn parse_add_sub(&mut self) -> Option<f64> {
+        if !self.bump_node() {
+            return None;
+        }
         let mut left = self.parse_mul_div()?;
         loop {
             self.skip_ws();
@@ -67,6 +131,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_mul_div(&mut self) -> Option<f64> {
+        if !self.bump_node() {
+            return None;
+        }
         let mut left = self.parse_power()?;
         loop {
             self.skip_ws();
@@ -105,6 +172,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_power(&mut self) -> Option<f64> {
+        if !self.bump_node() {
+            return None;
+        }
         let mut base = self.parse_unary()?;
         self.skip_ws();
         if self.peek() == Some(b'^') {
@@ -116,6 +186,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_unary(&mut self) -> Option<f64> {
+        if !self.bump_node() {
+            return None;
+        }
         self.skip_ws();
         match self.peek() {
             Some(b'-') => {
@@ -132,6 +205,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_primary(&mut self) -> Option<f64> {
+        if !self.bump_node() {
+            return None;
+        }
         self.skip_ws();
         match self.peek() {
             Some(b'(') => {
@@ -234,21 +310,38 @@ impl<'a> Parser<'a> {
 }
 
 pub fn eval_math(expr: &[u8], env: &TantoEnv) -> Option<f64> {
-    let mut parser = Parser::new(expr, env);
+    eval_math_with_limits(expr, env, ParserLimits::default())
+}
+
+/// Bounded variant of [`eval_math`] with explicit resource limits.
+pub fn eval_math_with_limits(expr: &[u8], env: &TantoEnv, limits: ParserLimits) -> Option<f64> {
+    if expr.len() > limits.max_input_bytes {
+        return None;
+    }
+    let mut parser = Parser::with_limits(expr, env, limits);
     parser.parse_expr()
 }
 
 /// Op-format parser: "split 142.37 5" -> split(142.37, 5)
 pub fn eval_op_format(expr: &[u8], env: &TantoEnv) -> Option<f64> {
+    eval_op_format_with_limits(expr, env, ParserLimits::default())
+}
+
+/// Bounded variant of [`eval_op_format`] with explicit resource limits.
+pub fn eval_op_format_with_limits(
+    expr: &[u8],
+    env: &TantoEnv,
+    limits: ParserLimits,
+) -> Option<f64> {
     let s = trim(expr);
-    if s.is_empty() {
+    if s.is_empty() || s.len() > limits.max_input_bytes {
         return None;
     }
 
     let mut tokens: [&[u8]; 8] = [&[], &[], &[], &[], &[], &[], &[], &[]];
     let mut tcount = 0;
     let mut i = 0;
-    while i < s.len() && tcount < 8 {
+    while i < s.len() && tcount < limits.max_tokens.min(8) {
         while i < s.len() && (s[i] == b' ' || s[i] == b'\t') {
             i += 1;
         }
@@ -331,4 +424,70 @@ pub fn looks_like_expression(s: &[u8]) -> bool {
         i += 1;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parser_normal_expression_succeeds() {
+        let env = TantoEnv::new();
+        assert_eq!(eval_math(b"2 + 3 * 4", &env), Some(14.0));
+        assert_eq!(eval_math(b"(1 + 1) * (2 + 2)", &env), Some(8.0));
+    }
+
+    #[test]
+    fn parser_input_size_limit_enforced() {
+        let env = TantoEnv::new();
+        let limits = ParserLimits {
+            max_input_bytes: 4,
+            ..ParserLimits::default()
+        };
+        // "12345" is 5 bytes > 4 byte limit.
+        assert_eq!(eval_math_with_limits(b"12345", &env, limits), None);
+        // Within limit still works.
+        assert_eq!(eval_math_with_limits(b"123", &env, limits), Some(123.0));
+    }
+
+    #[test]
+    fn parser_depth_limit_enforced() {
+        let env = TantoEnv::new();
+        // 300-deep nested parens exceeds the default max_depth of 256.
+        let deep = format!("{}{}{}", "(".repeat(300), "1", ")".repeat(300));
+        assert_eq!(eval_math(deep.as_bytes(), &env), None);
+        // 100-deep is well within the limit.
+        let shallow = format!("{}{}{}", "(".repeat(100), "1", ")".repeat(100));
+        assert!(eval_math(shallow.as_bytes(), &env).is_some());
+    }
+
+    #[test]
+    fn parser_node_limit_enforced() {
+        let env = TantoEnv::new();
+        // A chain of additions creates many AST nodes; cap nodes at 2 so even
+        // "1+1+1" (3 leaf/op nodes) is rejected.
+        let limits = ParserLimits {
+            max_nodes: 8,
+            ..ParserLimits::default()
+        };
+        // "1+1+1" expands to more than 8 parse nodes and is rejected.
+        assert_eq!(eval_math_with_limits(b"1+1+1", &env, limits), None);
+        // A single literal stays well under the node cap.
+        let ok = ParserLimits {
+            max_nodes: 8,
+            ..ParserLimits::default()
+        };
+        assert_eq!(eval_math_with_limits(b"42", &env, ok), Some(42.0));
+    }
+
+    #[test]
+    fn parser_op_format_token_limit_enforced() {
+        let env = TantoEnv::new();
+        let limits = ParserLimits {
+            max_tokens: 1,
+            ..ParserLimits::default()
+        };
+        // "add 2 3" has 3 tokens; with a 1-token cap it must be refused.
+        assert_eq!(eval_op_format_with_limits(b"add 2 3", &env, limits), None);
+    }
 }

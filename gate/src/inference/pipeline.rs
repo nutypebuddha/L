@@ -1,14 +1,11 @@
 use super::request::ValidationRequest;
 use super::result::{CidError, CidResult, GateScore, ValidationResult};
 use crate::core::ball::{Ball, TokenCandidate};
-use crate::core::pin::{Gate, PinField};
+use crate::core::pin::PinField;
 use crate::core::pocket::Pocket;
 use crate::economy::budget::Budget;
 use crate::economy::tray::BallEconomy;
-use crate::gates::{
-    confidence::ConfidenceGate, fact::FactGate, formal::FormalGate, logic::LogicGate,
-    math::MathGate, GateValidator,
-};
+use crate::gates::validate_candidate;
 use crate::kb::facts::KnowledgeBase;
 use crate::state::machine::{State, StateMachine};
 
@@ -57,6 +54,12 @@ impl Pipeline {
                 remaining_cost: self.budget.remaining_cost(),
             });
         }
+
+        // Per-pin cost accounting: charge the cumulative cost of every enabled
+        // pin for this validation batch. Previously only a single token was
+        // charged regardless of how many gates actually ran.
+        let pin_cost = self.pin_field.total_cost();
+        self.budget.spend_cost(pin_cost);
 
         let _effective_domain = domain.or(request.domain.as_deref()).unwrap_or("general");
 
@@ -139,27 +142,7 @@ impl Pipeline {
     ) -> CidResult<Ball> {
         let candidate = TokenCandidate::new(0, token, 0.5);
         let mut ball = Ball::new(candidate);
-
-        for pin in self.pin_field.pins.iter() {
-            if !pin.enabled {
-                continue;
-            }
-
-            let result = match pin.gate {
-                Gate::Math => MathGate::new().validate(&mut ball, context),
-                Gate::Logic => LogicGate::new().validate(&mut ball, context),
-                Gate::Fact => FactGate::new(&self.kb)
-                    .with_claim(claim)
-                    .validate(&mut ball, context),
-                Gate::Confidence => {
-                    ConfidenceGate::with_platt_for_domain(context).validate(&mut ball, context)
-                }
-                Gate::Formal => FormalGate::new().validate(&mut ball, context),
-            };
-
-            ball.add_result(result);
-        }
-
+        validate_candidate(&mut ball, &self.pin_field.pins, context, claim, &self.kb);
         Ok(ball)
     }
 
@@ -174,27 +157,7 @@ impl Pipeline {
         for (i, token) in candidates.iter().enumerate() {
             let candidate = TokenCandidate::new(i as u32, token, 0.5);
             let mut ball = Ball::new(candidate);
-
-            for pin in self.pin_field.pins.iter() {
-                if !pin.enabled {
-                    continue;
-                }
-
-                let result = match pin.gate {
-                    Gate::Math => MathGate::new().validate(&mut ball, context),
-                    Gate::Logic => LogicGate::new().validate(&mut ball, context),
-                    Gate::Fact => FactGate::new(&self.kb)
-                        .with_claim(claim)
-                        .validate(&mut ball, context),
-                    Gate::Confidence => {
-                        ConfidenceGate::with_platt_for_domain(context).validate(&mut ball, context)
-                    }
-                    Gate::Formal => FormalGate::new().validate(&mut ball, context),
-                };
-
-                ball.add_result(result);
-            }
-
+            validate_candidate(&mut ball, &self.pin_field.pins, context, claim, &self.kb);
             balls.push(ball);
         }
 

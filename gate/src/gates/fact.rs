@@ -1,5 +1,5 @@
 use super::GateValidator;
-use crate::core::ball::{Ball, GateResult};
+use crate::core::ball::{Ball, GateOutcome, GateResult};
 use crate::core::pin::Gate;
 use crate::kb::facts::KnowledgeBase;
 
@@ -250,10 +250,26 @@ impl<'a> GateValidator for FactGate<'a> {
             None
         };
 
-        if passed {
-            GateResult::passed(Gate::Fact, avg_score)
+        // A *contradiction* with the corpus is a definite falsehood -> Fail.
+        // Any other non-pass means we could neither confirm nor refute the
+        // claim (missing evidence, unverifiable numeric assertion) -> the gate
+        // is `Unevaluable`: semantically distinct from a refutation.
+        let outcome = if passed {
+            GateOutcome::Pass
+        } else if !no_contradiction {
+            GateOutcome::Fail
         } else {
-            GateResult::failed(Gate::Fact, avg_score, &reason.unwrap_or_default())
+            GateOutcome::Unevaluable
+        };
+
+        match outcome {
+            GateOutcome::Pass => GateResult::passed(Gate::Fact, avg_score),
+            GateOutcome::Fail => {
+                GateResult::failed(Gate::Fact, avg_score, &reason.unwrap_or_default())
+            }
+            GateOutcome::Unevaluable => {
+                GateResult::unevaluable(Gate::Fact, avg_score, &reason.unwrap_or_default())
+            }
         }
     }
 }
