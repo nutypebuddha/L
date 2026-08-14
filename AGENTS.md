@@ -25,8 +25,9 @@ gated by feature). Standalone `athena` binary is `athena/src/main.rs.standalone`
 ## The `lai` binary (`proof/`)
 
 Top-level subcommands include `validate`, `mcp`, `corpus`, `gate`, `tanto`,
-`athena`, `companion`, and `assistant` (only when the `assistant` feature is on).
-For the current list run `lai --help` / `lai <sub> --help` — don't trust prose.
+`athena`, `companion`, `verify`, and `assistant` (only when the `assistant`
+feature is on). For the current list run `lai --help` / `lai <sub> --help`
+— don't trust prose.
 
 ## Dev cycle — match CI exactly (`.github/workflows/ci.yml`)
 
@@ -35,7 +36,7 @@ Run in this order. CI fails on any warning (`RUSTFLAGS="-D warnings"`):
 ```bash
 cargo fmt -- --check                                          # 1. formatting
 cargo clippy --locked --workspace --all-targets -- -D warnings  # 2. lints
-`cargo build -p laverna --bin lai --locked` on rustc 1.75 (sandbox MSRV compliance)  # 2. MSRV compliance
+`cargo build -p laverna --bin lai --locked` on rustc 1.75 (sandbox MSRV compliance) # 2. MSRV compliance
 
 cargo deny check                                              # 3. license/bans/advisory (needs cargo-deny)
 cargo test --locked --workspace                               # 4. tests (default features)
@@ -166,7 +167,7 @@ Release profile is aggressive (`opt-level="z"`, `lto="fat"`, `panic="abort"`,
 - `CARGO_BUILD_JOBS` is not hardcoded — set per-invocation.
 - Check disk before building: `df -h / | tail -1` (abort if < 2 GB).
 - Development is on Android/Termux (proot); the repo root is the checkout dir.
-- MSRV is 1.85, pinned by the `xalen-*` ephemeris crates (edition 2024, single
+- MSRV is 1.75, pinned by the `xalen-*` ephemeris crates (edition 2024, single
   publisher `Zayn111666`/Vedika Intelligence, no `rust-version`) — direct deps of
   `laverna` in the chart-computation critical path. Exact versions are locked by
   the committed `Cargo.lock` + `--locked` CI; do not re-pin indexmap/hashbrown to

@@ -61,7 +61,7 @@ name = "shikai_processing"
 harness = false
 
 [features]
-default = ["mcp"]
+default = []
 mcp = ["dep:rmcp", "dep:tokio"]
 budget = []
 llm = ["dep:llama-gguf", "dep:ureq", "dep:tokio", "dep:dirs", "dep:sha2"]
