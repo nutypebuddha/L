@@ -1786,7 +1786,7 @@ impl DescentEngine {
             }
             // Set western from forms' Vedic dominant graha → sign
             if let Some(graha) = de.vedic_classification.dominant_graha() {
-                let sign = Sign::from_index(graha.index());
+                let sign = sign_from_domain(graha);
                 st.western_classification.set_sign(sign, 0.9);
                 let domain = crate::domain_graph::from_sign(sign);
                 st.domains.push(domain);
@@ -1885,7 +1885,7 @@ impl DescentEngine {
             .clone();
         if !de.forms.is_empty() || !de.events.is_empty() {
             if let Some(graha) = de.vedic_classification.dominant_graha() {
-                let sign = Sign::from_index(graha.index());
+                let sign = sign_from_domain(graha);
                 let domain = crate::domain_graph::from_sign(sign);
                 st.domains.push(domain);
                 st.western_classification.set_sign(sign, 0.7);
@@ -1961,8 +1961,7 @@ impl DescentEngine {
 
         // Update western classification based on dominant domain
         if let Some(domain) = st.domains.first() {
-            let sign_index = domain.index();
-            let sign = Sign::from_index(sign_index);
+            let sign = sign_from_domain(*domain);
             st.western_classification = st
                 .western_classification
                 .clone()
@@ -2030,8 +2029,7 @@ impl DescentEngine {
     /// Resolve elemental+modality features from domain.
     fn resolve_element(&self, st: &mut SettledToken) {
         if let Some(domain) = st.domains.first() {
-            let sign_index = domain.index();
-            let sign = Sign::from_index(sign_index);
+            let sign = sign_from_domain(*domain);
             st.western_classification = st
                 .western_classification
                 .clone()
@@ -2124,7 +2122,7 @@ impl DescentEngine {
                 }
             }
             if let Some(graha) = de.vedic_classification.dominant_graha() {
-                let sign = Sign::from_index(graha.index());
+                let sign = sign_from_domain(graha);
                 st.western_classification.set_sign(sign, 0.9);
             }
         }
@@ -2286,10 +2284,31 @@ fn token_is_whole_word_in_formula(f: &crate::formula::Formula, token: &str) -> b
 
 // ─── Helper: Sign from Domain ──────────────────────────────────────────────
 
-/// Convert a `Domain` to its corresponding `Sign`.
-/// Both enums share the same 0-based ordering (Aries=0, Pisces=11).
+/// Convert a `Domain` (graha) to its corresponding `Sign`.
+///
+/// This is the inverse of [`crate::domain_graph::from_sign`]: each graha maps
+/// to its primary (moola-trikona) ruling sign. The previous implementation did
+/// `Sign::from_index(domain.index())`, which silently treated the 9-valued
+/// graha index as a 12-valued sign index and produced a *wrong* sign for every
+/// domain — e.g. Surya (index 0) became Aries instead of Leo — corrupting
+/// `vedic_classification` for any token resolved through `DOMAIN_KEYWORDS`, the
+/// T110 lexicon, or the formula-search fallback.
+///
+/// Rahu and Ketu are lunar nodes with no sign rulership; they map
+/// deterministically to their exaltation signs (Rahu→Taurus, Ketu→Scorpio) so
+/// the western-classification path stays total and reproducible.
 fn sign_from_domain(domain: Domain) -> Sign {
-    Sign::from_index(domain.index())
+    match domain {
+        Domain::Surya => Sign::Leo,
+        Domain::Chandra => Sign::Cancer,
+        Domain::Mangala => Sign::Aries,
+        Domain::Budha => Sign::Gemini,
+        Domain::Brihaspati => Sign::Sagittarius,
+        Domain::Shukra => Sign::Taurus,
+        Domain::Shani => Sign::Capricorn,
+        Domain::Rahu => Sign::Taurus,
+        Domain::Ketu => Sign::Scorpio,
+    }
 }
 
 /// Convert a `PlanetaryRuler` to its corresponding `Graha`.
