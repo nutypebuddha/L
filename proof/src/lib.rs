@@ -1,6 +1,7 @@
 // Copyright 2026 nutypebuddha
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod adaptive;
 pub mod aspect;
 pub mod astrology;
 pub mod chart;
