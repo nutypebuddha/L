@@ -53,10 +53,23 @@ Shares solver with `optimize` — no subprocess.
 ## Export
 
 ```bash
-proof/scripts/export.sh   # static x86_64-musl build → /sdcard/Download/Laverna/bin/
+proof/scripts/export.sh   # static x86_64-musl build → Download/Laverna/bin/
 ```
 
 Note: `REPO_ROOT` in export.sh resolves to `proof/` but target dir is workspace root.
+
+### Export / import always go through `Download`
+
+`Download` is the **canonical interchange directory** between this dev container
+and Android (Termux `~/storage/shared/Download` ≡ `/sdcard/Download` ≡
+container `/mnt/android/Download`).
+
+- **Export:** always write build artifacts (binaries, `*.apk`, wasm, `*.tar`)
+  into `Download`.
+- **Import:** always read artifacts back from `Download` (prebuilt `lai-x86_64`,
+  `lai-cyberdeck-final.apk`, repro TOMLs, review docs, `*.tar`). Never pull
+  them from any other location.
+
 `/sdcard` is vfat FUSE — no symlinks, no exec bits.
 
 ## Corpus

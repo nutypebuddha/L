@@ -139,11 +139,29 @@ wasm-bindgen target/wasm32-unknown-unknown/release/laverna_wasm.wasm --out-dir p
 # Static release (CI does this for tags): musl + assistant-web, verified statically linked
 cargo build --locked --release --target x86_64-unknown-linux-musl -p laverna \
   --features "mcp websearch budget llm milp graph assistant-web"
-proof/scripts/export.sh                    # equivalent; copies to /sdcard/Download/Laverna/bin/
+proof/scripts/export.sh                    # copies to Download/Laverna/bin/
 ```
 
 Release profile is aggressive (`opt-level="z"`, `lto="fat"`, `panic="abort"`,
 `strip`): build in debug for fast iteration.
+
+### Export / import always go through `Download`
+
+`Download` (the Android shared-storage folder) is the **canonical interchange
+directory** between this dev container and Android. All of these name the same
+place:
+
+- Termux: `~/storage/shared/Download`
+- Android mount: `/sdcard/Download`
+- from this Linux container: `/mnt/android/Download`
+
+- **Export:** always write build artifacts (binaries, `*.apk`, wasm, `*.tar`)
+  into `Download` — `proof/scripts/export.sh` already targets
+  `Download/Laverna/bin/`.
+- **Import:** always read artifacts back from `Download` — e.g. a prebuilt
+  `lai-x86_64` binary, `lai-cyberdeck-final.apk`,
+  reproduction TOMLs (`repro_gate.toml`), review docs, or `*.tar` archives.
+  Never pull them from any other location.
 
 `/sdcard` is vfat FUSE — no symlinks, no exec bits. Use `cp`, never `cp -a`.
 
