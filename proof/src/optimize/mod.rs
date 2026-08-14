@@ -1253,61 +1253,82 @@ mod fuzz_tlc01 {
         best
     }
 
-    fn rand_schema(seed: u64) -> Schema {
-        let mut rng = seed;
-        let rnd = |r: &mut u64| {
-            *r ^= *r << 13;
-            *r ^= *r >> 7;
-            *r ^= *r << 17;
-            *r
-        };
-        let n = 2 + (rnd(&mut rng) % 4) as usize; // 2..5 items
-        let budget = (n as f64) * 2.0 + (rnd(&mut rng) % 6) as f64; // room for multi-level
-        let mut s = Schema {
-            meta: Meta {
-                domain: "fuzz".into(),
-                schema_version: 1,
-                shape: None,
-            },
-            budget: HashMap::new(),
-            items: Vec::new(),
-            objective: Objective {
-                maximize: Vec::new(),
-                weights: HashMap::new(),
-            },
-            scoring: HashMap::new(),
-        };
-        s.budget.insert("pts".into(), budget);
-        let score_names: Vec<String> = (0..n).map(|i| format!("s{i}")).collect();
-        for (i, name) in score_names.iter().enumerate() {
-            let w = ((rnd(&mut rng) % 100) as f64) / 100.0 + 0.01;
-            s.objective.maximize.push(name.clone());
-            s.objective.weights.insert(name.clone(), w);
-            let mut t = HashMap::new();
-            t.insert(name.clone(), 1.0);
-            s.scoring.insert(name.clone(), ScoreTerm { terms: t });
-            s.items.push(Item {
-                id: format!("i{i}"),
-                kind: ItemKind::Attribute,
-                requires: None,
-                cost: {
-                    let mut c = HashMap::new();
-                    c.insert("pts".into(), 1.0);
-                    c
-                },
-                max_level: Some(1 + (rnd(&mut rng) % 8) as u32),
-                effects: {
-                    let mut e = HashMap::new();
-                    e.insert(name.clone(), 1.0);
-                    e
-                },
-            });
+fn rand_schema(seed: u64) -> Schema {
+    let mut rng = seed;
+    let rnd = |r: &mut u64| {
+        *r ^= *r << 13;
+        *r ^= *r >> 7;
+        *r ^= *r << 17;
+        *r
+    };
+    let n = 2 + (rnd(&mut rng) % 4) as usize; // 2..5 items
+    // Multiple budget pools with differing headroom
+    let budget_a = 5.0 + (rnd(&mut rng) % 10) as f64; // small pool
+    let budget_b = 15.0 + (rnd(&mut rng) % 20) as f64; // large pool
+    let budget_a_name: String = "points_a".into();
+    let budget_b_name: String = "pts".into();
+    let mut s = Schema {
+        meta: Meta {
+            domain: "fuzz".into(),
+            schema_version: 1,
+            shape: None,
+        },
+        budget: HashMap::new(),
+        items: Vec::new(),
+        objective: Objective {
+            maximize: Vec::new(),
+            weights: HashMap::new(),
+        },
+        scoring: HashMap::new(),
+    };
+    s.budget.insert(budget_a_name.clone(), budget_a);
+    s.budget.insert(budget_b_name.clone(), budget_b);
+    let score_names: Vec<String> = (0..n).map(|i| format!("s{i}")).collect();
+    for (i, name) in score_names.iter().enumerate() {
+        let w = ((rnd(&mut rng) % 100) as f64) / 100.0 + 0.01;
+        s.objective.maximize.push(name.clone());
+        s.objective.weights.insert(name.clone(), w);
+        // 50% chance of zero-cost perk, 50% costed
+        let zero_cost = (rnd(&mut rng) % 2) == 0;
+        let mut t = HashMap::new();
+        t.insert(name.clone(), 1.0);
+        s.scoring.insert(name.clone(), ScoreTerm { terms: t });
+        // determines whether a perk is reachable within budget
+        let reachable = (rnd(&mut rng) % 2) == 0;
+        // determines whether perk has a requires threshold
+        let has_requires = (rnd(&mut rng) % 3) != 0; // ~66% chance
+        let mut requires = None;
+        if has_requires {
+            // attribute threshold gating: r >= some_value
+            let threshold = 5 + (rnd(&mut rng) % 15) as u32;
+            requires = Some(vec![format!("r>={}", threshold)]);
         }
-        s
+        // cost: 0.0 for zero-cost, 1.0+ for costed
+        let cost_val = if zero_cost { 0.0 } else { 1.0 + (rnd(&mut rng) % 4) as f64 };
+        let mut effects = HashMap::new();
+        effects.insert(name.clone(), 1.0);
+        // if reachable, also add a secondary effect
+        if reachable {
+            effects.insert(format!("s{}_reach", i), 1.0);
+        }
+        s.items.push(Item {
+            id: format!("i{i}"),
+            kind: ItemKind::Attribute,
+            requires,
+            cost: {
+                let mut c = HashMap::new();
+                c.insert(budget_a_name.clone(), cost_val);
+                c.insert(budget_b_name.clone(), cost_val);
+                c
+            },
+            max_level: Some(1 + (rnd(&mut rng) % 8) as u32),
+            effects,
+        });
+    }
+    s
     }
 
     #[test]
-    #[ignore = "differential fuzz vs brute force — run with --ignored"]
     fn fuzz_solver_matches_bruteforce() {
         for seed in 0..2000u64 {
             let s = rand_schema(seed);
