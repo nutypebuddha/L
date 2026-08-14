@@ -14,6 +14,8 @@ Offline, deterministic, fail-loud verification umbrella for AI. One binary
 | `proof/laverna-wasm/`, `gate/cid-wasm/` | wasm crates | — | `wasm32-unknown-unknown` targets. |
 | `assistant/` | `assistant` | — | Optional dep of `laverna`. Voice-first assistant. |
 | `bridge/` | — | — | Node/TypeScript. **Not** a Cargo member; built with `npm`. |
+| `thirdparty/` | — | — | Vendored ephemeris crates (`xalen-*`), now edition 2021; on the chart-critical path |
+| `android-app/` | — | — | Android-only binary; built with `termux` feature |
 
 `athena` is a library dependency of `proof` (optional `mcp`/`llm`/`budget` deps
 gated by feature). Standalone `athena` binary is `athena/src/main.rs.standalone`
@@ -22,10 +24,9 @@ gated by feature). Standalone `athena` binary is `athena/src/main.rs.standalone`
 
 ## The `lai` binary (`proof/`)
 
-Top-level subcommands include `validate`, `mcp`, `score`, `verify`, `corpus`,
-`gate`, `gaterepl`, `tanto`, `athena`, `companion`, and `assistant` (only when
-the `assistant` feature is on). For the current list run `lai --help` /
-`lai <sub> --help` — don't trust prose.
+Top-level subcommands include `validate`, `mcp`, `corpus`, `gate`, `tanto`,
+`athena`, `companion`, and `assistant` (only when the `assistant` feature is on).
+For the current list run `lai --help` / `lai <sub> --help` — don't trust prose.
 
 ## Dev cycle — match CI exactly (`.github/workflows/ci.yml`)
 
@@ -34,6 +35,8 @@ Run in this order. CI fails on any warning (`RUSTFLAGS="-D warnings"`):
 ```bash
 cargo fmt -- --check                                          # 1. formatting
 cargo clippy --locked --workspace --all-targets -- -D warnings  # 2. lints
+`cargo build -p laverna --bin lai --locked` on rustc 1.75 (sandbox MSRV compliance)  # 2. MSRV compliance
+
 cargo deny check                                              # 3. license/bans/advisory (needs cargo-deny)
 cargo test --locked --workspace                               # 4. tests (default features)
 cargo test --locked -p laverna --test swiss_oracle            # 5. Swiss-ephemeris oracle gate
@@ -78,17 +81,17 @@ Athena smoke test (after `cargo build --release -p laverna`):
 
 ## Feature flags (`proof/Cargo.toml`)
 
-`default = ["assistant", "mcp", "websearch", "budget", "milp", "graph"]` — a
-plain `cargo build` already pulls heavy deps; use `--no-default-features` for a
-minimal build.
+`default = ["assistant", "budget", "graph"]` — a plain `cargo build` pulls
+  assistant + budget + graph deps; use `--no-default-features` for a minimal
+  build.
 
 | Flag | Enables | Default |
 |------|---------|---------|
-| `mcp` | MCP server + websearch + athena mcp | yes |
+| `mcp` | MCP server + websearch + athena mcp | no |
 | `websearch` | World Bank stats (ureq) | via `mcp` |
 | `budget` | Token budget tracking + athena budget | yes |
 | `llm` | Local LLM inference (llama-gguf + ureq) | no |
-| `milp` | MILP solver (good_lp) | yes |
+| `milp` | MILP solver (good_lp) | no |
 | `graph` | Graph algorithms (petgraph) | yes |
 | `bench` | Criterion harness | no |
 | `assistant` | Voice-first assistant (STT/TTS/intent/actions) | yes |
