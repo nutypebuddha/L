@@ -16,6 +16,9 @@ pub fn normalize_whitespace(input: &str) -> String {
     input.split_whitespace().collect::<Vec<&str>>().join(" ")
 }
 
+pub mod lexicon;
+pub use lexicon::{Lexicon, LexiconEntry};
+
 use std::fmt::Write as FmtWrite;
 
 use serde::{Deserialize, Serialize};
@@ -1400,6 +1403,10 @@ pub struct DescentEngine {
     /// Only available when built with `--features llm`.
     #[cfg(feature = "llm")]
     pub copilot: Option<crate::inference::Copilot>,
+    /// Optional runtime keyword→domain lexicon (T110). Consulted only when
+    /// the built-in `DOMAIN_KEYWORDS` table and the dynamic-entity path both
+    /// miss for a token — see `descent::lexicon` for the precedence rule.
+    pub lexicon: Option<Lexicon>,
 }
 
 impl Clone for DescentEngine {
@@ -1411,6 +1418,7 @@ impl Clone for DescentEngine {
             events: self.events.clone(),
             #[cfg(feature = "llm")]
             copilot: None,
+            lexicon: self.lexicon.clone(),
         }
     }
 }
@@ -1429,6 +1437,7 @@ impl DescentEngine {
             events,
             #[cfg(feature = "llm")]
             copilot: None,
+            lexicon: None,
         }
     }
 
@@ -1436,6 +1445,14 @@ impl DescentEngine {
     #[cfg(feature = "llm")]
     pub fn with_copilot(mut self, copilot: crate::inference::Copilot) -> Self {
         self.copilot = Some(copilot);
+        self
+    }
+
+    /// Attach a runtime keyword→domain lexicon (T110) — the "teach L a new
+    /// domain without a rebuild" hook. See `descent::lexicon` for format and
+    /// precedence rules.
+    pub fn with_lexicon(mut self, lexicon: Lexicon) -> Self {
+        self.lexicon = Some(lexicon);
         self
     }
 
@@ -1891,6 +1908,42 @@ impl DescentEngine {
             }
         }
 
+        // Runtime lexicon (T110) — only fills a gap the curated table and the
+        // dynamic-entity path both left empty; never overrides either, and is
+        // tried before the noisier full-text formula-search fallback below so
+        // an explicit, weighted lexicon entry always beats a coincidental
+        // word co-occurrence. See `descent::lexicon` for the precedence rule.
+        //
+        // Sets BOTH `st.domains` (the gate `classify_route_token`/
+        // `dominant_graha_of` doesn't actually read — see strategy.rs's own
+        // doc comment on the domains/vedic_classification split, T53) AND
+        // `st.vedic_classification` (what `dominant_graha_of` DOES read).
+        // Only writing `domains` silently produces a token that counts as
+        // "resolved" for the low_confidence gate while its displayed/scored
+        // force comes from whatever downstream layer happens to run once
+        // `domains` is non-empty — i.e. a *different* answer than the
+        // lexicon specified. Mirrors the dynamic-entity branch above, which
+        // sets both fields for exactly this reason.
+        if st.domains.is_empty() {
+            if let Some(entry) = self
+                .lexicon
+                .as_ref()
+                .and_then(|lex| lex.lookup(&token_lower))
+            {
+                st.domains.push(entry.domain);
+                st.vedic_classification = st
+                    .vedic_classification
+                    .clone()
+                    .with_graha(entry.domain, entry.weight);
+                st.confidence = entry.weight;
+                st.provenance.push(ProvenanceStep::DomainClassification {
+                    domain: entry.domain.full_name_lower().to_string(),
+                    keyword: format!("{token_lower} [runtime lexicon]"),
+                    confidence: entry.weight,
+                });
+            }
+        }
+
         // If still no domain, search in formulas
         if st.domains.is_empty() {
             let results = self.formula_registry.search(&token_lower);
@@ -2268,6 +2321,71 @@ mod tests {
         let forms = ShikaiFormRegistry::new();
         let events = EventRegistry::new();
         DescentEngine::new(registry, entity_registry, forms, events)
+    }
+
+    // ─── Runtime lexicon integration (T110) ────────────────────────────────
+
+    #[test]
+    fn lexicon_fills_a_gap_the_builtin_table_leaves_unresolved() {
+        // "ssi" is not in DOMAIN_KEYWORDS and (with an empty test corpus)
+        // nothing else resolves it either — bare `test_engine()` refuses it.
+        let bare = test_engine().descend("ssi");
+        assert!(
+            bare.tokens[0].domains.is_empty(),
+            "sanity check: 'ssi' should be unresolved with no lexicon attached"
+        );
+
+        let toml = r#"
+            [[keyword]]
+            word = "ssi"
+            domain = "budha"
+            weight = 0.6
+        "#;
+        let lexicon = Lexicon::load_toml(toml).unwrap();
+        let engine = test_engine().with_lexicon(lexicon);
+        let matrix = engine.descend("ssi");
+        assert_eq!(
+            matrix.tokens[0].domains.first(),
+            Some(&Domain::Budha),
+            "lexicon entry should resolve the domains field even though \
+             DOMAIN_KEYWORDS and the (empty) dynamic-entity path both miss"
+        );
+    }
+
+    #[test]
+    fn lexicon_never_overrides_the_curated_domain_keywords_table() {
+        // "math" IS in the curated DOMAIN_KEYWORDS table (→ Mangala). A
+        // lexicon entry claiming a different domain for the same word must
+        // NOT win — the curated table stays authoritative (see the
+        // precedence rule documented on `descent::lexicon`).
+        let toml = r#"
+            [[keyword]]
+            word = "math"
+            domain = "shani"
+        "#;
+        let lexicon = Lexicon::load_toml(toml).unwrap();
+        let engine = test_engine().with_lexicon(lexicon);
+        let matrix = engine.descend("math");
+        assert_eq!(matrix.tokens[0].domains.first(), Some(&Domain::Mangala));
+    }
+
+    #[test]
+    fn lexicon_is_still_whole_word_only_through_the_full_pipeline() {
+        // Guards the same class of bug DOMAIN_KEYWORDS' whole-word regex
+        // avoids, this time end-to-end through `descend()` rather than just
+        // `Lexicon::lookup` in isolation (see lexicon.rs's own unit test).
+        let toml = r#"
+            [[keyword]]
+            word = "car"
+            domain = "budha"
+        "#;
+        let lexicon = Lexicon::load_toml(toml).unwrap();
+        let engine = test_engine().with_lexicon(lexicon);
+        let matrix = engine.descend("cardiac");
+        assert!(
+            matrix.tokens[0].domains.is_empty(),
+            "'cardiac' must not resolve off a 'car' lexicon entry via substring"
+        );
     }
 
     // ─── Pure function tests (original Laverna) ───────────────────────────

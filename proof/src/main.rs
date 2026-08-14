@@ -153,6 +153,12 @@ enum Commands {
         /// Output format: text (default) or json
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
+        /// Optional runtime keyword→domain lexicon TOML (T110) — teach the
+        /// router vocabulary for a new/"alien" topic without a rebuild. Only
+        /// fills gaps the built-in table leaves unresolved; run
+        /// `lai schema lexicon` for the format.
+        #[arg(short = 'L', long = "lexicon")]
+        lexicon: Option<String>,
     },
     /// Look up an archetypal seed entity by ID
     EntityGet {
@@ -308,6 +314,12 @@ enum Commands {
         /// before allocation.
         #[arg(short = 'F', long = "forces")]
         forces: Option<String>,
+        /// Optional runtime keyword→domain lexicon TOML (T110) — teach the
+        /// router vocabulary for a new/"alien" topic without a rebuild. Only
+        /// fills gaps the built-in table leaves unresolved; run
+        /// `lai schema lexicon` for the format.
+        #[arg(short = 'L', long = "lexicon")]
+        lexicon: Option<String>,
     },
     /// Print the canonical TOML template for a subcommand's input (self-describing)
     Schema {
@@ -1019,43 +1031,46 @@ fn main() {
             verbose,
             explain,
             format,
-        } => match (query, repos) {
-            (Some(_), Some(repos_csv)) => {
-                eprintln!(
+            lexicon,
+        } => {
+            let lexicon = load_lexicon_arg(&lexicon);
+            match (query, repos) {
+                (Some(_), Some(repos_csv)) => {
+                    eprintln!(
                     "warning: both --query and --repos given; --query is ignored, routing by --repos"
                 );
-                cmd_route_repos(&repos_csv, verbose, explain, format);
-            }
-            (_, Some(repos_csv)) => cmd_route_repos(&repos_csv, verbose, explain, format),
-            (Some(query), None) => {
-                let result = run_route(&query);
+                    cmd_route_repos(&repos_csv, verbose, explain, format);
+                }
+                (_, Some(repos_csv)) => cmd_route_repos(&repos_csv, verbose, explain, format),
+                (Some(query), None) => {
+                    let result = run_route_with_lexicon(&query, lexicon.as_ref());
 
-                // Part 2.3: a route with no resolved graha is a typed OutOfScope
-                // refusal — regardless of WHY the content tokens failed. The
-                // refusal must key off "did any graha resolve?" (ranked forces
-                // empty ⟺ zero resolved weight), NOT off whether the misses
-                // landed in `unresolved` vs `stopwords`. Keying off `unresolved`
-                // let all-stopword queries ("the of and to") slip through with
-                // rc=0 + primary:null — a quiet failure with an inconsistent
-                // contract (T60).
-                if query.trim().is_empty() {
-                    let refusal = laverna::verify::diagnostics::Refusal::new(
-                        laverna::verify::diagnostics::RefusalKind::Underspecified,
-                        "query is empty — nothing to route",
-                    )
-                    .with_fix_suggestion("provide a non-empty query");
-                    emit_solve_refusal(&refusal, format);
-                } else if result.report.ranked.is_empty() {
-                    let refusal = laverna::verify::diagnostics::Refusal::new(
-                        laverna::verify::diagnostics::RefusalKind::OutOfScope,
-                        "no token resolved to a known corpus graha — outside routing scope",
-                    )
-                    .with_fix_suggestion(
-                        "rephrase using terms covered by the corpus (formulas/entities)",
-                    );
-                    emit_solve_refusal(&refusal, format);
-                } else if query.split_whitespace().count() > TOO_COMPLEX_TOKEN_LIMIT {
-                    let refusal = laverna::verify::diagnostics::Refusal::new(
+                    // Part 2.3: a route with no resolved graha is a typed OutOfScope
+                    // refusal — regardless of WHY the content tokens failed. The
+                    // refusal must key off "did any graha resolve?" (ranked forces
+                    // empty ⟺ zero resolved weight), NOT off whether the misses
+                    // landed in `unresolved` vs `stopwords`. Keying off `unresolved`
+                    // let all-stopword queries ("the of and to") slip through with
+                    // rc=0 + primary:null — a quiet failure with an inconsistent
+                    // contract (T60).
+                    if query.trim().is_empty() {
+                        let refusal = laverna::verify::diagnostics::Refusal::new(
+                            laverna::verify::diagnostics::RefusalKind::Underspecified,
+                            "query is empty — nothing to route",
+                        )
+                        .with_fix_suggestion("provide a non-empty query");
+                        emit_solve_refusal(&refusal, format);
+                    } else if result.report.ranked.is_empty() {
+                        let refusal = laverna::verify::diagnostics::Refusal::new(
+                            laverna::verify::diagnostics::RefusalKind::OutOfScope,
+                            "no token resolved to a known corpus graha — outside routing scope",
+                        )
+                        .with_fix_suggestion(
+                            "rephrase using terms covered by the corpus (formulas/entities)",
+                        );
+                        emit_solve_refusal(&refusal, format);
+                    } else if query.split_whitespace().count() > TOO_COMPLEX_TOKEN_LIMIT {
+                        let refusal = laverna::verify::diagnostics::Refusal::new(
                         laverna::verify::diagnostics::RefusalKind::TooComplex,
                         format!(
                             "query exceeds the bounded token window ({} tokens); the kernel cannot route it deterministically",
@@ -1063,16 +1078,17 @@ fn main() {
                         ),
                     )
                     .with_fix_suggestion("split the query into smaller, independently verifiable claims");
-                    emit_solve_refusal(&refusal, format);
-                }
+                        emit_solve_refusal(&refusal, format);
+                    }
 
-                print_route(&result, verbose, explain, format);
+                    print_route(&result, verbose, explain, format);
+                }
+                (None, None) => {
+                    eprintln!("error: `route` requires --query <Q> or --repos <a,b,c>");
+                    std::process::exit(2);
+                }
             }
-            (None, None) => {
-                eprintln!("error: `route` requires --query <Q> or --repos <a,b,c>");
-                std::process::exit(2);
-            }
-        },
+        }
         Commands::EntityGet { entity_id, format } => cmd_entity_get(&entity_id, format),
         Commands::Chart {
             datetime,
@@ -1144,7 +1160,10 @@ fn main() {
             explain,
             format,
             forces,
-        } => cmd_strategize(query, budget, top_k, domain, explain, format, forces),
+            lexicon,
+        } => cmd_strategize(
+            query, budget, top_k, domain, explain, format, forces, lexicon,
+        ),
         Commands::Schema { name } => cmd_schema(&name),
         #[cfg(feature = "mcp")]
         Commands::Mcp => cmd_mcp(),
@@ -4804,11 +4823,46 @@ fn cmd_solve_batch(_verbose: bool, _explain: bool, explain_binding: Option<Expla
 /// pipeline as `cmd_solve`. The formula registry is accepted pre-loaded so the
 /// caller can reuse it for IDF-style token specificity (T55) without re-parsing
 /// the corpus per query.
+/// Load and validate an optional `--lexicon` TOML file (T110). Mirrors the
+/// existing `--forces` file-handling convention: missing/unreadable file or
+/// invalid TOML is a hard error (fail loud), not a silent no-op.
+fn load_lexicon_arg(path: &Option<String>) -> Option<Lexicon> {
+    let path = path.as_ref()?;
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: cannot read lexicon file '{path}': {e}");
+            std::process::exit(2);
+        }
+    };
+    match Lexicon::load_toml(&content) {
+        Ok(lex) => Some(lex),
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(2);
+        }
+    }
+}
+
 fn build_route_matrix_with(formula_reg: FormulaRegistry, query: &str) -> SettlingMatrix {
+    build_route_matrix_with_lexicon(formula_reg, query, None)
+}
+
+/// Same as `build_route_matrix_with`, but with an optional runtime lexicon
+/// (T110) attached to the descent engine for this query only — every other
+/// call site is unaffected.
+fn build_route_matrix_with_lexicon(
+    formula_reg: FormulaRegistry,
+    query: &str,
+    lexicon: Option<&Lexicon>,
+) -> SettlingMatrix {
     let entity_reg = load_entity_registry();
     let forms = load_shikai_forms();
     let events = load_events();
-    let descent_engine = DescentEngine::new(formula_reg, entity_reg, forms, events);
+    let mut descent_engine = DescentEngine::new(formula_reg, entity_reg, forms, events);
+    if let Some(lex) = lexicon {
+        descent_engine = descent_engine.with_lexicon(lex.clone());
+    }
     descent_engine.descend(query)
 }
 
@@ -4839,13 +4893,20 @@ struct RouteResult {
 /// strategy is grounded in the same deterministic pipeline. Token→graha is a
 /// PURE function of the token text (T54): no neighbor-domain inheritance, and
 /// stopwords/unresolved words carry no vote (T55).
+#[cfg(feature = "mcp")]
 fn run_route(query: &str) -> RouteResult {
+    run_route_with_lexicon(query, None)
+}
+
+/// Same as `run_route`, but with an optional runtime lexicon (T110) —
+/// see `descent::lexicon` for the format and precedence rule.
+fn run_route_with_lexicon(query: &str, lexicon: Option<&Lexicon>) -> RouteResult {
     let mut formula_reg = load_formula_registry();
     // Build the word index once so IDF-specificity lookups (T55) hit the O(1)
     // fast path. Deferred to the route path only — `solve`/`build` don't need
     // it, so the eager fold stays off their hot paths (PERF).
     formula_reg.finalize();
-    let matrix = build_route_matrix_with(formula_reg.clone(), query);
+    let matrix = build_route_matrix_with_lexicon(formula_reg.clone(), query, lexicon);
     let forces: Vec<(String, TokenForce)> = matrix
         .tokens
         .iter()
@@ -5978,6 +6039,7 @@ fn cmd_build(
 /// Pareto-optimal allocation. Route-only (no ephemeris): the pillar weights come
 /// purely from the query's graha forces. With `--domain`, the same pillar weights
 /// drive a concrete domain profile instead of the generic pillar domain.
+#[allow(clippy::too_many_arguments)]
 fn cmd_strategize(
     query: Option<String>,
     budget: f64,
@@ -5986,6 +6048,7 @@ fn cmd_strategize(
     explain: bool,
     format: OutputFormat,
     forces_path: Option<String>,
+    lexicon_path: Option<String>,
 ) {
     let query = match query {
         Some(q) => q,
@@ -5996,7 +6059,8 @@ fn cmd_strategize(
     };
 
     // 1. Reverse-route the query → graha forces → strategy report (deterministic).
-    let route = run_route(&query);
+    let lexicon = load_lexicon_arg(&lexicon_path);
+    let route = run_route_with_lexicon(&query, lexicon.as_ref());
     let mut pillars = aggregate_pillars(&route.report, &route.matrix);
     let speculative = route.report.warning.is_some();
     let decomposition = route.decomposition;

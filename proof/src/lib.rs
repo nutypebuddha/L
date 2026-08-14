@@ -61,8 +61,8 @@ pub mod prelude {
         extract_identifiers, is_expression_valid, solve_problem,
     };
     pub use crate::descent::{
-        lowercase_string, tokenize_descent, DescentEngine, DescentLayer, ProvenanceStep,
-        SettledToken, SettlingMatrix,
+        lowercase_string, tokenize_descent, DescentEngine, DescentLayer, Lexicon, LexiconEntry,
+        ProvenanceStep, SettledToken, SettlingMatrix,
     };
     pub use crate::digest::{sha256, sha256_hex, to_hex};
     pub use crate::domain_graph::{
