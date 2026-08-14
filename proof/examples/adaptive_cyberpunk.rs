@@ -4,7 +4,7 @@
 //!
 //! Prints the full `StrategyCycleReport` as machine-readable JSON.
 
-use laverna::adaptive::{run_cyberpunk_scenario, Evidence, Factor, WorldEvent};
+use laverna::adaptive::{run_cyberpunk_scenario, Evidence, Fact, Factor, WorldEvent};
 
 fn main() {
     let event = WorldEvent {
@@ -34,6 +34,14 @@ fn main() {
                 "Coordinated enforcement begun.".to_string(),
             ),
         ],
+        new_facts: vec![Fact::new(
+            "F-new",
+            "surveillance-oversight",
+            true,
+            "Independent surveillance oversight now exists.",
+            0.6,
+            "HYPOTHETICAL",
+        )],
         new_assumptions: vec![
             "Treaty signatories include the three largest autonomous-systems firms.".to_string(),
         ],
