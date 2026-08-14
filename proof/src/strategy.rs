@@ -466,6 +466,64 @@ pub fn aggregate_pillars(
     pillars
 }
 
+/// Parse an external sensor-force TOML file into a name→weight map.
+///
+/// Accepts either a `[forces]` table (`[forces]\nForge = 1.5`) or a flat
+/// top-level table (`Forge = 1.5`). Fail-loud on any parse error.
+pub fn parse_sensor_forces(
+    toml_str: &str,
+) -> Result<std::collections::HashMap<String, f64>, String> {
+    #[derive(serde::Deserialize)]
+    struct Wrapped {
+        forces: std::collections::HashMap<String, f64>,
+    }
+    if let Ok(w) = toml::from_str::<Wrapped>(toml_str) {
+        Ok(w.forces)
+    } else {
+        toml::from_str::<std::collections::HashMap<String, f64>>(toml_str)
+            .map_err(|e| format!("sensor-force parse error: {e}"))
+    }
+}
+
+/// Match a lowercased pillar name (Spear/Forge/…) to its `Pillar`.
+fn pillar_by_name(lower: &str) -> Option<Pillar> {
+    for i in 0..Pillar::COUNT {
+        if Pillar::from_index(i).name().to_lowercase() == lower {
+            return Some(Pillar::from_index(i));
+        }
+    }
+    None
+}
+
+/// Match a lowercased graha name (surya/mangala/…) to its `Pillar`.
+fn graha_name_to_pillar(lower: &str) -> Option<Pillar> {
+    for graha in Domain::all() {
+        if graha.name().to_lowercase() == lower {
+            return domain_to_pillar(graha);
+        }
+    }
+    None
+}
+
+/// Blend external sensor/graha forces into the pillar weight vector (the
+/// "real-time pillar reweight from sensor/query forces" path in `strategize`).
+///
+/// Each key is matched against a pillar name (e.g. `Forge`) or a graha name
+/// (e.g. `mangala`); the matching pillar receives the added weight. Keys that
+/// match neither are ignored (the caller surfaces which keys were applied).
+/// Pure + deterministic.
+pub fn reweight_pillars_with_sensor_forces(
+    pillars: &mut [f64; 7],
+    forces: &std::collections::HashMap<String, f64>,
+) {
+    for (name, weight) in forces {
+        let lower = name.to_lowercase();
+        if let Some(pillar) = pillar_by_name(&lower).or_else(|| graha_name_to_pillar(&lower)) {
+            pillars[pillar.index()] += *weight;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -667,5 +725,53 @@ mod tests {
         let dg = dominant_graha_display(&token);
         assert_eq!(dg, Some(Domain::Rahu));
         assert!(token.domains.contains(&dg.expect("resolved")));
+    }
+
+    // --- Sensor-force reweighting (#4) -----------------------------------------
+
+    #[test]
+    fn parse_sensor_forces_reads_forces_table() {
+        let toml = "[forces]\nForge = 1.5\nmangala = 0.5\n";
+        let f = parse_sensor_forces(toml).expect("parse [forces] table");
+        assert_eq!(f.get("Forge"), Some(&1.5));
+        assert_eq!(f.get("mangala"), Some(&0.5));
+    }
+
+    #[test]
+    fn parse_sensor_forces_reads_flat_table() {
+        let toml = "Stone = 2.0\n";
+        let f = parse_sensor_forces(toml).expect("parse flat table");
+        assert_eq!(f.get("Stone"), Some(&2.0));
+    }
+
+    #[test]
+    fn parse_sensor_forces_fails_on_garbage() {
+        assert!(parse_sensor_forces("this is not = toml {").is_err());
+    }
+
+    #[test]
+    fn reweight_pillars_accepts_pillar_and_graha_names() {
+        let mut pillars = [0.0f64; 7];
+        pillars[Pillar::Spear.index()] = 0.4;
+        let mut forces = std::collections::HashMap::new();
+        forces.insert("Forge".to_string(), 1.5); // pillar name
+        forces.insert("mangala".to_string(), 0.5); // graha name → Forge
+        reweight_pillars_with_sensor_forces(&mut pillars, &forces);
+        // Forge receives both contributions; others untouched.
+        assert!((pillars[Pillar::Forge.index()] - 2.0).abs() < 1e-9);
+        assert!((pillars[Pillar::Spear.index()] - 0.4).abs() < 1e-9);
+        assert_eq!(pillars[Pillar::Olive.index()], 0.0);
+    }
+
+    #[test]
+    fn reweight_pillars_ignores_unknown_keys() {
+        let mut pillars = [1.0f64; 7];
+        let mut forces = std::collections::HashMap::new();
+        forces.insert("nonexistent_axis".to_string(), 5.0);
+        reweight_pillars_with_sensor_forces(&mut pillars, &forces);
+        // No pillar changed (unknown key ignored).
+        for w in &pillars {
+            assert_eq!(*w, 1.0);
+        }
     }
 }

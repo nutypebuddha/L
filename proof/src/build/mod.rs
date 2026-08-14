@@ -2,7 +2,7 @@
 //! command. Uses a `DomainProfile` (TOML) to map chart pillar weights to
 //! optimization objective weights, then delegates to the existing solver.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::Deserialize;
 
@@ -176,14 +176,21 @@ pub fn parse_domain_profile(toml_str: &str) -> Result<DomainProfile, String> {
 pub fn compute_objective_weights(
     profile: &DomainProfile,
     pillar_weights: &[f64; 7],
-) -> Result<HashMap<String, f64>, String> {
-    let mut weights: HashMap<String, f64> = HashMap::new();
+) -> Result<BTreeMap<String, f64>, String> {
+    let mut weights: BTreeMap<String, f64> = BTreeMap::new();
 
     for entry in &profile.graha_map {
         let pillar = graha_name_to_pillar(&entry.graha)
             .ok_or_else(|| format!("unknown graha '{}' in graha_map", entry.graha))?;
         let pw = pillar_weights[pillar.index()];
-        for (score_name, fraction) in &entry.splits {
+        // Sort splits by score name so the float accumulation order is
+        // deterministic across processes. `entry.splits` is a `HashMap`, whose
+        // iteration order is not stable, and f64 addition is not associative —
+        // summing the same addends in a different order changes the last ULP,
+        // which silently breaks proof digest/recomputation verification.
+        let mut splits: Vec<_> = entry.splits.iter().collect();
+        splits.sort_by(|a, b| a.0.cmp(b.0));
+        for (score_name, fraction) in splits {
             *weights.entry(score_name.clone()).or_insert(0.0) += pw * fraction;
         }
     }
@@ -197,7 +204,7 @@ pub fn compute_objective_weights(
 pub struct BuildResult {
     pub chart: ChartSnapshot,
     pub personality: PersonalityProfile,
-    pub objective_weights: HashMap<String, f64>,
+    pub objective_weights: BTreeMap<String, f64>,
     pub allocations: Vec<optimize::Allocation>,
 }
 
@@ -353,7 +360,7 @@ pub fn solve_pillar_allocation(
 /// Convert a DomainProfile + computed weights into an optimize::Schema.
 pub fn profile_to_schema(
     profile: &DomainProfile,
-    weights: &HashMap<String, f64>,
+    weights: &BTreeMap<String, f64>,
 ) -> Result<optimize::Schema, String> {
     Ok(optimize::Schema {
         meta: optimize::Meta {
@@ -365,7 +372,9 @@ pub fn profile_to_schema(
         items: profile.items.clone(),
         objective: optimize::Objective {
             maximize: profile.objective.maximize.clone(),
-            weights: weights.clone(),
+            // Internal only (never serialized into a proof); collected into a
+            // HashMap here. Values are already deterministic.
+            weights: weights.iter().map(|(k, v)| (k.clone(), *v)).collect(),
         },
         scoring: profile.scoring.clone(),
     })

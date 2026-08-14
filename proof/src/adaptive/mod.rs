@@ -39,7 +39,7 @@
 //! missing information. It does *not* claim universal optimality — the returned
 //! [`StrategyCycleReport::caveat`] says so explicitly.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use cid::core::ball::{Ball, GateOutcome, TokenCandidate};
 use cid::core::pin::PinField;
@@ -53,7 +53,7 @@ use crate::verify::verifier::{verify_proposal_envelope, ProposalKind};
 use serde::{Deserialize, Serialize};
 
 /// The ten required dimensions of the near-future hypothetical model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Factor {
     CyberneticAugmentation,
     UbiquitousSurveillance,
@@ -192,7 +192,7 @@ pub struct WorldState {
     /// Always `true`: this model is a hypothetical, not a claim about reality.
     pub hypothetical: bool,
     pub label: String,
-    pub factors: HashMap<Factor, WorldFactor>,
+    pub factors: BTreeMap<Factor, WorldFactor>,
     /// Structured, confidence-weighted known facts.
     pub facts: Vec<Fact>,
     /// Dependency edges between factors (used by the relational simulator).
@@ -351,10 +351,15 @@ pub struct Assumption {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Outcome {
     /// Named metrics in [0,1]; keys match `Objective::Criterion::name`.
-    pub metrics: HashMap<String, f64>,
+    pub metrics: BTreeMap<String, f64>,
     pub narrative: String,
     /// Objective-function score in [0,1] (before confidence discount).
     pub predicted_score: f64,
+    /// Origin tag for the metric coefficients. This is a *toy* model: the
+    /// `1.0 - k*factor` coefficients and the `0.7` neutral-confidence fallback
+    /// in `assumption_confidence` are illustrative, not derived. They are
+    /// load-bearing on the ranking, so they are flagged rather than hidden.
+    pub provenance: String,
 }
 
 /// A candidate strategy. `proposer` records the trust status of its origin.
@@ -369,7 +374,7 @@ pub struct Strategy {
     pub cost: Resource,
     pub risks: Vec<Risk>,
     /// Intervention magnitudes applied to world factors during simulation.
-    pub levers: HashMap<Factor, f64>,
+    pub levers: BTreeMap<Factor, f64>,
     pub expected_outcome: Outcome,
 }
 
@@ -583,7 +588,7 @@ pub fn detect_delta(before: &WorldState, after: &WorldState) -> Delta {
 // ----------------------------------------------------------------------------
 
 /// Objective score in [0,1] for a set of named metrics under an objective.
-pub fn score_objective(objective: &Objective, metrics: &HashMap<String, f64>) -> f64 {
+pub fn score_objective(objective: &Objective, metrics: &BTreeMap<String, f64>) -> f64 {
     let mut total_w = 0.0;
     let mut acc = 0.0;
     for c in &objective.criteria {
@@ -631,23 +636,33 @@ fn assumption_confidence(world: &WorldState, subject: &Option<String>) -> f64 {
 /// it is not a real social simulator.
 pub fn simulate(world: &WorldState, strategy: &Strategy, objective: &Objective) -> Outcome {
     // First-hop propagation of lever effects through relationships.
-    let mut deltas: HashMap<Factor, f64> = strategy.levers.clone();
+    //
+    // Order-independence: we read ONLY from the immutable lever map and write
+    // propagated effects into a separate accumulator, then merge. This guarantees
+    // exactly one hop regardless of the order in which `world.relationships` is
+    // declared (T111).
+    let levers: BTreeMap<Factor, f64> = strategy.levers.clone();
+    let mut propagated: BTreeMap<Factor, f64> = BTreeMap::new();
     for rel in &world.relationships {
-        if let Some(&d) = deltas.get(&rel.from) {
+        if let Some(&d) = levers.get(&rel.from) {
             if d.abs() > 1e-9 {
-                *deltas.entry(rel.to).or_insert(0.0) += rel.strength * d;
+                *propagated.entry(rel.to).or_insert(0.0) += rel.strength * d;
             }
         }
     }
+    let mut deltas: BTreeMap<Factor, f64> = levers;
+    for (k, v) in propagated {
+        *deltas.entry(k).or_insert(0.0) += v;
+    }
 
-    let mut post: HashMap<Factor, f64> = HashMap::new();
+    let mut post: BTreeMap<Factor, f64> = BTreeMap::new();
     for f in Factor::all() {
         let base = world.level(*f);
         let d = deltas.get(f).copied().unwrap_or(0.0);
         post.insert(*f, clamp1(base + d));
     }
 
-    let mut metrics = HashMap::new();
+    let mut metrics = BTreeMap::new();
     metrics.insert(
         "human_security".to_string(),
         clamp1(1.0 - 0.6 * post[&Factor::AutonomousWeapons] - 0.4 * post[&Factor::Cybercrime]),
@@ -688,6 +703,10 @@ pub fn simulate(world: &WorldState, strategy: &Strategy, objective: &Objective) 
         metrics,
         narrative,
         predicted_score,
+        provenance: "toy-model: metric coefficients (1.0 - k*factor) and the 0.7 \
+                     neutral-confidence fallback in assumption_confidence are \
+                     illustrative, not derived; they are load-bearing on ranking."
+            .to_string(),
     }
 }
 
@@ -738,11 +757,12 @@ pub fn generate_strategies(
             probability: 0.5,
             impact: 0.6,
         }],
-        levers: HashMap::new(),
+        levers: BTreeMap::new(),
         expected_outcome: Outcome {
-            metrics: HashMap::new(),
+            metrics: BTreeMap::new(),
             narrative: String::new(),
             predicted_score: 0.0,
+            provenance: String::new(),
         },
     };
     s1.levers.insert(Factor::AutonomousWeapons, -0.4);
@@ -784,11 +804,12 @@ pub fn generate_strategies(
             probability: 0.4,
             impact: 0.4,
         }],
-        levers: HashMap::new(),
+        levers: BTreeMap::new(),
         expected_outcome: Outcome {
-            metrics: HashMap::new(),
+            metrics: BTreeMap::new(),
             narrative: String::new(),
             predicted_score: 0.0,
+            provenance: String::new(),
         },
     };
     s2.levers.insert(Factor::UbiquitousSurveillance, -0.4);
@@ -821,11 +842,12 @@ pub fn generate_strategies(
             probability: 0.45,
             impact: 0.35,
         }],
-        levers: HashMap::new(),
+        levers: BTreeMap::new(),
         expected_outcome: Outcome {
-            metrics: HashMap::new(),
+            metrics: BTreeMap::new(),
             narrative: String::new(),
             predicted_score: 0.0,
+            provenance: String::new(),
         },
     };
     s3.levers.insert(Factor::NeuralInterfaces, 0.1);
@@ -858,11 +880,12 @@ pub fn generate_strategies(
             probability: 0.5,
             impact: 0.5,
         }],
-        levers: HashMap::new(),
+        levers: BTreeMap::new(),
         expected_outcome: Outcome {
-            metrics: HashMap::new(),
+            metrics: BTreeMap::new(),
             narrative: String::new(),
             predicted_score: 0.0,
+            provenance: String::new(),
         },
     };
     s4.levers.insert(Factor::EconomicInequality, -0.5);
@@ -1342,8 +1365,8 @@ pub fn cyberpunk_uncertainties() -> Vec<Uncertainty> {
 /// analogues; facts carry confidence; the relationship graph and uncertainties
 /// are attached. None of it is a claim about reality.
 pub fn initial_cyberpunk_world() -> WorldState {
-    let mut factors = HashMap::new();
-    let put = |factors: &mut HashMap<Factor, WorldFactor>,
+    let mut factors = BTreeMap::new();
+    let put = |factors: &mut BTreeMap<Factor, WorldFactor>,
                f: Factor,
                level: f64,
                conf: f64,
@@ -1683,11 +1706,12 @@ mod tests {
             assumptions: vec![],
             cost: Resource::default_pool(),
             risks: vec![],
-            levers: HashMap::new(),
+            levers: BTreeMap::new(),
             expected_outcome: Outcome {
-                metrics: HashMap::new(),
+                metrics: BTreeMap::new(),
                 narrative: String::new(),
                 predicted_score: 0.0,
+                provenance: String::new(),
             },
         };
         s.levers.insert(Factor::Megacorporations, 0.5);
@@ -1696,6 +1720,79 @@ mod tests {
         assert!(
             out.metrics["equity"] < 0.2,
             "relationship should worsen equity"
+        );
+    }
+
+    #[test]
+    fn report_json_is_byte_reproducible() {
+        // T110: the Critical: Determinism rule requires byte-stable output.
+        // BTreeMap keying on Factor/String makes the serialized report a
+        // function of content only, not HashMap iteration order.
+        let r1 = run_cyberpunk_scenario(&base_event()).to_json();
+        let r2 = run_cyberpunk_scenario(&base_event()).to_json();
+        assert_eq!(
+            r1, r2,
+            "StrategyCycleReport JSON must be byte-identical across runs"
+        );
+    }
+
+    #[test]
+    fn simulate_is_one_hop_and_order_independent() {
+        // T111: propagation must be exactly one hop and independent of the
+        // declaration order of `relationships`.
+        let mut w = initial_cyberpunk_world();
+        w.relationships = vec![
+            Relationship {
+                from: Factor::Megacorporations,
+                to: Factor::EconomicInequality,
+                strength: 0.5,
+            },
+            Relationship {
+                from: Factor::EconomicInequality,
+                to: Factor::Cybercrime,
+                strength: 0.5,
+            },
+        ];
+        let obj = cyberpunk_objective();
+
+        let s0 = Strategy {
+            id: "X".into(),
+            name: "X".into(),
+            description: "x".into(),
+            proposer: "d".into(),
+            assumptions: vec![],
+            cost: Resource::default_pool(),
+            risks: vec![],
+            levers: BTreeMap::new(),
+            expected_outcome: Outcome {
+                metrics: BTreeMap::new(),
+                narrative: String::new(),
+                predicted_score: 0.0,
+                provenance: String::new(),
+            },
+        };
+        let base_hs = simulate(&w, &s0, &obj).metrics["human_security"];
+
+        let mut s = s0.clone();
+        s.levers.insert(Factor::Megacorporations, 1.0);
+        let out_forward = simulate(&w, &s, &obj);
+
+        // One-hop: the Megacorp lever must NOT leak into Cybercrime, which only
+        // reaches human_security indirectly. human_security depends solely on
+        // AutonomousWeapons + Cybercrime; neither is directly touched, so it must
+        // equal the no-lever baseline.
+        assert!(
+            (out_forward.metrics["human_security"] - base_hs).abs() < 1e-12,
+            "second-hop propagation leaked into Cybercrime"
+        );
+
+        // Order independence: reversing the edge list must not change the result.
+        w.relationships.reverse();
+        let out_reversed = simulate(&w, &s, &obj);
+        assert_eq!(out_forward.metrics, out_reversed.metrics);
+        assert!(
+            (out_forward.predicted_score - out_reversed.predicted_score).abs() < 1e-12,
+            "result depends on relationship declaration order"
         );
     }
 

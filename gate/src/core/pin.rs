@@ -5,6 +5,14 @@ pub enum Gate {
     Fact,
     Confidence,
     Formal,
+    /// A token is *domain-bound* iff it is grounded in the verified context that
+    /// the answer is allowed to draw from. Unbound tokens have no provenance and
+    /// are rejected (they are either fabricated or off-domain).
+    DomainBinding,
+    /// A token that asserts a verifiable numeric claim must *recompute* to match.
+    /// This is the "proof recomputation match" gate — a claim with a wrong or
+    /// non-recomputable proof is rejected.
+    ProofRecompute,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +35,8 @@ impl Pin {
                 Gate::Fact => 0.001,
                 Gate::Confidence => 0.0005,
                 Gate::Formal => 0.003,
+                Gate::DomainBinding => 0.002,
+                Gate::ProofRecompute => 0.002,
             },
         }
     }
@@ -96,6 +106,18 @@ impl PinField {
             Pin::new(Gate::Formal, 0.5),
         ];
         PinField { pins }
+    }
+
+    /// Enforce the two hallucination-hardening gates on top of the default field:
+    /// `DomainBinding` (reject tokens with no provenance in the verified context)
+    /// and `ProofRecompute` (reject claims whose proof does not recompute). Use
+    /// this for the LLM completion path where un-grounded or un-verifiable tokens
+    /// must be refused rather than emitted.
+    pub fn with_domain_proof_enforcement() -> Self {
+        let mut base = PinField::new();
+        base.pins.push(Pin::new(Gate::DomainBinding, 0.8));
+        base.pins.push(Pin::new(Gate::ProofRecompute, 0.9));
+        base
     }
 
     pub fn adjust_pin(&mut self, gate: Gate, threshold: f64) {

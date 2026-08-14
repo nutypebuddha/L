@@ -1,0 +1,54 @@
+# Graha-tagged fundamental constants (IMPROVE L.AI #1).
+#
+# Each constant is a verifiable, recomputable quantity anchored to a graha
+# archetype. `properties` carries the SI value as a number (the entity schema
+# stores numeric properties only; units live in `description`), and `tags` carry
+# the graha keyword so `corpus lint` stays clean.
+
+[[entity]]
+id = "const_speed_of_light"
+name = "Speed of Light"
+domain = "surya"
+description = "Invariant speed of light in vacuum, c = 299792458 m/s — the cosmic speed limit and the Surya (solar core) constant."
+tags = ["constant", "surya", "physics", "c"]
+properties = { value = 299792458.0 }
+
+[[entity]]
+id = "const_gravitational"
+name = "Gravitational Constant"
+domain = "shani"
+description = "Newtonian gravitational constant, G = 6.67430e-11 m^3 kg^-1 s^-2 — the Shani (structure/limits) constant governing attraction."
+tags = ["constant", "shani", "physics", "gravity"]
+properties = { value = 6.67430e-11 }
+
+[[entity]]
+id = "const_planck"
+name = "Planck Constant"
+domain = "budha"
+description = "Planck constant, h = 6.62607015e-34 J s — the Budha (articulation/precision) constant of quantized action."
+tags = ["constant", "budha", "physics", "quantum"]
+properties = { value = 6.62607015e-34 }
+
+[[entity]]
+id = "const_electron_charge"
+name = "Elementary Charge"
+domain = "budha"
+description = "Elementary charge, e = 1.602176634e-19 C — the Budha constant of a single electron's charge."
+tags = ["constant", "budha", "physics", "charge"]
+properties = { value = 1.602176634e-19 }
+
+[[entity]]
+id = "const_avogadro"
+name = "Avogadro Constant"
+domain = "brihaspati"
+description = "Avogadro constant, N_A = 6.02214076e23 mol^-1 — the Brihaspati (scaling/abundance) constant of entities per mole."
+tags = ["constant", "brihaspati", "chemistry", "mole"]
+properties = { value = 6.02214076e23 }
+
+[[entity]]
+id = "const_boltzmann"
+name = "Boltzmann Constant"
+domain = "chandra"
+description = "Boltzmann constant, k = 1.380649e-23 J/K — the Chandra (cycles/adaptation) constant linking energy and temperature."
+tags = ["constant", "chandra", "physics", "thermodynamics"]
+properties = { value = 1.380649e-23 }

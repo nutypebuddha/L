@@ -114,6 +114,14 @@ impl InferenceEngine {
         self.pipeline.pin_field.adjust_pin(gate, threshold);
     }
 
+    /// Activate the two hallucination-hardening gates on this engine's pipeline:
+    /// `DomainBinding` (refuse tokens lacking provenance in the verified context)
+    /// and `ProofRecompute` (refuse claims whose proof does not recompute). Used
+    /// by the LLM completion path so generated text is gated before emission.
+    pub fn enable_domain_proof_gates(&mut self) {
+        self.pipeline.pin_field = crate::core::pin::PinField::with_domain_proof_enforcement();
+    }
+
     pub fn state(&self) -> &State {
         self.pipeline.state()
     }

@@ -74,7 +74,7 @@ container `/mnt/android/Download`).
 
 ## Corpus
 
-- 538 formulas, 222 entities — **embedded at compile time** by `build.rs`.
+- 553 formulas, 228 entities — **embedded at compile time** by `build.rs`.
   `lai info` is the authoritative live count; update this line if it drifts.
 - Overlay: `~/.laverna/corpus/` or `./corpus/` — user TOML merges over seed.
 - After editing formula TOML: rebuild required (build.rs re-embeds).

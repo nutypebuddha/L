@@ -276,6 +276,9 @@ enum Commands {
         /// Dump the per-item marginal-value trace for each solution
         #[arg(short, long)]
         explain: bool,
+        /// Emit a machine-verifiable proof object (chart build) to this path (JSON)
+        #[arg(long)]
+        proof_out: Option<String>,
     },
     /// Strategize: reverse-route a query → 7-pillar weights → deterministic
     /// Pareto-optimal resource allocation (the "ultimate strategy engine")
@@ -299,6 +302,12 @@ enum Commands {
         /// Output format: text (default) or json
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
+        /// Optional external sensor-force TOML. A `[forces]` table mapping pillar
+        /// names (Spear/Forge/…) or graha names (surya/mangala/…) to weights;
+        /// blended with the query's graha forces for real-time pillar reweighting
+        /// before allocation.
+        #[arg(short = 'F', long = "forces")]
+        forces: Option<String>,
     },
     /// Print the canonical TOML template for a subcommand's input (self-describing)
     Schema {
@@ -972,7 +981,29 @@ fn main() {
                 if let Some(path) = proof_out {
                     let proof = build_proof_object(&result, timestamp);
                     match std::fs::write(&path, serde_json::to_string_pretty(&proof).unwrap()) {
-                        Ok(_) => eprintln!("proof object written to {path}"),
+                        Ok(_) => {
+                            // Proof discipline (fail-closed): re-verify what we just
+                            // wrote by recomputation. A solve proof must always verify
+                            // against itself; if it does not, the kernel produced an
+                            // internally inconsistent artifact and we must not hand it
+                            // over. We delete the file and exit non-zero.
+                            let outcome = verify_proof(&proof);
+
+                            if outcome.verified {
+                                eprintln!("proof object written to {path} and self-verified");
+                            } else {
+                                eprintln!(
+                                    "error: proof written to {path} FAILED self-verification \
+                                     (digest_ok={}, recompute_ok={}) — failing closed",
+                                    outcome.digest_ok, outcome.recompute_ok
+                                );
+                                for m in &outcome.mismatches {
+                                    eprintln!("  diverges: {m}");
+                                }
+                                let _ = std::fs::remove_file(path);
+                                std::process::exit(1);
+                            }
+                        }
                         Err(e) => eprintln!("error: could not write proof to {path}: {e}"),
                     }
                 }
@@ -1092,6 +1123,7 @@ fn main() {
             longitude,
             top_k,
             explain,
+            proof_out,
         } => cmd_build(
             &domain,
             datetime.as_deref(),
@@ -1102,6 +1134,7 @@ fn main() {
             longitude,
             top_k,
             explain,
+            proof_out.as_deref(),
         ),
         Commands::Strategize {
             query,
@@ -1110,7 +1143,8 @@ fn main() {
             domain,
             explain,
             format,
-        } => cmd_strategize(query, budget, top_k, domain, explain, format),
+            forces,
+        } => cmd_strategize(query, budget, top_k, domain, explain, format, forces),
         Commands::Schema { name } => cmd_schema(&name),
         #[cfg(feature = "mcp")]
         Commands::Mcp => cmd_mcp(),
@@ -1975,7 +2009,7 @@ fn infer_number_units(
 /// they meant; `no_name_anchor` → rephrase naming inputs, retry once; `unit_mismatch`
 /// → tell the person their units don't compose, do NOT retry; `search_too_large` →
 /// split the query, retryable.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum BindRefusal {
     Ambiguous {
@@ -1996,6 +2030,26 @@ enum BindRefusal {
     SearchTooLarge {
         permutations: u64,
         limit: u64,
+        detail: String,
+    },
+    /// #3 Strengthen descent: the query did not resolve fully to the NAND
+    /// (gate-verifiable) layer. We refuse rather than emit a partially-resolved,
+    /// hence unverifiable, claim.
+    LowNandCompleteness {
+        score: f64,
+        detail: String,
+    },
+    /// #3 Strengthen descent: at least one meaning-bearing token settled without a
+    /// resolved dominant graha, so the query has no unambiguous astrological
+    /// anchor. Refused rather than guessed.
+    UnresolvedDominantGraha {
+        token: String,
+        detail: String,
+    },
+    /// #3 Strengthen descent: the average settling depth was below the required
+    /// resolution floor, so the query was not resolved deeply enough to verify.
+    ShallowDescent {
+        average_depth: f64,
         detail: String,
     },
 }
@@ -2625,49 +2679,6 @@ const MAX_CHAIN_DEPTH: usize = 16;
 /// guess. After the primary rule fires, its output variable is fed forward into
 /// any rule that consumes it (a two-hop chain), again taking the highest score
 /// and refusing on ambiguity.
-/// Does an input (or any of its declared aliases) appear as a standalone token
-/// in the query? Used by inverse solving to detect which input the user is
-/// asking for (e.g. "what **mass** has KE 100 at v 5").
-fn input_named_in_query(
-    inp: &str,
-    aliases: &HashMap<String, Vec<String>>,
-    toks: &[String],
-) -> bool {
-    let norm = |s: &str| -> String {
-        let s = s.to_lowercase();
-        if s.len() > 3 {
-            s.strip_suffix('s').unwrap_or(&s).to_string()
-        } else {
-            s
-        }
-    };
-    let mut names: Vec<String> = Vec::new();
-    if inp.len() >= 3 {
-        names.push(inp.to_lowercase());
-    }
-    for a in aliases.get(inp).into_iter().flatten() {
-        if a.len() >= 3 {
-            names.push(a.to_lowercase());
-        }
-    }
-    let nnames: Vec<String> = names
-        .iter()
-        .map(|nm| {
-            if nm.len() > 3 {
-                nm.strip_suffix('s').unwrap_or(nm).to_string()
-            } else {
-                nm.clone()
-            }
-        })
-        .collect();
-    toks.iter().any(|t| {
-        let tn = norm(t);
-        nnames
-            .iter()
-            .any(|m| tn == *m || tn.starts_with(m) || tn.ends_with(m))
-    })
-}
-
 /// Numeric inverse: given a formula, bindings for all-but-one input, the name of
 /// the missing input, and a target output value, bisect the missing input until
 /// the formula reproduces the target. Works for *any* corpus formula because it
@@ -2840,80 +2851,6 @@ fn try_inverse_pre(
                     full.push((missing[0].clone(), x));
                     let out = eval_formula_bind(f, &full)?;
                     return Some(make_app(f, full, out));
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Inverse fallback: when no formula binds directly but a keyword-matching
-/// formula is missing exactly one input that the user *named* in the query,
-/// solve that input from the single leftover scalar (treated as the output).
-fn solve_inverse_fallback(
-    toks: &[String],
-    numbers: &[(usize, f64, Option<String>)],
-    formulas: &[&Formula],
-    var_tokens: &HashSet<String>,
-    id_score: &dyn Fn(&Formula) -> f64,
-    rank_of: &dyn Fn(&Formula) -> usize,
-) -> Option<RuleApplication> {
-    let mut cands: Vec<&&Formula> = formulas.iter().filter(|f| id_score(f) > 0.0).collect();
-    cands.sort_by(|a, b| {
-        id_score(b)
-            .partial_cmp(&id_score(a))
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(rank_of(a).cmp(&rank_of(b)))
-            .then(a.id.cmp(&b.id))
-    });
-    for &f in &cands {
-        for miss in &f.inputs {
-            if !input_named_in_query(miss, &f.input_aliases, toks) {
-                continue;
-            }
-            let rest: Vec<String> = f.inputs.iter().filter(|i| *i != miss).cloned().collect();
-            if rest.is_empty() {
-                continue;
-            }
-            let rest_types: HashMap<String, Option<String>> = f
-                .input_types
-                .iter()
-                .filter(|(k, _)| k.as_str() != miss)
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            let rest_aliases: HashMap<String, Vec<String>> = f
-                .input_aliases
-                .iter()
-                .filter(|(k, _)| k.as_str() != miss)
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            if let Ok((bindings, used)) = bind_inputs(
-                &rest,
-                &rest_types,
-                &rest_aliases,
-                var_tokens,
-                toks,
-                numbers,
-                &HashMap::new(),
-                false,
-                false,
-                "",
-                0,
-                &mut BindTrace::default(),
-            ) {
-                let leftover: Vec<(usize, f64, Option<String>)> = numbers
-                    .iter()
-                    .filter(|(idx, _, _)| !used.contains(idx))
-                    .cloned()
-                    .collect();
-                if leftover.len() == 1 {
-                    let target = leftover[0].1;
-                    if let Some(x) = solve_inverse(f, &bindings, miss, target) {
-                        let mut full = bindings.clone();
-                        full.push((miss.to_string(), x));
-                        let out = eval_formula_bind(f, &full)?;
-                        return Some(make_app(f, full, out));
-                    }
                 }
             }
         }
@@ -3326,24 +3263,89 @@ fn bind_formula(
         return Ok(chain);
     }
 
-    // No direct bind: try inverse solving (e.g. "what mass has KE 100 at v 5").
-    if let Some(app) =
-        solve_inverse_fallback(&toks, &numbers, &formulas, &var_tokens, &id_score, &rank_of)
-    {
-        if explain {
-            eprintln!(
-                "[bind] inverse fallback matched `{}` (solved a missing input from the leftover scalar)",
-                app.formula_id
-            );
-        }
-        trace.formula_chain.push(app.formula_id.clone());
-        return Ok(vec![app]);
-    }
-
+    // No direct bind and no stated-output inverse query: refuse rather than
+    // fabricate. There is deliberately no generative fallback (no-hallucination
+    // discipline) — out-of-scope or unbindable queries surface as loud refusals.
     Err(refusals)
 }
 
+/// #3 Strengthen descent: produce structured refusals for queries that are not
+/// fully resolved to the NAND (gate-verifiable) layer, that have tokens without a
+/// resolved dominant graha, or whose average settling depth is below the required
+/// resolution floor. Any of these means the query cannot be verified end-to-end,
+/// so we refuse rather than emit a partially-resolved, hence unverifiable, claim.
+fn descent_refusal_reasons(matrix: &SettlingMatrix) -> Vec<BindRefusal> {
+    let mut out = Vec::new();
+
+    let nand = matrix.nand_completeness();
+    if nand < 1.0 {
+        out.push(BindRefusal::LowNandCompleteness {
+            score: nand,
+            detail: format!(
+                "query resolved to the NAND layer for {:.1}% of tokens (required 100%); \
+                 a partial descent is not a verified claim",
+                nand * 100.0
+            ),
+        });
+    }
+
+    // "Increase resolution depth": enforce a minimum average settling depth so the
+    // query is resolved deeply enough to verify, not just loosely classified.
+    const MIN_AVERAGE_DEPTH: f64 = 3.5;
+    if matrix.average_depth < MIN_AVERAGE_DEPTH {
+        out.push(BindRefusal::ShallowDescent {
+            average_depth: matrix.average_depth,
+            detail: format!(
+                "average settling depth {:.2}/6 is below the required resolution floor {:.1}",
+                matrix.average_depth, MIN_AVERAGE_DEPTH
+            ),
+        });
+    }
+
+    for t in &matrix.tokens {
+        if t.vedic_classification.dominant_graha().is_none() {
+            out.push(BindRefusal::UnresolvedDominantGraha {
+                token: t.text.clone(),
+                detail: format!(
+                    "token '{}' settled without a resolved dominant graha",
+                    t.text
+                ),
+            });
+        }
+    }
+
+    out
+}
+
 /// Run the full `solve` pipeline and collect every result field.
+/// Direct-proof path for self-contained, fully-evaluable arithmetic claims
+/// (e.g. `2 + 3 = 5`). Such claims are verifiable with certainty yet carry no
+/// graha-domain anchor, so the descent-refusal rule would otherwise refuse them
+/// (over-refusal of verifiable claims). When the stated equality holds, emit a
+/// verified `RuleApplication` and bypass the descent refusal entirely. A claim
+/// that does not hold (`2 + 3 = 6`) still falls through to refusal, as does any
+/// non-arithmetic / unanchored query.
+fn direct_proof_if_computable(num_exprs: &[NumExpr]) -> Option<RuleApplication> {
+    for e in num_exprs {
+        if let (Some(l_val), Some(r_val), Some(true)) = (e.lhs_value, e.stated_rhs, e.matches) {
+            return Some(RuleApplication {
+                formula_id: "compute".to_string(),
+                expression: e.expr.clone(),
+                bindings: vec![("lhs".to_string(), l_val), ("rhs".to_string(), r_val)],
+                output: l_val,
+                unit: None,
+                provenance: vec![ProvenanceStep::FormalExpression {
+                    token: e.expr.clone(),
+                    expression: format!(
+                        "{l_val} == {r_val} (verified by direct arithmetic evaluation)"
+                    ),
+                }],
+            });
+        }
+    }
+    None
+}
+
 fn run_solve(query: &str, explain_binding: Option<ExplainBindingMode>) -> SolveResult {
     let formula_reg = load_formula_registry();
     let entity_reg = load_entity_registry();
@@ -3357,6 +3359,12 @@ fn run_solve(query: &str, explain_binding: Option<ExplainBindingMode>) -> SolveR
     let numerical = extract_numerical_values(query);
 
     let matrix = descent_engine.descend(query);
+
+    // #3 Strengthen descent: refuse any query that does not fully resolve to the
+    // NAND layer, has a token without a resolved dominant graha, or sits below the
+    // required resolution depth. No partial / under-resolved claims are emitted.
+    let descent_refusals = descent_refusal_reasons(&matrix);
+    let descent_rejected = !descent_refusals.is_empty();
 
     let env = create_env();
     let mut tanto_evals = Vec::new();
@@ -3426,11 +3434,21 @@ fn run_solve(query: &str, explain_binding: Option<ExplainBindingMode>) -> SolveR
 
     let explain = explain_binding.is_some();
     let mut trace = BindTrace::default();
-    let (rule_applications, refusals) =
+    // Direct-proof path: a self-contained, verifiable arithmetic claim bypasses
+    // the descent refusal (it needs no graha-domain anchor to be proven).
+    let direct_proof = direct_proof_if_computable(&num_exprs);
+    let (rule_applications, refusals) = if let Some(app) = direct_proof {
+        (vec![app], Vec::new())
+    } else if descent_rejected {
+        // Descent did not fully resolve — refuse rather than fall through to a
+        // possibly-bindable but unverifiable formula.
+        (Vec::new(), descent_refusals)
+    } else {
         match bind_formula(query, &numerical, &formula_reg, explain, &mut trace) {
             Ok(apps) => (apps, Vec::new()),
             Err(refs) => (Vec::new(), refs),
-        };
+        }
+    };
 
     // Advisory hint when nothing bound: point at near-miss formulas/outputs so a
     // wrong query is self-correcting instead of silently empty (fail-loud UX).
@@ -3616,6 +3634,162 @@ fn build_proof_object(result: &SolveResult, include_timestamp: bool) -> serde_js
     proof
 }
 
+/// Build a recomputable proof object for a `build` (chart) result. The `inputs`
+/// block records everything needed to rebuild the result from scratch; the
+/// `outputs` block is the canonical, determinism-receipt-bearing result.
+/// Canonicalize an f64 to a fixed precision for proof hashing/serialization.
+///
+/// serde_json's float formatter and parser are not exact inverses at ULP
+/// boundaries: a value computed as `0.11369975956291137` round-trips back as
+/// `0.11369975956291135`, which silently breaks proof digest/recomputation
+/// verification across processes (the build hash is computed over the in-memory
+/// Value, while `verify` re-parses the JSON text). Rounding to a fixed precision
+/// collapses such 1-ULP ambiguities so the same build yields byte-identical
+/// proof JSON across runs and re-parsing (determinism rule).
+fn canon_f64(x: f64) -> f64 {
+    (x * 1e6).round() / 1e6
+}
+
+fn build_build_proof_object(
+    domain_content: &str,
+    resolved: &laverna::time::ResolvedInstant,
+    ayanamsa_token: &str,
+    latitude: Option<f64>,
+    longitude: Option<f64>,
+    top_k: usize,
+    result: &laverna::build::BuildResult,
+) -> serde_json::Value {
+    let objective_weights: std::collections::BTreeMap<String, f64> = result
+        .objective_weights
+        .iter()
+        .map(|(k, v)| (k.clone(), canon_f64(*v)))
+        .collect();
+    let payload = serde_json::json!({
+        "kind": "build",
+        "schema_version": "1.1.0",
+        "laverna_version": env!("CARGO_PKG_VERSION"),
+        "features": collect_features(),
+        "inputs": {
+            "domain_toml": domain_content,
+            "datetime_utc": resolved.utc_iso,
+            "ayanamsa": ayanamsa_token,
+            "latitude": latitude,
+            "longitude": longitude,
+            "top_k": top_k,
+        },
+        "outputs": {
+            "lagna": result.chart.lagna.map(|l| l.name()),
+            "pillar_weights": result.personality.pillar_weights.iter().map(|w| canon_f64(*w)).collect::<Vec<_>>(),
+            "objective_weights": objective_weights,
+            "allocations": result
+                .allocations
+                .iter()
+                .map(|s| serde_json::json!({ "objective": canon_f64(s.objective), "levels": s.levels }))
+                .collect::<Vec<_>>(),
+        },
+    });
+    let digest = proof_digest(&payload);
+    let mut proof = payload;
+    if let Some(m) = proof.as_object_mut() {
+        m.insert(
+            "digest".to_string(),
+            serde_json::json!({ "algorithm": "sha256", "value": digest }),
+        );
+    }
+    proof
+}
+
+/// Re-verify a `build` proof object by recomputation: re-parse the domain TOML,
+/// re-resolve the datetime, re-run `build_with`, and require the rebuilt payload
+/// to be byte-identical. Returns `(verified, mismatches)`.
+fn verify_build_proof(proof: &serde_json::Value) -> (bool, bool, Vec<String>) {
+    let recorded_payload = proof_payload_view(proof);
+    let recorded_digest = proof["digest"]["value"].as_str().unwrap_or("");
+    let digest_ok =
+        !recorded_digest.is_empty() && recorded_digest == proof_digest(&recorded_payload);
+
+    let inputs = &proof["inputs"];
+    let domain_toml = inputs["domain_toml"].as_str().unwrap_or("");
+    let utc_iso = inputs["datetime_utc"].as_str().unwrap_or("");
+    let ayanamsa = inputs["ayanamsa"].as_str().unwrap_or("lahiri");
+    let latitude = inputs["latitude"].as_f64();
+    let longitude = inputs["longitude"].as_f64();
+    let top_k = inputs["top_k"].as_u64().unwrap_or(1) as usize;
+
+    let (recompute_ok, mismatches) = match laverna::build::parse_domain_profile(domain_toml)
+        .and_then(|p| laverna::build::validate_domain_profile(&p).map(|_| p))
+    {
+        Ok(profile) => {
+            // `resolved.utc_iso` is RFC3339 with an offset (e.g. "...+00:00");
+            // `resolve_chart_datetime`'s UTC branch parses the naive form, so
+            // normalize the offset the same way `cmd_build` does before re-resolving.
+            let naive_utc = utc_iso
+                .trim()
+                .trim_end_matches('Z')
+                .split('+')
+                .next()
+                .unwrap_or(utc_iso)
+                .trim();
+            match laverna::time::resolve_chart_datetime(Some(naive_utc), None, None) {
+                Ok(resolved) => {
+                    match laverna::ephemeris::AyanamsaSystem::from_cli(Some(ayanamsa)) {
+                        Ok(sys) => match laverna::build::build_with(
+                            &profile,
+                            resolved.jd_utc,
+                            latitude,
+                            longitude,
+                            top_k,
+                            sys,
+                        ) {
+                            Ok(result) => {
+                                let recomputed = build_build_proof_object(
+                                    domain_toml,
+                                    &resolved,
+                                    ayanamsa,
+                                    latitude,
+                                    longitude,
+                                    top_k,
+                                    &result,
+                                );
+                                let recomputed_payload = proof_payload_view(&recomputed);
+                                if recomputed_payload == recorded_payload {
+                                    (true, Vec::new())
+                                } else {
+                                    let mut ms = Vec::new();
+                                    if let (Some(a), Some(b)) = (
+                                        recorded_payload.as_object(),
+                                        recomputed_payload.as_object(),
+                                    ) {
+                                        let mut keys: Vec<&String> =
+                                            a.keys().chain(b.keys()).collect();
+                                        keys.sort();
+                                        keys.dedup();
+                                        for k in keys {
+                                            if a.get(k) != b.get(k) {
+                                                ms.push(k.clone());
+                                            }
+                                        }
+                                    }
+                                    (false, ms)
+                                }
+                            }
+                            Err(_) => (false, vec!["recompute: build_with failed".into()]),
+                        },
+                        Err(_) => (false, vec!["recompute: ayanamsa parse failed".into()]),
+                    }
+                }
+                Err(_) => (false, vec!["recompute: datetime resolve failed".into()]),
+            }
+        }
+        Err(_) => (
+            false,
+            vec!["recompute: profile parse/validate failed".into()],
+        ),
+    };
+
+    (digest_ok, recompute_ok, mismatches)
+}
+
 /// Strip the non-hashed envelope fields (`digest`, `computed_at`) from a proof,
 /// leaving the canonical payload that the digest is computed over.
 fn proof_payload_view(proof: &serde_json::Value) -> serde_json::Value {
@@ -3625,6 +3799,51 @@ fn proof_payload_view(proof: &serde_json::Value) -> serde_json::Value {
         map.remove("computed_at");
     }
     payload
+}
+
+/// Outcome of re-verifying a `solve` proof object via recomputation.
+struct VerifyOutcome {
+    query: String,
+    verified: bool,
+    digest_ok: bool,
+    recompute_ok: bool,
+    recorded_digest: String,
+    recomputed_digest: String,
+    mismatches: Vec<String>,
+}
+
+/// Re-verify a proof object emitted by `solve --proof-out`.
+///
+/// Verification is *recomputation*, not echoing: the descent is re-run from the
+/// recorded `query` against the embedded corpus, and the resulting canonical
+/// payload must be byte-identical to the recorded one. Any divergence — a
+/// tampered query, mutated scores, forged tokens — is reported. The recorded
+/// `digest` is also checked for internal consistency.
+fn verify_proof(proof: &serde_json::Value) -> VerifyOutcome {
+    let query = proof["query"].as_str().unwrap_or("").to_string();
+    let recorded_payload = proof_payload_view(proof);
+
+    // 1. Digest integrity: does the recorded digest match the recorded payload?
+    let recorded_digest = proof["digest"]["value"].as_str().unwrap_or("");
+    let recomputed_digest_of_recorded = proof_digest(&recorded_payload);
+    let digest_ok = !recorded_digest.is_empty() && recorded_digest == recomputed_digest_of_recorded;
+
+    // 2. Recomputation: re-run the descent and rebuild the canonical payload.
+    let recomputed_payload = build_proof_payload(&run_solve(&query, None));
+    let recomputed_digest = proof_digest(&recomputed_payload);
+    let recompute_ok = recorded_payload == recomputed_payload;
+
+    let mismatches = payload_field_mismatches(&recorded_payload, &recomputed_payload);
+
+    VerifyOutcome {
+        query,
+        verified: digest_ok && recompute_ok,
+        digest_ok,
+        recompute_ok,
+        recorded_digest: recorded_digest.to_string(),
+        recomputed_digest,
+        mismatches,
+    }
 }
 
 /// Re-verify a proof object emitted by `solve --proof-out` (T52).
@@ -3650,23 +3869,22 @@ fn cmd_verify(path: &str, format: OutputFormat) {
         }
     };
 
-    let query = proof["query"].as_str().unwrap_or("").to_string();
-    let recorded_payload = proof_payload_view(&proof);
+    let kind = proof.get("kind").and_then(|v| v.as_str()).unwrap_or("");
 
-    // 1. Digest integrity: does the recorded digest match the recorded payload?
-    let recorded_digest = proof["digest"]["value"].as_str().unwrap_or("");
-    let recomputed_digest_of_recorded = proof_digest(&recorded_payload);
-    let digest_ok = !recorded_digest.is_empty() && recorded_digest == recomputed_digest_of_recorded;
+    if kind == "build" {
+        cmd_verify_build(&proof, format);
+        return;
+    }
 
-    // 2. Recomputation: re-run the descent and rebuild the canonical payload.
-    let recomputed_payload = build_proof_payload(&run_solve(&query, None));
-    let recomputed_digest = proof_digest(&recomputed_payload);
-    let recompute_ok = recorded_payload == recomputed_payload;
+    let outcome = verify_proof(&proof);
 
-    // Field-level divergences for the report.
-    let mismatches = payload_field_mismatches(&recorded_payload, &recomputed_payload);
-
-    let verified = digest_ok && recompute_ok;
+    let query = outcome.query.clone();
+    let recorded_digest = outcome.recorded_digest.clone();
+    let recomputed_digest_of_recorded = outcome.recomputed_digest.clone();
+    let digest_ok = outcome.digest_ok;
+    let recompute_ok = outcome.recompute_ok;
+    let mismatches = outcome.mismatches.clone();
+    let verified = outcome.verified;
 
     if format == OutputFormat::Json {
         let out = serde_json::json!({
@@ -3675,7 +3893,7 @@ fn cmd_verify(path: &str, format: OutputFormat) {
             "digest_ok": digest_ok,
             "recompute_ok": recompute_ok,
             "recorded_digest": recorded_digest,
-            "recomputed_digest": recomputed_digest,
+            "recomputed_digest": outcome.recomputed_digest,
             "schema_version": proof["schema_version"].as_str().unwrap_or("?"),
             "laverna_version": proof["laverna_version"].as_str().unwrap_or("?"),
             "corpus_version": proof["corpus"]["version"].as_str().unwrap_or("?"),
@@ -3715,6 +3933,67 @@ fn cmd_verify(path: &str, format: OutputFormat) {
             );
         } else {
             println!("✗ Proof object REJECTED — recomputation does not match the recorded claim");
+        }
+    }
+
+    if !verified {
+        std::process::exit(1);
+    }
+}
+
+/// Verify a `build` (chart) proof object: re-parse the domain TOML, re-resolve
+/// the datetime, re-run `build_with`, and require the rebuilt payload to be
+/// byte-identical to the recorded claim (including a matching digest).
+fn cmd_verify_build(proof: &serde_json::Value, format: OutputFormat) {
+    let recorded_digest = proof["digest"]["value"].as_str().unwrap_or("").to_string();
+    let recorded_payload = proof_payload_view(proof);
+    let digest_ok =
+        !recorded_digest.is_empty() && recorded_digest == proof_digest(&recorded_payload);
+    let (_, recompute_ok, mismatches) = verify_build_proof(proof);
+    let verified = digest_ok && recompute_ok;
+
+    if format == OutputFormat::Json {
+        let out = serde_json::json!({
+            "verified": verified,
+            "kind": "build",
+            "digest_ok": digest_ok,
+            "recompute_ok": recompute_ok,
+            "recorded_digest": recorded_digest,
+            "recomputed_digest": proof_digest(&recorded_payload),
+            "schema_version": proof["schema_version"].as_str().unwrap_or("?"),
+            "laverna_version": proof["laverna_version"].as_str().unwrap_or("?"),
+            "mismatched_fields": mismatches,
+        });
+        println!("{}", serde_json::to_string(&out).unwrap());
+    } else {
+        println!("  Kind: build");
+        println!(
+            "  {} Digest integrity (recorded matches payload)",
+            if digest_ok { "✓" } else { "✗" }
+        );
+        if !digest_ok {
+            println!("      recorded:   {recorded_digest}");
+            println!("      recomputed: {}", proof_digest(&recorded_payload));
+        }
+        println!(
+            "  {} Recomputation (build_with re-run matches recorded claim)",
+            if recompute_ok { "✓" } else { "✗" }
+        );
+        if !recompute_ok {
+            for field in &mismatches {
+                println!("      ✗ diverges: {field}");
+            }
+        }
+        println!();
+        if verified {
+            println!(
+                "✓ Build proof object VERIFIED (schema {})",
+                proof["schema_version"].as_str().unwrap_or("?")
+            );
+        } else {
+            println!(
+                "✗ Build proof object REJECTED — recomputation does not match the recorded claim"
+            );
         }
     }
 
@@ -5556,6 +5835,7 @@ fn cmd_build(
     longitude: Option<f64>,
     top_k: usize,
     explain: bool,
+    proof_out: Option<&str>,
 ) {
     let content = match std::fs::read_to_string(domain_path) {
         Ok(c) => c,
@@ -5658,6 +5938,40 @@ fn cmd_build(
             println!("  [{}] {} (source: {})", c.applies_to, c.note, c.source);
         }
     }
+
+    // Proof discipline (fail-closed): emit a recomputable proof object for the
+    // chart build and re-verify it by recomputation. If it does not verify, we
+    // delete it and exit non-zero rather than hand over an unverifiable artifact.
+    if let Some(path) = proof_out {
+        let proof = build_build_proof_object(
+            &content,
+            &resolved,
+            ayanamsa_token,
+            latitude,
+            longitude,
+            top_k,
+            &result,
+        );
+        match std::fs::write(path, serde_json::to_string_pretty(&proof).unwrap()) {
+            Ok(_) => {
+                let (digest_ok, recompute_ok, mismatches) = verify_build_proof(&proof);
+                let verified = digest_ok && recompute_ok;
+                if verified {
+                    eprintln!("build proof object written to {path} and self-verified");
+                } else {
+                    eprintln!(
+                        "error: build proof written to {path} FAILED self-verification — failing closed"
+                    );
+                    for m in &mismatches {
+                        eprintln!("  diverges: {m}");
+                    }
+                    let _ = std::fs::remove_file(path);
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => eprintln!("error: could not write build proof to {path}: {e}"),
+        }
+    }
 }
 
 /// Strategize: query → reverse-route → 7-pillar weights → deterministic
@@ -5671,6 +5985,7 @@ fn cmd_strategize(
     domain_path: Option<String>,
     explain: bool,
     format: OutputFormat,
+    forces_path: Option<String>,
 ) {
     let query = match query {
         Some(q) => q,
@@ -5682,9 +5997,37 @@ fn cmd_strategize(
 
     // 1. Reverse-route the query → graha forces → strategy report (deterministic).
     let route = run_route(&query);
-    let pillars = aggregate_pillars(&route.report, &route.matrix);
+    let mut pillars = aggregate_pillars(&route.report, &route.matrix);
     let speculative = route.report.warning.is_some();
     let decomposition = route.decomposition;
+
+    // 1b. Real-time pillar reweight from external sensor forces (if supplied).
+    // The query's graha forces set the base; sensor/telemetry signals blend in
+    // here so the allocation adapts to live conditions, not just the query text.
+    let mut sensor_forces: std::collections::HashMap<String, f64> =
+        std::collections::HashMap::new();
+    if let Some(path) = &forces_path {
+        let content = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("error: cannot read sensor-force file '{path}': {e}");
+                std::process::exit(2);
+            }
+        };
+        match laverna::strategy::parse_sensor_forces(&content) {
+            Ok(f) => {
+                sensor_forces = f;
+                laverna::strategy::reweight_pillars_with_sensor_forces(
+                    &mut pillars,
+                    &sensor_forces,
+                );
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(2);
+            }
+        }
+    }
 
     // 2. Build the optimization schema from the pillar vector.
     let (schema, domain_name) = match &domain_path {
@@ -5768,6 +6111,7 @@ fn cmd_strategize(
             budget,
             speculative,
             &allocations,
+            &sensor_forces,
         );
     } else {
         print_strategize_text(
@@ -5781,6 +6125,7 @@ fn cmd_strategize(
             &allocations,
             explain,
             &schema,
+            &sensor_forces,
         );
     }
 }
@@ -5798,6 +6143,7 @@ fn print_strategize_text(
     allocations: &[laverna::optimize::Allocation],
     explain: bool,
     schema: &laverna::optimize::Schema,
+    sensor_forces: &std::collections::HashMap<String, f64>,
 ) {
     println!("═══ Strategize ═══");
     println!("query: \"{query}\"");
@@ -5821,6 +6167,17 @@ fn print_strategize_text(
                 graha.archetype(),
                 share * 100.0
             );
+        }
+    }
+
+    // Real-time sensor forces (if any) blended into the pillar weights.
+    if !sensor_forces.is_empty() {
+        println!();
+        println!("SENSOR FORCES (blended into pillars):");
+        let mut names: Vec<&String> = sensor_forces.keys().collect();
+        names.sort();
+        for name in names {
+            println!("  {} → +{:.3}", name, sensor_forces[name]);
         }
     }
 
@@ -5880,6 +6237,7 @@ fn print_strategize_json(
     budget: f64,
     speculative: bool,
     allocations: &[laverna::optimize::Allocation],
+    sensor_forces: &std::collections::HashMap<String, f64>,
 ) {
     let forces: Vec<Value> = report
         .ranked
@@ -5936,6 +6294,10 @@ fn print_strategize_json(
             })
         })
         .collect();
+    let sensor_json: Vec<Value> = sensor_forces
+        .iter()
+        .map(|(k, v)| serde_json::json!({ "name": k, "weight": v }))
+        .collect();
     let out = serde_json::json!({
         "query": query,
         "speculative": speculative,
@@ -5943,6 +6305,7 @@ fn print_strategize_json(
         "domain": domain_name,
         "budget": budget,
         "forces": forces,
+        "sensor_forces": sensor_json,
         "decomposition": decomposition_json,
         "pillars": pillar_json,
         "allocations": alloc_json
@@ -6952,6 +7315,50 @@ fn build_tool(
 
 /// Laverna as a practical personality agent (companion-only surface).
 ///
+/// #2 Harden Gate: every external LLM completion must pass through the `cid`
+/// gate proxy before it is released. The engine validates the candidate text
+/// against the active gates (math / logic / fact / confidence / formal); any
+/// token that cannot be bound to a verified domain — i.e. fails a gate — is
+/// rejected and the answer is withheld rather than emitted unverified.
+///
+/// Returns the (possibly sanitized) validated text, or a refusal reason.
+#[cfg(feature = "llm")]
+fn gate_guard_llm(text: &str, domain: &str, context: &str) -> Result<String, String> {
+    use cid::inference::{InferenceEngine, ValidationRequest};
+    let mut engine = InferenceEngine::new();
+    if !domain.is_empty() {
+        engine.set_domain(domain);
+    }
+    // Harden the completion path: every emitted token must be domain-bound
+    // (grounded in the verified context) and, where it asserts a numeric claim,
+    // must recompute to match. Tokens failing either gate are refused.
+    engine.enable_domain_proof_gates();
+    let request = ValidationRequest::new(text, context).with_domain(if domain.is_empty() {
+        "general"
+    } else {
+        domain
+    });
+    match engine.validate(request) {
+        Ok(result) => {
+            if result.passed {
+                Ok(result.validated_text)
+            } else {
+                let reasons: Vec<String> = result
+                    .gate_scores
+                    .iter()
+                    .filter(|g| !g.passed)
+                    .map(|g| format!("gate {:?} score {:.3}", g.gate, g.score))
+                    .collect();
+                Err(format!(
+                    "LLM output rejected by gate proxy (token lacked a verifiable domain binding or proof recomputation match): {}",
+                    reasons.join("; ")
+                ))
+            }
+        }
+        Err(e) => Err(format!("gate proxy validation error: {e}")),
+    }
+}
+
 /// Classifies the query, routes to the matching engine tool to obtain grounded
 /// context, then returns a plain answer. With `--features llm`, the grounded
 /// context is handed to the local model (`Copilot`) which speaks naturally;
@@ -7001,8 +7408,22 @@ fn companion_tool(
         let copilot = laverna::inference::Copilot;
         match copilot.answer(query, &context) {
             Ok(answer) => {
-                let r = receipt(tool_name, CORPUS_VERSION, CORPUS_CONTENT_HASH);
-                return Ok(ToolOutput::text_only(format!("{answer}\n\n---\n{r}")));
+                // #2 Harden Gate: route the LLM completion through the gate proxy and
+                // withhold it if any token fails to bind to a verified domain.
+                match gate_guard_llm(&answer, tool_name, &context) {
+                    Ok(guarded) => {
+                        let r = receipt(tool_name, CORPUS_VERSION, CORPUS_CONTENT_HASH);
+                        return Ok(ToolOutput::text_only(format!("{guarded}\n\n---\n{r}")));
+                    }
+                    Err(rejection) => {
+                        return Ok(ToolOutput::text_only(format!(
+                            "I drafted a response but the gate proxy refused to release it \
+                             because it could not bind every token to a verified domain \
+                             ({}). I won't guess.",
+                            rejection
+                        )));
+                    }
+                }
             }
             Err(laverna::inference::CopilotError::BinaryMissing) => {
                 return Ok(ToolOutput::text_only(
@@ -7856,6 +8277,27 @@ mod proof_tests {
         let recomputed = build_proof_payload(&run_solve(proof["query"].as_str().unwrap(), None));
         assert_eq!(recorded, recomputed);
         assert_eq!(proof_digest(&recorded), proof_digest(&recomputed));
+    }
+
+    /// #2 plumbing: the `cid` gate proxy is the engine every LLM completion is now
+    /// routed through. This smoke test proves it is invocable on arbitrary text and
+    /// returns a structured verdict (per-gate scores), independent of the `llm`
+    /// feature (which needs a local model to actually generate).
+    #[test]
+    fn gate_proxy_is_callable_and_scores_gates() {
+        use cid::inference::{InferenceEngine, ValidationRequest};
+        let mut engine = InferenceEngine::new();
+        let request = ValidationRequest::new("the cat sat on the mat", "general knowledge");
+        let result = engine
+            .validate(request)
+            .expect("gate proxy must return a verdict");
+        assert!(
+            !result.gate_scores.is_empty(),
+            "gate proxy must score at least one gate"
+        );
+        for g in &result.gate_scores {
+            let _ = (g.gate, g.passed, g.score);
+        }
     }
 }
 
@@ -10238,7 +10680,15 @@ fn cmd_athena_llm(
     if generate {
         match router.generate(query, None) {
             Ok(resp) => {
-                println!("{}", resp.text);
+                // #2 Harden Gate: the generated completion must clear the gate proxy
+                // before it is released; unbound tokens are withheld, not emitted.
+                match gate_guard_llm(&resp.text, "general", query) {
+                    Ok(guarded) => println!("{}", guarded),
+                    Err(rejection) => {
+                        eprintln!("LLM output withheld by gate proxy: {}", rejection);
+                        std::process::exit(1);
+                    }
+                }
                 if verbose {
                     eprintln!(
                         "--- tokens: {}, finish: {} ---",
@@ -10593,74 +11043,37 @@ mod binder_tests {
     #[test]
     fn explain_binding_json_is_structured() {
         let q = "padded extent of a struct aligned to 8 bytes, the enum contributes max_variant 13 and disc 2";
-        // `=json` → field present with the expected shape.
+        // #3 Strengthen descent: an under-resolved query must be REFUSED by run_solve,
+        // not handed a binder chain. The explain-binding surface still attaches with
+        // `=json`, but carries an empty chain and the structured refusals explain why.
         let on = solve_to_json(&run_solve(q, Some(ExplainBindingMode::Json)), true);
         let on: serde_json::Value = serde_json::to_value(&on).unwrap();
+        let refusals = on
+            .get("refusals")
+            .expect("refusals must be present")
+            .as_array()
+            .expect("refusals must be an array");
+        assert!(
+            !refusals.is_empty(),
+            "descent must refuse an under-resolved query"
+        );
+        assert!(
+            refusals
+                .iter()
+                .any(|r| r["refused"]["kind"] == "low_nand_completeness"),
+            "refusal must report low NAND completeness"
+        );
+        let apps = on["rule_applications"].as_array().unwrap();
+        assert!(
+            apps.is_empty(),
+            "no rule_applications may be emitted under refusal"
+        );
+        // explain_binding still attaches with =json, but with an empty chain.
         let trace = on
             .get("explain_binding")
             .expect("explain_binding must be present with =json");
-        // T102: the bound formula(s) are now an ordered chain, not a single id.
-        let chain = trace["formula_chain"]
-            .as_array()
-            .expect("explain_binding.formula_chain must be an array");
-        assert!(!chain.is_empty(), "formula_chain must be non-empty");
-        for fid in chain {
-            assert!(fid.is_string(), "each formula_chain entry must be a string");
-        }
-        let inputs = trace["inputs"]
-            .as_array()
-            .expect("explain_binding.inputs must be an array");
-        assert!(!inputs.is_empty(), "trace must record at least one input");
-        let mut saw_derived = false;
-        let mut saw_hop1 = false;
-        for inp in inputs {
-            // T101: every input is attributable to the formula+hop it belongs to.
-            assert!(inp["input"].is_string());
-            assert!(
-                inp["formula_id"].is_string(),
-                "each input must carry the formula_id it was bound under (T101)"
-            );
-            assert!(
-                inp["hop"].is_u64(),
-                "each input must carry its chain hop index (T101)"
-            );
-            let method = inp["method"].as_str().expect("method must be a string");
-            assert!(
-                matches!(method, "name" | "unit" | "derived"),
-                "method must be name/unit/derived, got {method}"
-            );
-            assert!(inp["pre_conversion_value"].is_number());
-            // Forward (name/unit) binds have a real distance; derived (prior-hop)
-            // fills have none — both are valid and must appear (T100).
-            assert!(
-                inp["distance"].is_number() || inp["distance"].is_null(),
-                "distance must be a number (forward) or null (derived)"
-            );
-            if method == "derived" {
-                saw_derived = true;
-            }
-            if inp["hop"].as_u64() == Some(1) {
-                saw_hop1 = true;
-            }
-        }
-        // This query is a two-hop chain; the second rule consumes a derived output,
-        // so the trace MUST record the chained input rather than silently dropping it.
-        assert!(
-            saw_derived,
-            "two-hop chain must record at least one derived input"
-        );
-        // T101/T102: the chain has two hops, so the trace must carry at least one
-        // input stamped hop=1 (the downstream rule's input).
-        assert!(
-            saw_hop1,
-            "two-hop chain must record at least one hop=1 input"
-        );
-        assert_eq!(
-            chain.len(),
-            2,
-            "two-hop query must record a 2-formula chain"
-        );
-        assert!(trace["tie_count"].is_number(), "tie_count must be a number");
+        let chain = trace["formula_chain"].as_array().unwrap();
+        assert!(chain.is_empty(), "no chain under refusal");
 
         // Absent flag → field omitted (no contract drift for default JSON).
         let off = solve_to_json(&run_solve(q, None), false);
@@ -10678,28 +11091,22 @@ mod binder_tests {
     #[test]
     fn binder_trace_records_derived_binds() {
         let q = "padded extent of a struct aligned to 8 bytes, the enum contributes max_variant 13 and disc 2";
+        // #3 Strengthen descent: under-resolved queries are refused, so the binder
+        // trace records no derived (prior-hop) input — no chain was built. The
+        // derived-bind *machinery* remains covered by binder-level tests (which call
+        // `bind` directly); here we only assert the refusal contract.
         let result = run_solve(q, Some(ExplainBindingMode::Json));
-        let derived: Vec<_> = result
-            .explain_binding
-            .inputs
-            .iter()
-            .filter(|i| i.method == "derived")
-            .collect();
         assert!(
-            !derived.is_empty(),
-            "two-hop chain must record at least one derived (prior-hop) input"
-        );
-        let d = derived
-            .iter()
-            .find(|i| i.input == "size")
-            .expect("derived input must be the upstream `size` output");
-        assert_eq!(
-            d.pre_conversion_value, 15.0,
-            "derived value must be the upstream size output (13 + 2)"
+            !result.refusals.is_empty(),
+            "descent must refuse an under-resolved query"
         );
         assert!(
-            d.distance.is_none(),
-            "derived fills have no anchor distance"
+            result.rule_applications.is_empty(),
+            "no rule_applications under refusal"
+        );
+        assert!(
+            result.explain_binding.formula_chain.is_empty(),
+            "no chain under refusal"
         );
     }
 
@@ -10810,5 +11217,42 @@ mod binder_tests {
             .expect("mass should be solved")
             .1;
         assert!((mass - 8.0).abs() < 1e-6, "mass should be ~8, got {mass}");
+    }
+
+    /// Direct-proof path (#1 improvement): a self-contained, verifiable arithmetic
+    /// claim (`2 + 3 = 5`) must be PROVEN — a `compute` rule application with no
+    /// refusals — not refused for lacking a graha-domain anchor.
+    #[test]
+    fn solve_verifies_self_contained_arithmetic() {
+        let r = run_solve("2 + 3 = 5", None);
+        assert!(
+            r.rule_applications
+                .iter()
+                .any(|a| a.formula_id == "compute"),
+            "expected a direct compute proof for '2 + 3 = 5'"
+        );
+        assert!(
+            r.refusals.is_empty(),
+            "verifiable arithmetic must not be refused: {:?}",
+            r.refusals
+        );
+        // Deterministic across runs.
+        let a =
+            serde_json::to_string(&solve_to_json(&run_solve("2 + 3 = 5", None), false)).unwrap();
+        let b =
+            serde_json::to_string(&solve_to_json(&run_solve("2 + 3 = 5", None), false)).unwrap();
+        assert_eq!(a, b, "direct-proof solve must be deterministic");
+    }
+
+    /// A false arithmetic claim (`2 + 3 = 6`) still falls through to refusal — it
+    /// is not asserted as true.
+    #[test]
+    fn solve_refuses_false_arithmetic() {
+        let r = run_solve("2 + 3 = 6", None);
+        assert!(
+            r.rule_applications.is_empty(),
+            "false arithmetic must not be asserted true"
+        );
+        assert!(!r.refusals.is_empty(), "false arithmetic must be refused");
     }
 }

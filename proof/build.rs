@@ -21,6 +21,7 @@ fn main() {
         "formulas/bridging_seed.toml",
         "formulas/vortex_seed.toml",
         "formulas/rust_seed.toml",
+        "formulas/derived_verified.toml",
     ];
 
     let mut formulas = String::new();

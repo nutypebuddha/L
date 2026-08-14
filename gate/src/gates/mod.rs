@@ -1,16 +1,20 @@
 pub mod confidence;
+pub mod domain;
 pub mod fact;
 pub mod fallacy;
 pub mod formal;
 pub mod logic;
 pub mod math;
+pub mod recompute;
 
 pub use confidence::ConfidenceGate;
+pub use domain::DomainBindingGate;
 pub use fact::FactGate;
 pub use fallacy::FallacyGate;
 pub use formal::FormalGate;
 pub use logic::LogicGate;
 pub use math::MathGate;
+pub use recompute::ProofRecomputeGate;
 
 use crate::core::ball::{Ball, GateOutcome, GateResult};
 use crate::core::pin::{Gate, Pin};
@@ -59,6 +63,11 @@ pub fn validate_candidate(
             // the others via the downgrade step below.
             Gate::Confidence => ConfidenceGate::new(pin.threshold).validate(ball, context),
             Gate::Formal => FormalGate::new().validate(ball, context),
+            // DomainBinding: refuse tokens with no provenance in the verified
+            // context (the LLM hardening gate).
+            Gate::DomainBinding => DomainBindingGate::new().validate(ball, context),
+            // ProofRecompute: refuse claims whose proof does not recompute.
+            Gate::ProofRecompute => ProofRecomputeGate::new().validate(ball, context),
         };
 
         // Authoritative threshold enforcement — single point of truth.
@@ -176,5 +185,87 @@ mod tests {
         pins.disable_pin(Gate::Math);
         let ball = run("2 + 3 = 5", "math", &pins.pins);
         assert!(ball.gate_results.iter().all(|r| r.gate != Gate::Math));
+    }
+
+    // --- DomainBinding / ProofRecompute gates (#2 directive) -----------------
+
+    fn gate_outcome(gate: Gate, token: &str, context: &str) -> GateOutcome {
+        let candidate = TokenCandidate::new(0, token, 0.5);
+        let mut ball = Ball::new(candidate);
+        let result = match gate {
+            Gate::DomainBinding => DomainBindingGate::new().validate(&mut ball, context),
+            Gate::ProofRecompute => ProofRecomputeGate::new().validate(&mut ball, context),
+            _ => unreachable!("test only exercises the two new gates"),
+        };
+        result.outcome
+    }
+
+    #[test]
+    fn domain_binding_passes_when_grounded() {
+        assert_eq!(
+            gate_outcome(
+                Gate::DomainBinding,
+                "mangala is exalted",
+                "mangala exalted in capricorn"
+            ),
+            GateOutcome::Pass
+        );
+    }
+
+    #[test]
+    fn domain_binding_fails_when_ungrounded() {
+        assert_eq!(
+            gate_outcome(
+                Gate::DomainBinding,
+                "zephyr quantum flux unknownword",
+                "mangala exalted in capricorn"
+            ),
+            GateOutcome::Fail
+        );
+    }
+
+    #[test]
+    fn domain_binding_unevaluable_without_context() {
+        assert_eq!(
+            gate_outcome(Gate::DomainBinding, "any token at all", ""),
+            GateOutcome::Unevaluable
+        );
+    }
+
+    #[test]
+    fn proof_recompute_passes_balanced_equation() {
+        assert_eq!(
+            gate_outcome(Gate::ProofRecompute, "2 + 3 = 5", "math"),
+            GateOutcome::Pass
+        );
+    }
+
+    #[test]
+    fn proof_recompute_fails_unbalanced_equation() {
+        assert_eq!(
+            gate_outcome(Gate::ProofRecompute, "2 + 3 = 6", "math"),
+            GateOutcome::Fail
+        );
+    }
+
+    #[test]
+    fn proof_recompute_unevaluable_without_claim() {
+        assert_eq!(
+            gate_outcome(Gate::ProofRecompute, "the earth is round", "general"),
+            GateOutcome::Unevaluable
+        );
+    }
+
+    #[test]
+    fn domain_proof_enforcement_pinfield_enables_both() {
+        let pins = PinField::with_domain_proof_enforcement();
+        assert!(pins
+            .pins
+            .iter()
+            .any(|p| p.gate == Gate::DomainBinding && p.enabled));
+        assert!(pins
+            .pins
+            .iter()
+            .any(|p| p.gate == Gate::ProofRecompute && p.enabled));
     }
 }

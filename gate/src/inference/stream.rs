@@ -133,6 +133,12 @@ impl StreamValidator {
                 Gate::Formal => {
                     crate::gates::formal::FormalGate::new().validate(&mut ball, context)
                 }
+                Gate::DomainBinding => {
+                    crate::gates::domain::DomainBindingGate::new().validate(&mut ball, context)
+                }
+                Gate::ProofRecompute => {
+                    crate::gates::recompute::ProofRecomputeGate::new().validate(&mut ball, context)
+                }
             };
 
             ball.add_result(result);

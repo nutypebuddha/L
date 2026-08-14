@@ -1,0 +1,171 @@
+# Derived, graha-tagged, recomputable formulas (IMPROVE L.AI #1).
+#
+# Every entry is mechanically verifiable: the `expression` references only its
+# declared `inputs` (plus Tanto constants like pi, c) and par/serial reductions
+# reduce to NAND primitives, so each claim can be recomputed by the binder. Each
+# carries a graha/zodiac tag via `tags` so `corpus lint` stays clean.
+
+[[formula]]
+id = "geo_triangle_area"
+formula_type = "math"
+domain = "Surya"
+inputs = ["base", "height"]
+output = "area"
+expression = "0.5 * base * height"
+description = "Area of a triangle from base and height: A = ½·b·h."
+evidence = "Euclid Elements I.41: a triangle is half the parallelogram on the same base and height."
+tags = ["math", "surya", "geometry", "area"]
+
+[[formula]]
+id = "geo_pythagorean"
+formula_type = "math"
+domain = "Surya"
+inputs = ["a", "b"]
+output = "hypotenuse"
+expression = "sqrt(a * a + b * b)"
+description = "Pythagorean hypotenuse: c = √(a² + b²)."
+evidence = "Pythagoras: in a right triangle the square on the hypotenuse equals the sum of squares on the legs."
+tags = ["math", "surya", "geometry", "pythagoras"]
+
+[[formula]]
+id = "geom_circle_area"
+formula_type = "math"
+domain = "Surya"
+inputs = ["r"]
+output = "area"
+expression = "pi * r * r"
+description = "Area of a circle of radius r: A = π·r²."
+evidence = "Archimedes: circle area equals π times the square of its radius; π is the Tanto constant."
+tags = ["math", "surya", "geometry", "circle"]
+
+[[formula]]
+id = "phy_kinetic_energy"
+formula_type = "math"
+domain = "Surya"
+inputs = ["mass", "velocity"]
+output = "kinetic_energy"
+expression = "0.5 * mass * velocity * velocity"
+description = "Translational kinetic energy: KE = ½·m·v²."
+evidence = "Classical mechanics, Émilie du Châtelet: KE = ½ m v² for non-relativistic speeds."
+tags = ["math", "surya", "physics", "energy"]
+
+[[formula]]
+id = "phy_mass_energy"
+formula_type = "math"
+domain = "Surya"
+inputs = ["mass"]
+output = "energy"
+expression = "mass * c * c"
+description = "Mass–energy equivalence: E = m·c², where c is the speed of light."
+evidence = "Einstein 1905: E = m c²; c is the Tanto constant for the speed of light."
+tags = ["math", "surya", "physics", "relativity"]
+
+[[formula]]
+id = "stat_arith_mean"
+formula_type = "math"
+domain = "Budha"
+inputs = ["a", "b"]
+output = "mean"
+expression = "(a + b) / 2"
+description = "Arithmetic mean of two values: (a + b) / 2."
+evidence = "Definition of the arithmetic mean over a two-element sample."
+tags = ["math", "budha", "statistics", "mean"]
+
+[[formula]]
+id = "stat_geom_mean"
+formula_type = "math"
+domain = "Budha"
+inputs = ["a", "b"]
+output = "mean"
+expression = "sqrt(a * b)"
+description = "Geometric mean of two non-negative values: √(a·b)."
+evidence = "Geometric mean: the nth root of the product; for n=2, √(a·b)."
+tags = ["math", "budha", "statistics", "mean"]
+
+[[formula]]
+id = "stat_harm_mean"
+formula_type = "math"
+domain = "Budha"
+inputs = ["a", "b"]
+output = "mean"
+expression = "2 * a * b / (a + b)"
+description = "Harmonic mean of two positive values: 2ab / (a + b)."
+evidence = "Harmonic mean: reciprocal of the arithmetic mean of reciprocals; reduces to 2ab/(a+b)."
+tags = ["math", "budha", "statistics", "mean"]
+
+[[formula]]
+id = "vec_dot2"
+formula_type = "math"
+domain = "Brihaspati"
+inputs = ["ax", "ay", "bx", "by"]
+output = "dot"
+expression = "ax * bx + ay * by"
+description = "Dot product of two 2-vectors: a·b = ax·bx + ay·by."
+evidence = "Euclidean inner product in ℝ²; projects one vector onto the other."
+tags = ["math", "brihaspati", "vector", "linear_algebra"]
+
+[[formula]]
+id = "trig_sin"
+formula_type = "math"
+domain = "Budha"
+inputs = ["x"]
+output = "sine"
+expression = "sin(x)"
+description = "Sine of angle x (radians): sin(x)."
+evidence = "Trigonometric sine; Tanto provides the sin function over real radians."
+tags = ["math", "budha", "trigonometry", "sine"]
+
+[[formula]]
+id = "logic_xor"
+formula_type = "logic"
+domain = "Mangala"
+inputs = ["a", "b"]
+output = "xor_out"
+expression = "a + b - 2 * a * b"
+description = "XOR: a ⊕ b = a + b − 2ab — Mars: inequality gate, 1 iff exactly one input is 1."
+evidence = "Truth table: XOR(a,b)=1 iff a≠b; over {0,1}, a + b − 2ab gives 1 only when inputs differ."
+tags = ["logic", "mangala", "gate", "xor"]
+
+[[formula]]
+id = "logic_implies"
+formula_type = "logic"
+domain = "Mangala"
+inputs = ["a", "b"]
+output = "implies_out"
+expression = "1 - a + a * b"
+description = "Material implication: a → b = ¬a ∨ (a∧b) = 1 − a + a·b."
+evidence = "Truth table: a→b is false only when a=1 and b=0; otherwise 1."
+tags = ["logic", "mangala", "gate", "implication"]
+
+[[formula]]
+id = "fin_simple_interest"
+formula_type = "math"
+domain = "Shukra"
+inputs = ["principal", "rate", "time"]
+output = "interest"
+expression = "principal * rate * time / 100"
+description = "Simple interest: I = P·r·t / 100 for an annual rate r (percent)."
+evidence = "Simple interest accrues linearly: I = P r t; divide by 100 because r is a percent."
+tags = ["math", "shukra", "finance", "interest"]
+
+[[formula]]
+id = "meas_parallel_resistance"
+formula_type = "math"
+domain = "Shani"
+inputs = ["r1", "r2"]
+output = "resistance"
+expression = "(r1 * r2) / (r1 + r2)"
+description = "Equivalent resistance of two resistors in parallel: (R₁·R₂)/(R₁ + R₂)."
+evidence = "Kirchhoff: 1/R_eq = 1/R₁ + 1/R₂, which reduces to (R₁·R₂)/(R₁ + R₂)."
+tags = ["math", "shani", "circuit", "resistance"]
+
+[[formula]]
+id = "meas_series_resistance"
+formula_type = "math"
+domain = "Shani"
+inputs = ["r1", "r2"]
+output = "resistance"
+expression = "r1 + r2"
+description = "Equivalent resistance of two resistors in series: R₁ + R₂."
+evidence = "Kirchhoff: series resistances add directly."
+tags = ["math", "shani", "circuit", "resistance"]
