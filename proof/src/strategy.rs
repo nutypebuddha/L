@@ -539,6 +539,44 @@ use lai_core::{
     StrategyVerdict, WorldState,
 };
 
+/// Multi-word connector/function phrases that carry no domain signal and must
+/// never resolve to corpus entities (T-NEW-2), even when they happen to appear
+/// inside an entity description (e.g. an insurance description saying "coverage
+/// ... due to disability" must not let "due to" resolve to that entity).
+/// Pure function-word phrases ("has a", "in the") are already rejected by the
+/// all-stopword check; this list covers connectors built from one
+/// content-looking word plus function words ("as well as", "in order to").
+fn is_connector_phrase(phrase: &str) -> bool {
+    const CONNECTORS: &[&str] = &[
+        "as well as",
+        "in order to",
+        "in order for",
+        "due to",
+        "such as",
+        "in terms of",
+        "a lot of",
+        "lots of",
+        "kind of",
+        "sort of",
+        "more than",
+        "less than",
+        "because of",
+        "out of",
+        "up to",
+        "as a result",
+        "in addition to",
+        "as opposed to",
+        "on behalf of",
+        "regardless of",
+        "in spite of",
+        "in case of",
+        "in front of",
+        "with respect to",
+        "in accordance with",
+    ];
+    CONNECTORS.contains(&phrase)
+}
+
 /// Resolve the surface mentions in `text` against the embedded corpus entity
 /// registry. Builds n-grams (1..=3 words) so multi-word concepts like
 /// "distributed systems" are treated as one concept rather than blind tokens.
@@ -547,7 +585,9 @@ use lai_core::{
 /// - single words match only an exact entity `id`/`name` (not free-text
 ///   descriptions, which would silently resolve stopwords to facts);
 /// - multi-word phrases may match a description substring (a real concept);
-/// - stopwords and bare numbers never resolve.
+/// - stopwords, bare numbers, and pure connector/function-word phrases never
+///   resolve (T-NEW-2: "due to" must not resolve just because it appears in a
+///   description);
 ///
 /// Low-confidence or unresolved mentions are surfaced as concepts, never
 /// silently upgraded to authoritative facts.
@@ -571,6 +611,17 @@ pub fn resolve_entities(text: &str, reg: &EntityRegistry) -> Vec<EntityResolutio
                     continue;
                 }
                 if phrase.chars().all(|c| c.is_ascii_digit()) {
+                    continue;
+                }
+            } else {
+                // T-NEW-2: a multi-word candidate must carry at least one
+                // content word and must not be a pure connector phrase — "due
+                // to", "has a", "as well as", "in order to" are grammar, not
+                // domain concepts, and must never match a description substring.
+                if phrase.split_whitespace().all(crate::nlp::is_stopword) {
+                    continue;
+                }
+                if is_connector_phrase(&phrase) {
                     continue;
                 }
             }
@@ -679,6 +730,11 @@ pub fn build_world_state(text: &str, reg: &EntityRegistry, ts: Option<String>) -
                 continue;
             }
             if phrase.split_whitespace().all(crate::nlp::is_stopword) {
+                continue;
+            }
+            // T-NEW-2: connector phrases ("due to", "as well as", ...) are not
+            // critical concepts either — never surface them as unresolved.
+            if is_connector_phrase(&phrase) {
                 continue;
             }
             if !ws.concepts.contains(&phrase) {
@@ -1182,6 +1238,63 @@ mod foundation_tests {
                 .iter()
                 .any(|c| c.contains("distributed systems")),
             "unresolved multi-word phrase should surface as a concept"
+        );
+    }
+
+    /// T-NEW-2: connector phrases ("due to", "has a", "as well as", "in order
+    /// to") must never resolve to entities just because they appear inside an
+    /// entity description — the "due to -> disability_insurance" phantom.
+    #[test]
+    fn connector_phrases_never_resolve_to_entities_t_new_2() {
+        let mut reg = EntityRegistry::new();
+        reg.register_seed(seed(
+            "disability_insurance",
+            "disability insurance covers lost income due to disability",
+        ));
+        reg.register_seed(seed("ownership", "a claim on or has a stake in an asset"));
+
+        // The audit repro sentence must not produce a phantom "due to" entity.
+        let res = resolve_entities("Morale is low due to recent layoffs.", &reg);
+        assert!(
+            !res.iter().any(|r| r.mention == "due to"),
+            "connector 'due to' must not resolve, got {:?}",
+            res
+        );
+
+        // Pure connector phrases never resolve, even with an entity whose
+        // description contains the connector.
+        for phrase in ["due to", "has a", "as well as", "in order to"] {
+            let res = resolve_entities(phrase, &reg);
+            assert!(
+                !res.iter().any(|r| r.mention == phrase),
+                "connector phrase '{phrase}' must never resolve, got {:?}",
+                res
+            );
+        }
+
+        // Guard against over-filtering: real content phrases still resolve.
+        let res = resolve_entities("disability insurance", &reg);
+        assert!(
+            res.iter()
+                .any(|r| r.canonical_name == "disability_insurance"),
+            "real concept must still resolve"
+        );
+    }
+
+    /// T-NEW-2 at the world-state level: a connector phrase must never land in
+    /// `ws.entities` (and thus never reach `strategy_ir.evidence`).
+    #[test]
+    fn world_state_excludes_connector_entities_t_new_2() {
+        let mut reg = EntityRegistry::new();
+        reg.register_seed(seed(
+            "disability_insurance",
+            "disability insurance covers lost income due to disability",
+        ));
+        let ws = build_world_state("Morale is low due to recent layoffs.", &reg, None);
+        assert!(
+            !ws.entities.contains_key("due to"),
+            "connector must not be an entity, got {:?}",
+            ws.entities
         );
     }
 
