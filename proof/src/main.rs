@@ -8848,8 +8848,15 @@ fn cmd_strategy(action: StrategyAction) {
             let reg = load_entity_registry();
             let ws = laverna::strategy::build_world_state(&text, &reg, None);
             let resolutions = laverna::strategy::resolve_entities(&text, &reg);
+            let objective = ws
+                .goals
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "maximize weighted objective".to_string());
+            // Compiler-IR stage: natural language -> semantic grounding -> StrategyIR.
+            let ir = laverna::strategy::build_strategy_ir(&ws, &objective);
 
-            // --strict: refuse low-confidence semantic routing / unresolved concepts.
+            // --strict: refuse low-confidence semantic routing / unresolved critical concepts.
             if strict {
                 let weak: Vec<&str> = resolutions
                     .iter()
@@ -8873,13 +8880,38 @@ fn cmd_strategy(action: StrategyAction) {
                     }
                     std::process::exit(0);
                 }
+                if !ws.concepts.is_empty() {
+                    let value = serde_json::json!({
+                        "status": "blocked_by_unknowns",
+                        "execution": "success",
+                        "verified": false,
+                        "strategy_available": false,
+                        "unresolved_concepts": ws.concepts,
+                    });
+                    if format == OutputFormat::Json {
+                        println!("{}", serde_json::to_string(&value).unwrap());
+                    } else {
+                        println!(
+                            "Refused: unresolved critical concepts {ws_concepts:?}; strategy generation paused.",
+                            ws_concepts = ws.concepts
+                        );
+                    }
+                    std::process::exit(0);
+                }
             }
 
-            // Connect the existing deterministic optimizer (reverse-route → pillars → schema → solve).
+            // Ground the optimizer in the world model: a parsed budget constraint
+            // wins over the CLI default; the objective/constraints come from the IR.
+            let eff_budget = if ws.resources.contains_key("budget") && ws.resources["budget"] > 0.0
+            {
+                ws.resources["budget"]
+            } else {
+                budget
+            };
             let lexicon = load_lexicon_arg(&None);
             let route = run_route_with_lexicon(&text, lexicon.as_ref());
             let pillars = aggregate_pillars(&route.report, &route.matrix);
-            let schema = laverna::build::pillar_schema(&pillars, budget);
+            let schema = laverna::build::pillar_schema(&pillars, eff_budget);
             let allocations = match laverna::optimize::solve(&schema, top_k.max(1)) {
                 Ok(a) => a,
                 Err(e) => {
@@ -8887,17 +8919,10 @@ fn cmd_strategy(action: StrategyAction) {
                     std::process::exit(2);
                 }
             };
-            let objective = ws
-                .goals
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "maximize weighted objective".to_string());
             let strategies: Vec<lai_core::Strategy> = allocations
                 .iter()
                 .enumerate()
-                .map(|(i, a)| {
-                    laverna::strategy::allocation_to_strategy(a, &schema, &objective, i + 1)
-                })
+                .map(|(i, a)| laverna::strategy::allocation_to_strategy(a, &schema, &ir, i + 1))
                 .collect();
             if format == OutputFormat::Json {
                 let value = serde_json::json!({
@@ -8907,6 +8932,7 @@ fn cmd_strategy(action: StrategyAction) {
                     "strategy_available": true,
                     "objective": objective,
                     "world_state_version": ws.version,
+                    "strategy_ir": ir,
                     "strategies": strategies,
                 });
                 println!("{}", serde_json::to_string(&value).unwrap());

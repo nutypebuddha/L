@@ -533,7 +533,9 @@ pub fn reweight_pillars_with_sensor_forces(
 
 use crate::entity::EntityRegistry;
 use crate::optimize::{Allocation, Schema};
-use lai_core::{Claim, EntityResolution, EpistemicStatus, Observation, Strategy, WorldState};
+use lai_core::{
+    Claim, EntityResolution, EpistemicStatus, Observation, Strategy, StrategyIR, WorldState,
+};
 
 /// Resolve the surface mentions in `text` against the embedded corpus entity
 /// registry. Builds n-grams (1..=3 words) so multi-word concepts like
@@ -710,13 +712,15 @@ pub fn build_world_state(text: &str, reg: &EntityRegistry, ts: Option<String>) -
     ws
 }
 
-/// Convert a deterministic optimizer [`Allocation`] into a structured
-/// [`Strategy`]. The objective comes from the caller (e.g. the ingested goal);
-/// the allocation's chosen item levels become the actions.
+/// Convert a deterministic optimizer [`Allocation`] into a structured [`Strategy`],
+/// grounded in the supplied [`StrategyIR`] (objective, constraints, assumptions,
+/// entities, evidence, unknowns). The allocation's chosen item levels become the
+/// actions. This is Slice 4: the existing optimizer *consumes* the IR rather than
+/// re-deriving the world from raw text.
 pub fn allocation_to_strategy(
     alloc: &Allocation,
     schema: &Schema,
-    objective: &str,
+    ir: &StrategyIR,
     idx: usize,
 ) -> Strategy {
     let actions: Vec<String> = alloc
@@ -731,22 +735,71 @@ pub fn allocation_to_strategy(
     };
     Strategy {
         id: format!("S{idx:02}"),
-        objective: objective.to_string(),
-        assumptions: vec!["world model derived from ingested text".into()],
-        constraints: schema
-            .budget
-            .iter()
-            .map(|(k, v)| format!("{k} <= {v}"))
-            .collect(),
+        objective: ir.objective.clone(),
+        assumptions: if ir.assumptions.is_empty() {
+            vec!["world model derived from ingested text".into()]
+        } else {
+            ir.assumptions.clone()
+        },
+        constraints: if ir.hard_constraints.is_empty() {
+            schema
+                .budget
+                .iter()
+                .map(|(k, v)| format!("{k} <= {v}"))
+                .collect()
+        } else {
+            ir.hard_constraints.clone()
+        },
         actions,
         resources: schema.budget.iter().map(|(k, v)| (k.clone(), *v)).collect(),
         expected_outcomes: vec![format!("objective value {:.3}", alloc.objective)],
-        risks: vec!["depends on correctness of the ingested world model".into()],
-        dependencies: Vec::new(),
-        evidence: vec!["deterministic optimizer (Pareto frontier)".into()],
+        risks: if ir.risks.is_empty() {
+            vec!["depends on correctness of the ingested world model".into()]
+        } else {
+            ir.risks.clone()
+        },
+        dependencies: ir.dependencies.clone(),
+        evidence: {
+            let mut e = ir.evidence.clone();
+            e.push("deterministic optimizer (Pareto frontier)".into());
+            e
+        },
         confidence,
         robustness: 0.5,
     }
+}
+
+/// Build a [`StrategyIR`] from a resolved [`WorldState`]. This is the compiler-IR
+/// stage of the pipeline: natural language -> semantic grounding -> StrategyIR ->
+/// planner/optimizer. Keeps objective / hard constraints / soft constraints /
+/// assumptions / unknowns strictly separated (directive §15).
+pub fn build_strategy_ir(ws: &WorldState, objective: &str) -> StrategyIR {
+    let mut ir = StrategyIR::new(objective, ws.version);
+    ir.entities = ws.entities.clone();
+    ir.assumptions = ws.assumptions.clone();
+    ir.hard_constraints = ws.constraints.clone();
+    ir.resources = ws.resources.clone();
+    ir.goal_conditions = ws.goals.clone();
+    ir.unknowns = ws
+        .uncertainties
+        .iter()
+        .map(|u| u.question.clone())
+        .collect();
+    ir.evidence = ws
+        .observations
+        .iter()
+        .map(|o| format!("observation:{}", o.id))
+        .collect();
+    for c in &ws.claims {
+        ir.evidence.extend(c.evidence_refs.iter().cloned());
+    }
+    for con in &ws.contradictions {
+        ir.risks.push(format!(
+            "contradiction {} (severity {}) unresolved",
+            con.id, con.severity
+        ));
+    }
+    ir
 }
 
 #[cfg(test)]
@@ -1085,5 +1138,73 @@ mod foundation_tests {
         );
         assert_eq!(ws.resources.get("budget"), Some(&50.0));
         assert!(ws.entities.contains_key("surveillance capitalism"));
+    }
+}
+
+#[cfg(test)]
+mod slice3_tests {
+    use super::*;
+    use lai_core::{Observation, StrategyIR, Unknown, WorldState};
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn build_strategy_ir_carries_world_model() {
+        let mut ws = WorldState::new();
+        ws.observations.push(Observation {
+            id: "obs_1".into(),
+            content: "limit surveillance capitalism".into(),
+            source: "UserInput".into(),
+            timestamp: None,
+            reliability: 1.0,
+            context: None,
+        });
+        ws.entities.insert(
+            "surveillance capitalism".into(),
+            "surveillance_capitalism".into(),
+        );
+        ws.constraints.push("budget <= 100".into());
+        ws.resources.insert("budget".into(), 100.0);
+        ws.uncertainties.push(Unknown {
+            question: "is monitoring active?".into(),
+            impact: "high".into(),
+            urgency: "high".into(),
+            strategies_affected: 1,
+            information_gain: "high".into(),
+        });
+        let ir = build_strategy_ir(&ws, "limit exposure");
+        assert_eq!(ir.objective, "limit exposure");
+        assert_eq!(ir.initial_state_version, 1);
+        assert_eq!(
+            ir.entities.get("surveillance capitalism").unwrap(),
+            "surveillance_capitalism"
+        );
+        assert_eq!(ir.hard_constraints, vec!["budget <= 100".to_string()]);
+        assert_eq!(ir.resources.get("budget"), Some(&100.0));
+        assert_eq!(ir.unknowns, vec!["is monitoring active?".to_string()]);
+        assert!(ir.evidence.iter().any(|e| e.starts_with("observation:")));
+    }
+
+    #[test]
+    fn strategy_ir_conforms_to_directive_shape() {
+        // Sanity: StrategyIR serializes with the directive's field vocabulary.
+        let ir = StrategyIR::new("demo", 3);
+        let j = serde_json::to_string(&ir).unwrap();
+        for key in [
+            "objective",
+            "initial_state_version",
+            "goal_conditions",
+            "entities",
+            "assumptions",
+            "hard_constraints",
+            "soft_constraints",
+            "actions",
+            "resources",
+            "risks",
+            "dependencies",
+            "unknowns",
+            "evidence",
+        ] {
+            assert!(j.contains(&format!("\"{key}\"")), "missing key {key}");
+        }
     }
 }

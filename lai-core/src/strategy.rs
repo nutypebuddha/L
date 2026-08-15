@@ -384,6 +384,74 @@ impl Strategy {
     }
 }
 
+/// A first-class mathematical action (directive §16). An action transforms state;
+/// it is not prose. It carries preconditions, effects, cost, resources, risks, and
+/// the evidence it rests on so a strategy becomes a graph of state transitions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Action {
+    pub id: String,
+    pub name: String,
+    /// Conditions that must hold before the action applies.
+    pub preconditions: Vec<String>,
+    /// Effects the action produces on the world state.
+    pub effects: Vec<String>,
+    pub cost: f64,
+    /// Resource consumption keyed by resource name.
+    pub resources: BTreeMap<String, f64>,
+    pub duration: Option<String>,
+    pub risks: Vec<String>,
+    pub dependencies: Vec<String>,
+    /// "reversible" | "irreversible" | None (unknown).
+    pub reversibility: Option<String>,
+    pub evidence: Vec<String>,
+}
+
+/// The internal compiler-IR of a strategy (directive §14). Natural language must
+/// not flow directly into the optimizer; it flows through semantic grounding into
+/// this structure, which the planner/optimizer then consumes. Objective, hard
+/// constraints, soft constraints, assumptions, and unknowns are kept strictly
+/// separate (§15).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StrategyIR {
+    pub objective: String,
+    /// Version of the [`WorldState`] this IR was derived from.
+    pub initial_state_version: u64,
+    pub goal_conditions: Vec<String>,
+    /// Resolved entity mention -> canonical name.
+    pub entities: BTreeMap<String, String>,
+    pub assumptions: Vec<String>,
+    pub hard_constraints: Vec<String>,
+    pub soft_constraints: Vec<String>,
+    pub actions: Vec<Action>,
+    pub resources: BTreeMap<String, f64>,
+    pub risks: Vec<String>,
+    pub dependencies: Vec<String>,
+    /// Open questions that, if answered, could change the strategy.
+    pub unknowns: Vec<String>,
+    pub evidence: Vec<String>,
+}
+
+impl StrategyIR {
+    /// Empty IR for a given objective, derived from world-state version `version`.
+    pub fn new(objective: &str, version: u64) -> Self {
+        StrategyIR {
+            objective: objective.to_string(),
+            initial_state_version: version,
+            goal_conditions: Vec::new(),
+            entities: BTreeMap::new(),
+            assumptions: Vec::new(),
+            hard_constraints: Vec::new(),
+            soft_constraints: Vec::new(),
+            actions: Vec::new(),
+            resources: BTreeMap::new(),
+            risks: Vec::new(),
+            dependencies: Vec::new(),
+            unknowns: Vec::new(),
+            evidence: Vec::new(),
+        }
+    }
+}
+
 /// Final status of a strategy after Gate (matches the directive's vocabulary).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

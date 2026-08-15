@@ -16,6 +16,6 @@ pub use primitive::{
     xor, ExprNode, NandDag, NandExprError, NandExpression, NandNode,
 };
 pub use strategy::{
-    Claim, Contradiction, ContradictionStatus, EntityResolution, EpistemicStatus, Evidence,
-    Observation, StateDelta, Strategy, StrategyVerdict, Unknown, WorldState,
+    Action, Claim, Contradiction, ContradictionStatus, EntityResolution, EpistemicStatus, Evidence,
+    Observation, StateDelta, Strategy, StrategyIR, StrategyVerdict, Unknown, WorldState,
 };
