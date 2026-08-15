@@ -535,7 +535,8 @@ pub fn reweight_pillars_with_sensor_forces(
 use crate::entity::EntityRegistry;
 use crate::optimize::{Allocation, Schema};
 use lai_core::{
-    Action, Claim, EntityResolution, EpistemicStatus, Observation, Strategy, StrategyIR, WorldState,
+    Action, Claim, EntityResolution, EpistemicStatus, Observation, Strategy, StrategyIR,
+    StrategyVerdict, WorldState,
 };
 
 /// Resolve the surface mentions in `text` against the embedded corpus entity
@@ -839,6 +840,34 @@ pub fn strategy_to_actions(s: &Strategy) -> Vec<Action> {
         });
     }
     out
+}
+
+/// Synthesize a single [`StrategyVerdict`] from the StrategyIR context, the
+/// deterministic simulation result, and the legacy Gate tri-state (directive §7).
+/// Precedence: simulation violations reject; world contradictions block; a flagged
+/// Gate blocks (it found a real problem); open unknowns block (correct operation
+/// needs more information); an unevaluable Gate (`cant_check`) does NOT block —
+/// it merely means nothing could be judged, so we fall through to the simulation/
+/// assumption-based verdict. Assumption-bearing strategies are conditionally
+/// verified; fully-grounded ones verified.
+pub fn synthesize_verdict(
+    sim_violations: &[String],
+    unknown_count: usize,
+    contradiction_count: usize,
+    gate_state: &str,
+    has_assumptions: bool,
+) -> StrategyVerdict {
+    if !sim_violations.is_empty() {
+        StrategyVerdict::Rejected
+    } else if contradiction_count > 0 || gate_state == "flagged" {
+        StrategyVerdict::BlockedByContradiction
+    } else if unknown_count > 0 {
+        StrategyVerdict::BlockedByUnknowns
+    } else if has_assumptions {
+        StrategyVerdict::ConditionallyVerified
+    } else {
+        StrategyVerdict::Verified
+    }
 }
 
 #[cfg(test)]
@@ -1245,5 +1274,48 @@ mod slice3_tests {
         ] {
             assert!(j.contains(&format!("\"{key}\"")), "missing key {key}");
         }
+    }
+}
+
+#[cfg(test)]
+mod verify_tests {
+    use super::*;
+    use lai_core::StrategyVerdict;
+
+    #[test]
+    fn synthesis_rejects_on_simulation_violation() {
+        assert_eq!(
+            synthesize_verdict(&["unmet precondition: x".into()], 0, 0, "verified", true),
+            StrategyVerdict::Rejected
+        );
+    }
+
+    #[test]
+    fn synthesis_blocks_on_world_contradiction_and_unknowns() {
+        assert_eq!(
+            synthesize_verdict(&[], 0, 1, "verified", true),
+            StrategyVerdict::BlockedByContradiction
+        );
+        assert_eq!(
+            synthesize_verdict(&[], 1, 0, "verified", true),
+            StrategyVerdict::BlockedByUnknowns
+        );
+        // An unevaluable Gate does NOT block; it falls through to conditional/verified.
+        assert_eq!(
+            synthesize_verdict(&[], 0, 0, "cant_check", true),
+            StrategyVerdict::ConditionallyVerified
+        );
+    }
+
+    #[test]
+    fn synthesis_verified_when_grounded_no_assumptions() {
+        assert_eq!(
+            synthesize_verdict(&[], 0, 0, "verified", false),
+            StrategyVerdict::Verified
+        );
+        assert_eq!(
+            synthesize_verdict(&[], 0, 0, "verified", true),
+            StrategyVerdict::ConditionallyVerified
+        );
     }
 }

@@ -625,10 +625,14 @@ enum StrategyAction {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    /// Verify a strategy JSON file against Gate (tri-state verdict).
+    /// Verify a strategy JSON file against Gate (tri-state verdict), now grounded
+    /// in its StrategyIR and deterministic simulation (directive §7).
     Verify {
         /// Strategy JSON file
         path: PathBuf,
+        /// Optional world-state JSON providing unknowns/contradictions context.
+        #[arg(long)]
+        world: Option<PathBuf>,
         /// Output format: json (default) or text
         #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
         format: OutputFormat,
@@ -9000,39 +9004,104 @@ fn cmd_strategy(action: StrategyAction) {
                 println!("Dominant: {dom}");
             }
         }
-        StrategyAction::Verify { path, format } => {
+        StrategyAction::Verify {
+            path,
+            world,
+            format,
+        } => {
             use cid::inference::{InferenceEngine, ValidationRequest};
             let s = read_strategy(&path);
+            let ws = world.as_ref().map(read_world_state);
+            // Build the StrategyIR the Gate validates against.
+            let ir = match &ws {
+                Some(w) => laverna::strategy::build_strategy_ir(w, &s.objective),
+                None => {
+                    let mut ir = lai_core::StrategyIR::new(&s.objective, 1);
+                    ir.hard_constraints = s.constraints.clone();
+                    ir.resources = s.resources.clone();
+                    ir.assumptions = s.assumptions.clone();
+                    ir.evidence = s.evidence.clone();
+                    ir
+                }
+            };
+            // Seed the simulation envelope from the strategy when no world is given,
+            // then run the deterministic simulator (directive §7: Gate validates
+            // simulated results too).
+            let init = match &ws {
+                Some(w) => w.clone(),
+                None => {
+                    let mut w = lai_core::WorldState::new();
+                    for c in &s.constraints {
+                        w.constraints.push(c.clone());
+                    }
+                    for (k, v) in &s.resources {
+                        w.resources.insert(k.clone(), *v);
+                    }
+                    w
+                }
+            };
+            let actions = laverna::strategy::strategy_to_actions(&s);
+            let transitions = lai_core::simulate_sequence(&init, &actions);
+            let sim_violations: Vec<String> = transitions
+                .iter()
+                .flat_map(|t| t.violations.iter().cloned())
+                .collect();
+            let unknown_count = ws.as_ref().map(|w| w.uncertainties.len()).unwrap_or(0);
+            let contradiction_count = ws.as_ref().map(|w| w.contradictions.len()).unwrap_or(0);
+
+            // Legacy Gate over the strategy claim.
             let claim = format!("{} | actions: {}", s.objective, s.actions.join("; "));
             let mut engine = InferenceEngine::new();
             let request = ValidationRequest::new(&claim, &s.id);
-            match engine.validate(request) {
-                Ok(result) => {
-                    let verdict = match result.tri_state().as_str() {
-                        "verified" => "verified",
-                        "cant_check" => "blocked_by_unknowns",
-                        "flagged" => "blocked_by_contradiction",
-                        other => other,
-                    };
-                    if format == OutputFormat::Json {
-                        let value = serde_json::json!({
-                            "strategy_id": s.id,
-                            "verdict": verdict,
-                            "tri_state": result.tri_state().as_str(),
-                            "confidence": result.confidence,
-                            "policy": result.policy.map(|p| p.as_str()),
-                        });
-                        println!("{}", serde_json::to_string(&value).unwrap());
-                    } else {
-                        println!("Strategy {} — Gate verdict: {}", s.id, verdict);
-                        println!("  tri_state : {}", result.tri_state().as_str());
-                        println!("  confidence: {:.4}", result.confidence);
-                    }
-                }
+            let (gate_state, gate_conf) = match engine.validate(request) {
+                Ok(r) => (r.tri_state().as_str().to_string(), r.confidence),
                 Err(e) => {
                     eprintln!("error: {e}");
                     std::process::exit(1);
                 }
+            };
+
+            // Synthesize one StrategyVerdict over IR + simulation + Gate.
+            let verdict = laverna::strategy::synthesize_verdict(
+                &sim_violations,
+                unknown_count,
+                contradiction_count,
+                &gate_state,
+                s.assumptions.iter().any(|a| !a.is_empty()),
+            );
+
+            if format == OutputFormat::Json {
+                let value = serde_json::json!({
+                    "strategy_id": s.id,
+                    "verdict": verdict.label(),
+                    "gate_tri_state": gate_state,
+                    "gate_confidence": gate_conf,
+                    "simulation_violations": sim_violations,
+                    "unknown_count": unknown_count,
+                    "contradiction_count": contradiction_count,
+                    "strategy_ir": ir,
+                    "world_state_version": init.version,
+                });
+                println!("{}", serde_json::to_string(&value).unwrap());
+            } else {
+                println!("Strategy {} — verdict: {}", s.id, verdict.label());
+                println!("  gate tri_state : {}", gate_state);
+                println!("  gate confidence: {:.4}", gate_conf);
+                println!(
+                    "  simulation     : {} transition(s), {} violation(s)",
+                    transitions.len(),
+                    sim_violations.len()
+                );
+                for v in &sim_violations {
+                    println!("    ! {v}");
+                }
+                println!("  unknowns       : {}", unknown_count);
+                println!("  contradictions : {}", contradiction_count);
+                println!(
+                    "  strategy IR    : objective={}, constraints={}",
+                    ir.objective,
+                    ir.hard_constraints.len()
+                );
             }
         }
         StrategyAction::Explain { path } => {
