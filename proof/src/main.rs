@@ -154,7 +154,8 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
         /// Optional runtime keyword→domain lexicon TOML (T110) — teach the
-        /// router vocabulary for a new/"alien" topic without a rebuild. Only
+        /// router vocabulary for a new/"alien" topic without a rebuild. Matches
+        /// single words and multi-word phrases (exact, case-insensitive). Only
         /// fills gaps the built-in table leaves unresolved; run
         /// `lai schema lexicon` for the format.
         #[arg(short = 'L', long = "lexicon")]
@@ -322,7 +323,8 @@ enum Commands {
         #[arg(short = 'F', long = "forces")]
         forces: Option<String>,
         /// Optional runtime keyword→domain lexicon TOML (T110) — teach the
-        /// router vocabulary for a new/"alien" topic without a rebuild. Only
+        /// router vocabulary for a new/"alien" topic without a rebuild. Matches
+        /// single words and multi-word phrases (exact, case-insensitive). Only
         /// fills gaps the built-in table leaves unresolved; run
         /// `lai schema lexicon` for the format.
         #[arg(short = 'L', long = "lexicon")]
@@ -5912,10 +5914,7 @@ fn resolve_domain_profile_path(arg: &str) -> String {
         format!("{arg}.toml")
     };
     let mut candidates: Vec<String> = vec![name.clone(), format!("domains/{name}")];
-    candidates.push(format!(
-        "{}/domains/{name}",
-        env!("CARGO_MANIFEST_DIR")
-    ));
+    candidates.push(format!("{}/domains/{name}", env!("CARGO_MANIFEST_DIR")));
     if let Ok(home) = std::env::var("HOME") {
         candidates.push(format!("{home}/.laverna/domains/{name}"));
     }

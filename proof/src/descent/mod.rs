@@ -1478,7 +1478,8 @@ impl DescentEngine {
         let mut entity_cache = std::collections::HashMap::new();
         let mut settled: Vec<SettledToken> = tokens
             .iter()
-            .map(|t| self.descent_token(t, &tokens, &mut entity_cache))
+            .enumerate()
+            .map(|(i, t)| self.descent_token(t, i, &tokens, &mut entity_cache))
             .collect();
 
         // Phase 3: Constraint propagation — propagate shared domains/formulas
@@ -1508,7 +1509,8 @@ impl DescentEngine {
         let mut entity_cache = std::collections::HashMap::new();
         let mut settled: Vec<SettledToken> = tokens
             .iter()
-            .map(|t| self.descent_token(t, &tokens, &mut entity_cache))
+            .enumerate()
+            .map(|(i, t)| self.descent_token(t, i, &tokens, &mut entity_cache))
             .collect();
 
         // Phase 3: Constraint propagation
@@ -1627,6 +1629,7 @@ impl DescentEngine {
     fn descent_token(
         &self,
         token: &str,
+        idx: usize,
         all_tokens: &[&str],
         entity_cache: &mut std::collections::HashMap<String, DynamicEntity>,
     ) -> SettledToken {
@@ -1693,7 +1696,7 @@ impl DescentEngine {
         // Only do keyword-based domain classification if entity/formula lookup didn't resolve it.
         // This prevents "mercury" (the element) from keyword-matching to "mercury" (the planet).
         if st.domains.is_empty() {
-            self.resolve_domain(&mut st, entity_cache);
+            self.resolve_domain(&mut st, entity_cache, all_tokens, idx);
         }
         if st.domains.is_empty() {
             // Couldn't even resolve domain — float at Macro
@@ -1873,6 +1876,8 @@ impl DescentEngine {
         &self,
         st: &mut SettledToken,
         entity_cache: &mut std::collections::HashMap<String, DynamicEntity>,
+        all_tokens: &[&str],
+        idx: usize,
     ) {
         let token_lower = st.text.to_lowercase();
 
@@ -1925,22 +1930,36 @@ impl DescentEngine {
         // lexicon specified. Mirrors the dynamic-entity branch above, which
         // sets both fields for exactly this reason.
         if st.domains.is_empty() {
-            if let Some(entry) = self
-                .lexicon
-                .as_ref()
-                .and_then(|lex| lex.lookup(&token_lower))
-            {
-                st.domains.push(entry.domain);
-                st.vedic_classification = st
-                    .vedic_classification
-                    .clone()
-                    .with_graha(entry.domain, entry.weight);
-                st.confidence = entry.weight;
-                st.provenance.push(ProvenanceStep::DomainClassification {
-                    domain: entry.domain.full_name_lower().to_string(),
-                    keyword: format!("{token_lower} [runtime lexicon]"),
-                    confidence: entry.weight,
-                });
+            if let Some(lex) = self.lexicon.as_ref() {
+                // Phrase-level match first: a multi-word span starting at this
+                // token (e.g. "personal finance") wins over a coincidental
+                // single-token hit. Falls back to the whole-word lookup.
+                if let Some((span, entry)) = lex.lookup_phrase(&all_tokens[idx..]) {
+                    let phrase = all_tokens[idx..idx + span].join(" ");
+                    st.domains.push(entry.domain);
+                    st.vedic_classification = st
+                        .vedic_classification
+                        .clone()
+                        .with_graha(entry.domain, entry.weight);
+                    st.confidence = entry.weight;
+                    st.provenance.push(ProvenanceStep::DomainClassification {
+                        domain: entry.domain.full_name_lower().to_string(),
+                        keyword: format!("{phrase} [runtime lexicon phrase]"),
+                        confidence: entry.weight,
+                    });
+                } else if let Some(entry) = lex.lookup(&token_lower) {
+                    st.domains.push(entry.domain);
+                    st.vedic_classification = st
+                        .vedic_classification
+                        .clone()
+                        .with_graha(entry.domain, entry.weight);
+                    st.confidence = entry.weight;
+                    st.provenance.push(ProvenanceStep::DomainClassification {
+                        domain: entry.domain.full_name_lower().to_string(),
+                        keyword: format!("{token_lower} [runtime lexicon]"),
+                        confidence: entry.weight,
+                    });
+                }
             }
         }
 
@@ -2541,7 +2560,7 @@ mod tests {
         let tokens: Vec<&str> = vec!["what", "is", "the", "mass", "of", "an", "electron"];
         let mut entity_cache = std::collections::HashMap::new();
         for token in &tokens {
-            let st = engine.descent_token(token, &tokens, &mut entity_cache);
+            let st = engine.descent_token(token, 0, &tokens, &mut entity_cache);
             // Every token should at least attempt domain resolution
             assert!(!st.text.is_empty());
         }
@@ -2600,7 +2619,7 @@ mod tests {
         let engine = test_engine();
         let tokens: Vec<&str> = vec!["calculate"];
         let mut entity_cache = std::collections::HashMap::new();
-        let st = engine.descent_token("calculate", &tokens, &mut entity_cache);
+        let st = engine.descent_token("calculate", 0, &tokens, &mut entity_cache);
         // "calculate" should at least hit Domain (Aries - Math)
         assert!(st.settled_layer >= DescentLayer::Domain);
         assert!(!st.domains.is_empty());
