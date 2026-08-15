@@ -533,7 +533,7 @@ pub fn reweight_pillars_with_sensor_forces(
 
 use crate::entity::EntityRegistry;
 use crate::optimize::{Allocation, Schema};
-use lai_core::{EntityResolution, EpistemicStatus, Fact, Strategy, WorldState};
+use lai_core::{Claim, EntityResolution, EpistemicStatus, Observation, Strategy, WorldState};
 
 /// Resolve the surface mentions in `text` against the embedded corpus entity
 /// registry. Builds n-grams (1..=3 words) so multi-word concepts like
@@ -682,12 +682,23 @@ pub fn build_world_state(text: &str, reg: &EntityRegistry, ts: Option<String>) -
             }
         }
     }
-    ws.observations.push(text.to_string());
-    ws.facts.push(Fact {
+    ws.observations.push(Observation {
         id: "obs_1".into(),
+        content: text.to_string(),
+        source: "UserInput".into(),
+        timestamp: ts.clone(),
+        reliability: 1.0,
+        context: None,
+    });
+    ws.claims.push(Claim {
+        id: "claim_1".into(),
         statement: text.to_string(),
         status: EpistemicStatus::Observed,
         evidence_refs: res.iter().map(|r| r.canonical_name.clone()).collect(),
+        dependencies: vec![],
+        source: Some("observation".into()),
+        timestamp: ts.clone(),
+        confidence: 1.0,
     });
     let (budget, constraints) = parse_resource_constraints(text);
     if budget > 0.0 {

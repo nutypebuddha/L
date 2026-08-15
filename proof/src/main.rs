@@ -8819,7 +8819,7 @@ fn cmd_strategy(action: StrategyAction) {
                     "unresolved_concepts": ws.concepts.len(),
                     "constraints": ws.constraints,
                     "resources": ws.resources,
-                    "facts": ws.facts.len(),
+                    "claims": ws.claims.len(),
                     "uncertainties": unknowns,
                 });
                 println!("{}", serde_json::to_string(&value).unwrap());
@@ -8829,7 +8829,7 @@ fn cmd_strategy(action: StrategyAction) {
                 println!("  unresolved concepts: {}", ws.concepts.len());
                 println!("  constraints       : {:?}", ws.constraints);
                 println!("  resources         : {:?}", ws.resources);
-                println!("  facts             : {}", ws.facts.len());
+                println!("  claims            : {}", ws.claims.len());
                 for (m, c) in &ws.entities {
                     println!("    resolved: {m} -> {c}");
                 }
@@ -9004,7 +9004,7 @@ fn print_world_state(ws: &lai_core::WorldState, format: OutputFormat) {
         println!("  concepts: {:?}", ws.concepts);
         println!("  constraints: {:?}", ws.constraints);
         println!("  resources: {:?}", ws.resources);
-        println!("  facts: {}", ws.facts.len());
+        println!("  claims: {}", ws.claims.len());
     }
 }
 
