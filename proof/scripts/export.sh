@@ -33,9 +33,16 @@ FEATURES="mcp websearch budget llm milp graph"
 DEST="$BIN_DIR/lai-x86_64"
 
 MUSL_SYSROOT="/opt/x86_64-linux-musl-cross/x86_64-linux-musl"
-HOST_X86_64_GCC="$(command -v x86_64-linux-gnu-gcc || true)"
+
+# Locate the aarch64-native, x86_64-targeting C toolchain. Either the classic
+# x86_64-linux-gnu-* (glibc-headed, musl sysroot) or the musl-cross-make
+# toolchain (x86_64-linux-musl-*, at /opt/x86_64-linux-musl-cross) installed
+# when the former is absent.
+TOOLCHAIN_BIN="/opt/x86_64-linux-musl-cross/bin"
+[ -d "$TOOLCHAIN_BIN" ] && PATH="$TOOLCHAIN_BIN:$PATH"
+HOST_X86_64_GCC="$(command -v x86_64-linux-gnu-gcc || command -v x86_64-linux-musl-gcc || true)"
 if [ -z "$HOST_X86_64_GCC" ]; then
-    echo "error: x86_64-linux-gnu-gcc (aarch64-native, x86_64-targeting) not found" >&2
+    echo "error: x86_64-linux-gnu-gcc / x86_64-linux-musl-gcc (aarch64-native, x86_64-targeting) not found" >&2
     exit 1
 fi
 
@@ -43,7 +50,7 @@ fi
 # are untouched. The musl target's C compiler + linker is the native
 # x86_64-targeting gcc, told to use the musl sysroot and link statically.
 export CC_x86_64_unknown_linux_musl="$HOST_X86_64_GCC"
-export AR_x86_64_unknown_linux_musl="$(command -v x86_64-linux-gnu-ar || command -v ar)"
+export AR_x86_64_unknown_linux_musl="$(command -v x86_64-linux-gnu-ar || command -v x86_64-linux-musl-ar || command -v ar)"
 export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER="$HOST_X86_64_GCC"
 export CFLAGS_x86_64_unknown_linux_musl="--sysroot=$MUSL_SYSROOT -static"
 export CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static -C link-arg=--sysroot=$MUSL_SYSROOT -C link-arg=-static"
