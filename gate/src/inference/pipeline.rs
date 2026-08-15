@@ -1,8 +1,9 @@
 use super::request::ValidationRequest;
-use super::result::{CidError, CidResult, GateScore, ValidationResult};
+use super::result::{CidError, CidResult, GateScore, ValidationResult, ValidationVerdict};
 use crate::core::ball::{Ball, TokenCandidate};
 use crate::core::pin::PinField;
 use crate::core::pocket::Pocket;
+use crate::core::policy::Policy;
 use crate::economy::budget::Budget;
 use crate::economy::tray::BallEconomy;
 use crate::gates::validate_candidate;
@@ -82,7 +83,7 @@ impl Pipeline {
                 .map(|b| b.candidate.token.clone())
                 .unwrap_or_else(|| request.text.clone());
 
-            let gate_scores = candidates
+            let gate_scores: Vec<GateScore> = candidates
                 .first()
                 .map(|b| {
                     b.gate_results
@@ -96,10 +97,25 @@ impl Pipeline {
 
             let passed = candidates.iter().any(|b| b.validated);
 
+            let policy: Option<Policy> = gate_scores.iter().find_map(|g| g.policy);
+            let claim_id = gate_scores.iter().find_map(|g| g.claim_id.clone());
+            let corrected = gate_scores.iter().find_map(|g| g.corrected_value.clone());
+
             result = result
                 .with_gate_scores(gate_scores)
                 .with_confidence(confidence)
-                .with_passed(passed);
+                .with_passed(passed)
+                .with_policy(policy)
+                .with_claim_id(claim_id)
+                .with_corrected_value(corrected);
+
+            if result.verdict() == ValidationVerdict::Corrected && result.corrected_value.is_none()
+            {
+                if let Some(fix) = result.fixes.first() {
+                    let corrected = fix.fixed.clone();
+                    result = result.with_corrected_value(Some(corrected));
+                }
+            }
 
             if passed {
                 result.validated_text = validated_text;
@@ -108,7 +124,7 @@ impl Pipeline {
             let ball =
                 self.validate_single_token(&request.text, &request.context, &request.text)?;
 
-            let gate_scores = ball
+            let gate_scores: Vec<GateScore> = ball
                 .gate_results
                 .iter()
                 .map(GateScore::from_gate_result)
@@ -116,10 +132,25 @@ impl Pipeline {
             let confidence = ball.total_score;
             let passed = ball.validated;
 
+            let policy: Option<Policy> = gate_scores.iter().find_map(|g| g.policy);
+            let claim_id = gate_scores.iter().find_map(|g| g.claim_id.clone());
+            let corrected = gate_scores.iter().find_map(|g| g.corrected_value.clone());
+
             result = result
                 .with_gate_scores(gate_scores)
                 .with_confidence(confidence)
-                .with_passed(passed);
+                .with_passed(passed)
+                .with_policy(policy)
+                .with_claim_id(claim_id)
+                .with_corrected_value(corrected);
+
+            if result.verdict() == ValidationVerdict::Corrected && result.corrected_value.is_none()
+            {
+                if let Some(fix) = result.fixes.first() {
+                    let corrected = fix.fixed.clone();
+                    result = result.with_corrected_value(Some(corrected));
+                }
+            }
 
             if passed {
                 result.validated_text = request.text.clone();

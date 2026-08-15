@@ -8426,6 +8426,10 @@ fn cmd_gate_validate(text: &str, context: &str, domain: Option<&str>, format: Ou
                     "original_text": result.original_text,
                     "confidence": result.confidence,
                     "verdict": result.verdict().as_str(),
+                    "tri_state": result.tri_state().as_str(),
+                    "policy": result.policy.map(|p| p.as_str()),
+                    "claim_id": result.claim_id,
+                    "corrected_value": result.corrected_value,
                     "fix_count": result.fix_count(),
                     "state": format!("{:?}", result.state),
                     "cost_usd": result.cost_usd,
@@ -8435,6 +8439,16 @@ fn cmd_gate_validate(text: &str, context: &str, domain: Option<&str>, format: Ou
                 println!("Validated: {}", result.validated_text);
                 println!("Confidence: {:.4}", result.confidence);
                 println!("Verdict: {}", result.verdict().as_str());
+                println!("Tri-state: {}", result.tri_state().as_str());
+                if let Some(p) = result.policy {
+                    println!("Policy: {}", p.as_str());
+                }
+                if let Some(id) = &result.claim_id {
+                    println!("Claim id: {}", id);
+                }
+                if let Some(c) = &result.corrected_value {
+                    println!("Corrected value: {}", c);
+                }
                 println!("Fixes: {}", result.fix_count());
                 println!("State: {:?}", result.state);
                 println!("Cost: ${:.6}", result.cost_usd);
@@ -8522,6 +8536,8 @@ fn cmd_gate_score(text: &str, context: Option<&str>, format: OutputFormat) {
             })
             .collect();
         let value = serde_json::json!({
+            "scope": "structural-quality",
+            "truth_signal": false,
             "overall_score": report.overall_score,
             "confidence": report.confidence,
             "action": format!("{:?}", report.action),
@@ -8529,7 +8545,11 @@ fn cmd_gate_score(text: &str, context: Option<&str>, format: OutputFormat) {
         });
         println!("{}", serde_json::to_string(&value).unwrap());
     } else {
-        println!("Quality Score: {:.2}", report.overall_score);
+        println!(
+            "Structural Quality (NOT a truth signal): {:.2}",
+            report.overall_score
+        );
+        println!("Scope: structural-quality — rhetorical/structural, never a truth verdict");
         println!("Confidence: {:.2}", report.confidence);
         println!("Action: {:?}", report.action);
         if !report.issues.is_empty() {

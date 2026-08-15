@@ -1,5 +1,6 @@
 use crate::core::ball::GateResult;
 use crate::core::pin::Gate;
+use crate::core::policy::Policy;
 use crate::state::machine::State;
 
 /// Stable, machine-classifiable outcome of a validation (Item 3). Replaces the
@@ -32,6 +33,36 @@ impl ValidationVerdict {
     }
 }
 
+/// PCN tri-state presentation of a [`ValidationVerdict`] (tri-state gate,
+/// Stage 1). This is the *human/renderer-facing* summary; `verdict` remains the
+/// stable machine contract and is never removed.
+///
+/// - `verified` — the claim reduced to a Tanto computation or matched a corpus
+///   claim under a declared [`Policy`] (carries `policy` + `claim_id`).
+/// - `cant_check` — outside corpus / not reducible to Tanto; L abstains rather
+///   than guess (maps from `Unevaluable`).
+/// - `flagged` — checked and failed; carries `corrected_value` (maps from
+///   `Failed`). A `Corrected` verdict (L silently fixed the claim) is reported
+///   as `verified` — the claim is now in a good state — with `corrected_value`
+///   populated from the applied fix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TriState {
+    Verified,
+    CantCheck,
+    Flagged,
+}
+
+impl TriState {
+    /// Stable string form (tri-state contract). Lowercase, never changes.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TriState::Verified => "verified",
+            TriState::CantCheck => "cant_check",
+            TriState::Flagged => "flagged",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ValidationResult {
     pub validated_text: String,
@@ -43,6 +74,12 @@ pub struct ValidationResult {
     pub gate_scores: Vec<GateScore>,
     pub state: State,
     pub cost_usd: f64,
+    /// PCN policy under which the claim was verified, if known (tri-state).
+    pub policy: Option<Policy>,
+    /// Corpus claim id the verified claim matched, if known (tri-state).
+    pub claim_id: Option<String>,
+    /// The value a `flagged` claim should have had (tri-state correction).
+    pub corrected_value: Option<String>,
 }
 
 impl ValidationResult {
@@ -76,6 +113,9 @@ impl ValidationResult {
             gate_scores: Vec::new(),
             state: State::Normal,
             cost_usd: 0.0,
+            policy: None,
+            claim_id: None,
+            corrected_value: None,
         }
     }
 
@@ -111,6 +151,35 @@ impl ValidationResult {
 
     pub fn with_cost(mut self, cost_usd: f64) -> Self {
         self.cost_usd = cost_usd;
+        self
+    }
+
+    /// PCN tri-state summary derived from the stable [`ValidationVerdict`].
+    /// `verdict` stays the machine contract; `tri_state` is the renderer-facing
+    /// `verified` / `cant_check` / `flagged` view.
+    pub fn tri_state(&self) -> TriState {
+        match self.verdict() {
+            ValidationVerdict::Ok | ValidationVerdict::Corrected => TriState::Verified,
+            ValidationVerdict::Failed => TriState::Flagged,
+            ValidationVerdict::Unevaluable => TriState::CantCheck,
+        }
+    }
+
+    /// Attach the PCN policy the verified claim was checked under.
+    pub fn with_policy(mut self, policy: Option<Policy>) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Attach the corpus claim id the verified claim matched.
+    pub fn with_claim_id(mut self, claim_id: Option<String>) -> Self {
+        self.claim_id = claim_id;
+        self
+    }
+
+    /// Attach the value a `flagged` claim should have had.
+    pub fn with_corrected_value(mut self, corrected: Option<String>) -> Self {
+        self.corrected_value = corrected;
         self
     }
 
@@ -159,6 +228,12 @@ pub struct GateScore {
     pub passed: bool,
     pub score: f64,
     pub details: String,
+    /// PCN policy this gate verified under, if it performed a policy comparison.
+    pub policy: Option<Policy>,
+    /// Corpus claim id matched, if any.
+    pub claim_id: Option<String>,
+    /// Corrected value for a `flagged` outcome, if known.
+    pub corrected_value: Option<String>,
 }
 
 impl GateScore {
@@ -168,6 +243,9 @@ impl GateScore {
             passed: result.passed,
             score: result.score,
             details: result.reason.clone().unwrap_or_default(),
+            policy: result.policy,
+            claim_id: result.claim_id.clone(),
+            corrected_value: result.corrected_value.clone(),
         }
     }
 
@@ -177,6 +255,9 @@ impl GateScore {
             passed: true,
             score,
             details: details.to_string(),
+            policy: None,
+            claim_id: None,
+            corrected_value: None,
         }
     }
 
@@ -186,6 +267,9 @@ impl GateScore {
             passed: false,
             score,
             details: details.to_string(),
+            policy: None,
+            claim_id: None,
+            corrected_value: None,
         }
     }
 }
@@ -287,5 +371,27 @@ mod tests {
         assert_eq!(ValidationVerdict::Corrected.as_str(), "corrected");
         assert_eq!(ValidationVerdict::Failed.as_str(), "failed");
         assert_eq!(ValidationVerdict::Unevaluable.as_str(), "unevaluable");
+    }
+
+    #[test]
+    fn tri_state_maps_verdict() {
+        // The tri-state is a renderer-facing view of the stable verdict.
+        // ok / corrected -> verified; failed -> flagged; unevaluable -> cant_check.
+        assert_eq!(ValidationResult::new("x").tri_state(), TriState::CantCheck);
+        assert_eq!(
+            with_gate().with_passed(true).tri_state(),
+            TriState::Verified
+        );
+        let corrected = with_gate().with_passed(true).with_fixes(vec![TokenFix::new(
+            "2+2=5",
+            "2+2=4",
+            "arithmetic",
+            0.9,
+        )]);
+        assert_eq!(corrected.tri_state(), TriState::Verified);
+        assert_eq!(
+            with_gate().with_passed(false).tri_state(),
+            TriState::Flagged
+        );
     }
 }

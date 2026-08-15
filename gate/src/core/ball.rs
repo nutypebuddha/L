@@ -64,6 +64,13 @@ pub struct GateResult {
     pub outcome: GateOutcome,
     pub score: f64,
     pub reason: Option<String>,
+    /// PCN comparison policy under which a claim was verified, if this gate
+    /// performed a policy-bounded comparison (tri-state gate, Stage 1).
+    pub policy: Option<super::policy::Policy>,
+    /// Corpus claim id the gate matched against, if any (tri-state provenance).
+    pub claim_id: Option<String>,
+    /// The value a `Flagged` claim should have had (tri-state correction).
+    pub corrected_value: Option<String>,
 }
 
 impl GateResult {
@@ -74,6 +81,9 @@ impl GateResult {
             outcome: GateOutcome::Pass,
             score,
             reason: None,
+            policy: None,
+            claim_id: None,
+            corrected_value: None,
         }
     }
 
@@ -84,6 +94,9 @@ impl GateResult {
             outcome: GateOutcome::Fail,
             score,
             reason: Some(reason.to_string()),
+            policy: None,
+            claim_id: None,
+            corrected_value: None,
         }
     }
 
@@ -97,7 +110,28 @@ impl GateResult {
             outcome: GateOutcome::Unevaluable,
             score,
             reason: Some(reason.to_string()),
+            policy: None,
+            claim_id: None,
+            corrected_value: None,
         }
+    }
+
+    /// Attach the PCN policy under which this gate verified the claim.
+    pub fn with_policy(mut self, policy: super::policy::Policy) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
+    /// Attach the corpus claim id this gate matched against.
+    pub fn with_claim_id(mut self, claim_id: String) -> Self {
+        self.claim_id = Some(claim_id);
+        self
+    }
+
+    /// Attach the value a `Flagged` claim should have had.
+    pub fn with_corrected(mut self, corrected: String) -> Self {
+        self.corrected_value = Some(corrected);
+        self
     }
 }
 

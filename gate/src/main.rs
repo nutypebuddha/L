@@ -160,6 +160,21 @@ fn main() {
                         let confidence = result.confidence;
                         let verdict = result.verdict().as_str().to_string();
                         let fix_count = result.fix_count() as f64;
+                        let tri_state = result.tri_state().as_str().to_string();
+                        let policy = result
+                            .policy
+                            .map(|p| JsonValue::Str(p.as_str().to_string()))
+                            .unwrap_or(JsonValue::Null);
+                        let claim_id = result
+                            .claim_id
+                            .clone()
+                            .map(JsonValue::Str)
+                            .unwrap_or(JsonValue::Null);
+                        let corrected = result
+                            .corrected_value
+                            .clone()
+                            .map(JsonValue::Str)
+                            .unwrap_or(JsonValue::Null);
 
                         println!(
                             "{}",
@@ -167,6 +182,10 @@ fn main() {
                                 ("validated_text".to_string(), JsonValue::Str(validated_text)),
                                 ("confidence".to_string(), JsonValue::Number(confidence)),
                                 ("verdict".to_string(), JsonValue::Str(verdict)),
+                                ("tri_state".to_string(), JsonValue::Str(tri_state)),
+                                ("policy".to_string(), policy),
+                                ("claim_id".to_string(), claim_id),
+                                ("corrected_value".to_string(), corrected),
                                 ("fix_count".to_string(), JsonValue::Number(fix_count)),
                             ]))
                         );
@@ -233,7 +252,13 @@ fn main() {
                 let context = args.get(3).map(|s| s.as_str()).unwrap_or("general");
                 let scorer = cid::inference::ResponseScorer::new();
                 let report = scorer.score(text, context);
-                println!("Quality Score: {:.2}", report.overall_score);
+                println!(
+                    "Structural Quality (NOT a truth signal): {:.2}",
+                    report.overall_score
+                );
+                println!(
+                    "Scope: structural-quality — rhetorical/structural, never a truth verdict"
+                );
                 println!("Confidence: {:.2}", report.confidence);
                 println!("Action: {:?}", report.action);
                 if !report.issues.is_empty() {
@@ -404,6 +429,16 @@ fn process_line(line: &str, device: &mut CIDDevice) -> String {
                     output.push_str(&format!("Validated: {}\n", result.validated_text));
                     output.push_str(&format!("Confidence: {:.4}\n", result.confidence));
                     output.push_str(&format!("Verdict: {}\n", result.verdict().as_str()));
+                    output.push_str(&format!("Tri-state: {}\n", result.tri_state().as_str()));
+                    if let Some(p) = result.policy {
+                        output.push_str(&format!("Policy: {}\n", p.as_str()));
+                    }
+                    if let Some(id) = &result.claim_id {
+                        output.push_str(&format!("Claim id: {}\n", id));
+                    }
+                    if let Some(c) = &result.corrected_value {
+                        output.push_str(&format!("Corrected value: {}\n", c));
+                    }
                     output.push_str(&format!("Fixes: {}\n", result.fix_count()));
                     output.push_str(&format!("State: {:?}\n", result.state));
                     output.push_str(&format!("Cost: ${:.6}\n", result.cost_usd));
