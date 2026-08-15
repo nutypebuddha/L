@@ -725,6 +725,40 @@ pub fn research_plan(ws: &WorldState, _strategies: &[Strategy]) -> ResearchPlan 
     }
 }
 
+/// A structured benchmark scenario (directive §36/§37): an initial world, a goal,
+/// a sequence of observations to ingest, and the properties L is expected to exhibit
+/// (resolved entities, critical unknowns, feasibility). Used by L-Bench.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BenchmarkScenario {
+    pub name: String,
+    /// Seed situation text establishing the initial world.
+    pub seed_text: String,
+    /// Observations introduced sequentially (each is a StateDelta).
+    pub observations: Vec<String>,
+    /// Entity canonical names L should resolve from the scenario.
+    pub expected_entities: Vec<String>,
+    /// Critical unknown questions L should surface.
+    pub expected_critical_unknowns: Vec<String>,
+    /// Whether a feasible plan is expected.
+    pub expects_feasible: bool,
+}
+
+/// Measured outcome of running a [`BenchmarkScenario`] through the pipeline.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct BenchmarkResult {
+    /// Fraction of expected entities L actually resolved.
+    pub entity_resolution_accuracy: f64,
+    /// Number of state transitions applied.
+    pub state_transitions: usize,
+    pub contradiction_detected: bool,
+    pub critical_unknowns_found: usize,
+    /// A feasible plan was produced.
+    pub planning_valid: bool,
+    /// Re-running produced byte-identical strategy output.
+    pub replay_deterministic: bool,
+    pub notes: Vec<String>,
+}
+
 /// Result of applying one [`Action`] to a [`WorldState`] (directive §17/§30). A
 /// transition records the before/after state, the effects produced, and any
 /// constraint/resource violations — so simulation is inspectable and reproducible

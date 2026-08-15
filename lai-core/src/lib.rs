@@ -17,8 +17,8 @@ pub use primitive::{
 };
 pub use strategy::{
     diff_strategies, generate_challenge, research_plan, simulate_sequence, stable_hash, Action,
-    ChallengeReport, Claim, Contradiction, ContradictionStatus, Counterexample,
-    DeterministicSimulator, EntityResolution, EpistemicStatus, Evidence, Observation, Proof,
-    ResearchPlan, ResearchTask, Simulator, StateDelta, Strategy, StrategyDiff, StrategyIR,
-    StrategyVerdict, Transition, Unknown, WorldState,
+    BenchmarkResult, BenchmarkScenario, ChallengeReport, Claim, Contradiction, ContradictionStatus,
+    Counterexample, DeterministicSimulator, EntityResolution, EpistemicStatus, Evidence,
+    Observation, Proof, ResearchPlan, ResearchTask, Simulator, StateDelta, Strategy, StrategyDiff,
+    StrategyIR, StrategyVerdict, Transition, Unknown, WorldState,
 };

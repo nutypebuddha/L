@@ -710,6 +710,16 @@ enum StrategyAction {
         #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
         format: OutputFormat,
     },
+    /// Run L-Bench: execute a scenario through the pipeline and report metrics
+    /// (directive §36/§37). Defaults to the built-in Cyberpunk scenario.
+    Bench {
+        /// Optional scenario JSON file. Defaults to the built-in Cyberpunk scenario.
+        #[arg(long)]
+        scenario: Option<PathBuf>,
+        /// Output format: json (default) or text
+        #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+        format: OutputFormat,
+    },
 }
 
 /// Subcommands of `lai tanto`.
@@ -1934,7 +1944,7 @@ fn load_formula_registry() -> FormulaRegistry {
     reg
 }
 
-fn load_entity_registry() -> EntityRegistry {
+pub(crate) fn load_entity_registry() -> EntityRegistry {
     let mut reg = EntityRegistry::new();
     reg.load_seeds_from_str(ENTITIES_TOML)
         .expect("embedded ENTITIES_TOML must parse");
@@ -5031,7 +5041,7 @@ fn cmd_solve_batch(_verbose: bool, _explain: bool, explain_binding: Option<Expla
 /// Load and validate an optional `--lexicon` TOML file (T110). Mirrors the
 /// existing `--forces` file-handling convention: missing/unreadable file or
 /// invalid TOML is a hard error (fail loud), not a silent no-op.
-fn load_lexicon_arg(path: &Option<String>) -> Option<Lexicon> {
+pub(crate) fn load_lexicon_arg(path: &Option<String>) -> Option<Lexicon> {
     let path = path.as_ref()?;
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -5105,7 +5115,7 @@ fn run_route(query: &str) -> RouteResult {
 
 /// Same as `run_route`, but with an optional runtime lexicon (T110) —
 /// see `descent::lexicon` for the format and precedence rule.
-fn run_route_with_lexicon(query: &str, lexicon: Option<&Lexicon>) -> RouteResult {
+pub(crate) fn run_route_with_lexicon(query: &str, lexicon: Option<&Lexicon>) -> RouteResult {
     let mut formula_reg = load_formula_registry();
     // Build the word index once so IDF-specificity lookups (T55) hit the O(1)
     // fast path. Deferred to the route path only — `solve`/`build` don't need
@@ -9432,6 +9442,43 @@ fn cmd_strategy(action: StrategyAction) {
                 }
             }
         }
+        StrategyAction::Bench { scenario, format } => {
+            let sc = match &scenario {
+                Some(p) => {
+                    let content = std::fs::read_to_string(p)
+                        .unwrap_or_else(|e| panic!("read scenario {}: {}", p.display(), e));
+                    serde_json::from_str::<lai_core::BenchmarkScenario>(&content)
+                        .unwrap_or_else(|e| panic!("parse scenario: {}", e))
+                }
+                None => default_cyberpunk_scenario(),
+            };
+            let result = run_benchmark(&sc);
+            if format == OutputFormat::Json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&result)
+                        .unwrap_or_else(|e| panic!("serialize result: {}", e))
+                );
+            } else {
+                println!("L-Bench scenario: {}", sc.name);
+                println!(
+                    "  entity resolution accuracy: {:.2}",
+                    result.entity_resolution_accuracy
+                );
+                println!("  state transitions: {}", result.state_transitions);
+                println!(
+                    "  contradiction detected: {}",
+                    result.contradiction_detected
+                );
+                println!(
+                    "  critical unknowns found: {}/{}",
+                    result.critical_unknowns_found,
+                    sc.expected_critical_unknowns.len()
+                );
+                println!("  planning valid: {}", result.planning_valid);
+                println!("  replay deterministic: {}", result.replay_deterministic);
+            }
+        }
     }
 }
 
@@ -12362,5 +12409,116 @@ mod binder_tests {
             "false arithmetic must not be asserted true"
         );
         assert!(!r.refusals.is_empty(), "false arithmetic must be refused");
+    }
+}
+
+fn run_benchmark(scenario: &lai_core::BenchmarkScenario) -> lai_core::BenchmarkResult {
+    use laverna::strategy::{
+        build_strategy_ir, build_world_state, parse_resource_constraints, resolve_entities,
+    };
+    let reg = load_entity_registry();
+    let mut ws = build_world_state(&scenario.seed_text, &reg, None);
+    let mut transitions: usize = 0;
+    for obs in &scenario.observations {
+        let res = resolve_entities(obs, &reg);
+        let added: Vec<String> = res
+            .iter()
+            .filter(|r| r.confidence >= 0.5)
+            .map(|r| r.canonical_name.clone())
+            .collect();
+        let (budget, constraints) = parse_resource_constraints(obs);
+        if budget > 0.0 {
+            ws.resources.insert("budget".into(), budget);
+        }
+        for c in constraints {
+            ws.constraints.push(c);
+        }
+        let delta = lai_core::StateDelta {
+            added_entities: added,
+            ..Default::default()
+        };
+        ws = ws.apply(&delta);
+        transitions += 1;
+    }
+    let found = scenario
+        .expected_entities
+        .iter()
+        .filter(|e| ws.entities.values().any(|v| v == *e))
+        .count();
+    let acc = if scenario.expected_entities.is_empty() {
+        1.0
+    } else {
+        found as f64 / scenario.expected_entities.len() as f64
+    };
+    let crit = scenario
+        .expected_critical_unknowns
+        .iter()
+        .filter(|u| ws.uncertainties.iter().any(|x| &x.question == *u))
+        .count();
+    let budget = ws.resources.get("budget").copied().unwrap_or(20.0);
+    let objective = ws
+        .goals
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "maximize weighted objective".into());
+    let ir = build_strategy_ir(&ws, &objective);
+    let top1 = optimize_top(&ws, budget, &ir);
+    let valid = top1.is_some();
+    let h1 = top1
+        .as_ref()
+        .map(|s| lai_core::stable_hash(s))
+        .unwrap_or_default();
+    let top2 = optimize_top(&ws, budget, &ir);
+    let h2 = top2
+        .as_ref()
+        .map(|s| lai_core::stable_hash(s))
+        .unwrap_or_default();
+    let replay = valid && h1 == h2;
+    lai_core::BenchmarkResult {
+        entity_resolution_accuracy: acc,
+        state_transitions: transitions,
+        contradiction_detected: !ws.contradictions.is_empty(),
+        critical_unknowns_found: crit,
+        planning_valid: valid,
+        replay_deterministic: replay,
+        notes: vec![],
+    }
+}
+
+fn optimize_top(
+    ws: &lai_core::WorldState,
+    budget: f64,
+    ir: &lai_core::StrategyIR,
+) -> Option<String> {
+    let query = ws
+        .observations
+        .last()
+        .map(|o| o.content.clone())
+        .unwrap_or_default();
+    let lexicon = load_lexicon_arg(&None);
+    let route = run_route_with_lexicon(&query, lexicon.as_ref());
+    let pillars = aggregate_pillars(&route.report, &route.matrix);
+    let schema = laverna::build::pillar_schema(&pillars, budget);
+    match laverna::optimize::solve(&schema, 1) {
+        Ok(a) if !a.is_empty() => {
+            let s = laverna::strategy::allocation_to_strategy(&a[0], &schema, ir, 1);
+            serde_json::to_string(&s).ok()
+        }
+        _ => None,
+    }
+}
+
+fn default_cyberpunk_scenario() -> lai_core::BenchmarkScenario {
+    lai_core::BenchmarkScenario {
+        name: "cyberpunk-surveillance".into(),
+        seed_text:
+            "A cyberpunk RED-style megacity where surveillance capitalism monitors citizens.".into(),
+        observations: vec![
+            "New mass-surveillance technology deployed by the corp.".into(),
+            "Budget for countermeasures is limited to 100.".into(),
+        ],
+        expected_entities: vec!["surveillance_capitalism".into()],
+        expected_critical_unknowns: vec![],
+        expects_feasible: true,
     }
 }
