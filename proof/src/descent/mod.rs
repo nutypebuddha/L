@@ -1243,6 +1243,38 @@ const DOMAIN_KEYWORDS: &[(&str, Domain)] = &[
     ("accept", Domain::Brihaspati),
     ("agree", Domain::Brihaspati),
     ("disagree", Domain::Brihaspati),
+    // ── Cross-domain: adjective/noun morphological pairs (T-NEW-4) ──
+    // Both members of each pair are listed explicitly (exact whole-word match)
+    // so an adjective and its noun never route to different grahas. The base
+    // form also serves as the stem target for `nlp::stem_token`'s derivational
+    // rules (resilience→resilient, durability→durable, ...). Stone (Shani):
+    // defense / durability / endurance cluster; the engineering pairings reuse
+    // their domain's existing base keywords.
+    ("resilient", Domain::Shani),
+    ("resilience", Domain::Shani),
+    ("resiliency", Domain::Shani),
+    ("durable", Domain::Shani),
+    ("durability", Domain::Shani),
+    ("resistant", Domain::Shani),
+    ("resistance", Domain::Shani),
+    ("defensible", Domain::Shani),
+    ("defense", Domain::Shani),
+    ("defensive", Domain::Shani),
+    ("defend", Domain::Shani),
+    ("endure", Domain::Shani),
+    ("endurance", Domain::Shani),
+    ("secure", Domain::Shani),
+    ("security", Domain::Shani),
+    ("reliable", Domain::Shani),
+    ("reliability", Domain::Shani),
+    ("efficient", Domain::Shukra),
+    ("productive", Domain::Mangala),
+    ("productivity", Domain::Mangala),
+    ("scalable", Domain::Mangala),
+    ("scalability", Domain::Mangala),
+    ("maintainable", Domain::Mangala),
+    ("maintainability", Domain::Mangala),
+    ("optimized", Domain::Mangala),
     // ── Inflected / plural forms (explicit) ──
     // Whole-word matching drops bare suffixes/plurals, so the common inflected
     // forms are listed explicitly to preserve legitimate recall without
@@ -2707,6 +2739,69 @@ mod tests {
             domain_for_keyword("database")
         );
         assert!(domain_for_keyword("reasoning").is_some());
+    }
+
+    #[test]
+    fn domain_for_keyword_adjective_noun_pairs_share_a_graha() {
+        // T-NEW-4: an adjective and its noun are morphological variants of the
+        // same concept and must route to the SAME graha — never the
+        // "resilient"→unresolved vs "resilience"→Chandra split. Both members
+        // are listed in the keyword table, so whole-word matching agrees.
+        let pairs: &[(&str, &str)] = &[
+            ("resilient", "resilience"),
+            ("durable", "durability"),
+            ("resistant", "resistance"),
+            ("secure", "security"),
+            ("defensible", "defense"),
+            ("efficient", "efficiency"),
+            ("productive", "productivity"),
+            ("reliable", "reliability"),
+            ("scalable", "scalability"),
+            ("maintainable", "maintainability"),
+        ];
+        for (adj, noun) in pairs {
+            let adj_domain = domain_for_keyword(adj);
+            let noun_domain = domain_for_keyword(noun);
+            assert!(
+                adj_domain.is_some(),
+                "adjective '{adj}' must resolve to a graha"
+            );
+            assert!(
+                noun_domain.is_some(),
+                "noun '{noun}' must resolve to a graha"
+            );
+            assert_eq!(
+                adj_domain, noun_domain,
+                "morphological pair '{adj}'/'{noun}' must share a graha"
+            );
+        }
+    }
+
+    #[test]
+    fn stem_token_collapses_derivational_pairs() {
+        // T-NEW-4: the derivational stemmer rules collapse -ent/-ence,
+        // -able/-ability, -ive/-ion variants onto one base so a variant that is
+        // not itself in the keyword table still resolves via its base form.
+        use crate::nlp::stem_token;
+        assert_eq!(stem_token("resilience"), "resilient");
+        assert_eq!(stem_token("resiliency"), "resilient");
+        assert_eq!(stem_token("durability"), "durable");
+        assert_eq!(stem_token("resistance"), "resistant");
+        assert_eq!(stem_token("efficiency"), "efficient");
+        assert_eq!(stem_token("dependency"), "dependent");
+        assert_eq!(stem_token("productivity"), "productive");
+        assert_eq!(stem_token("production"), "productive");
+        assert_eq!(stem_token("scalability"), "scalable");
+        // Idempotence holds for the new bases too.
+        for w in [
+            "resilient",
+            "durable",
+            "resistant",
+            "efficient",
+            "productive",
+        ] {
+            assert_eq!(stem_token(w), w);
+        }
     }
 
     #[test]

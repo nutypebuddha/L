@@ -177,3 +177,15 @@ JSON surface over scraping `--help`/text.
   Budget=30 completes in ~0.6s. Test: `branch_and_bound_handles_large_budget`.
 - **petgraph results** must be sorted by stable key before output (determinism rule).
 - **`build.rs`** embeds corpus + version hash — two sequential builds differ.
+- **Lexicon morphological coverage** (`descent/mod.rs` `DOMAIN_KEYWORDS` +
+  `nlp::stem_token`): routing collapses common inflections (`-ing`/`-ed`/plurals)
+  and the T-NEW-4 derivational pairs (`-ence`/`-ency`→`-ent`,
+  `-ility`→`-le`, `-ivity`→`-ive`, `-ance`→`-ant`, `-tion`→`-tive`), but it is
+  **not** a full stemmer/lemmatizer — an English morphological variant that is
+  neither in the keyword table nor reachable by those suffix rules stays
+  unresolved. That is handled fail-loud, never silently: `synthesize_strategy`
+  warns `unresolved content tokens ignored: [...]` whenever any content-bearing
+  token drops out (T-NEW-4), so a dropped adjective is visible in
+  `strategize`/`route` JSON. To add a new pair, list both members in
+  `DOMAIN_KEYWORDS` (exact whole-word match, one graha each) — never assume
+  the stemmer reaches a variant.

@@ -300,11 +300,14 @@ pub fn synthesize_strategy(query: &str, forces: &[(String, TokenForce)]) -> Stra
             "no graha forces resolved — query maps to no corpus domain; routing is speculative"
                 .to_string(),
         )
-    } else if low_confidence {
+    } else if !unresolved.is_empty() {
+        // T-NEW-4: partial degradation is visible, never silent. A single
+        // content-bearing token that dropped out (e.g. a morphological variant
+        // the lexicon/stemmer missed) names itself in the warning even though
+        // other tokens resolved — so `strategize`/`generate`'s speculative flag
+        // fires and the caller sees the information loss.
         Some(format!(
-            "{} of {} content tokens unresolved — low-confidence best-guess",
-            unresolved.len(),
-            content_count
+            "unresolved content tokens ignored: {unresolved:?} — routing partially speculative"
         ))
     } else {
         None
@@ -1030,6 +1033,28 @@ mod tests {
         assert!(report.warning.is_some());
         assert!(!report.low_confidence);
         assert_eq!(report.primary, None);
+    }
+
+    #[test]
+    fn single_unresolved_content_token_surfaces_in_warning() {
+        // T-NEW-4: one unresolved content token among resolved ones must still
+        // surface in the (non-fatal) warning, naming the dropped token —
+        // partial degradation is visible instead of silent.
+        let forces = vec![
+            resolved(Domain::Shani, 1.0),
+            resolved(Domain::Shukra, 0.5),
+            unresolved("resilience_variant"),
+        ];
+        let report = synthesize_strategy("query", &forces);
+        let w = report.warning.expect("partial degradation must warn");
+        assert!(
+            w.contains("resilience_variant"),
+            "warning must name the dropped token, got: {w}"
+        );
+        // Still a best-guess, not a refusal: primary is populated and the
+        // majority-resolved case is not low_confidence.
+        assert_eq!(report.primary, Some(Domain::Shani));
+        assert!(!report.low_confidence);
     }
 
     #[test]

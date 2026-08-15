@@ -173,13 +173,22 @@ pub fn is_stopword(token: &str) -> bool {
 
 /// Deterministic, dependency-free light stemmer.
 ///
-/// Strips a small, fixed set of English inflectional suffixes so that
-/// morphological variants collapse onto the base form used by the routing
-/// lexicon (e.g. `reasoning` → `reason`, `thinking` → `think`,
-/// `databases` → `database`). This is intentionally *not* a full Porter
-/// stemmer: it is a static suffix table with conservative length guards, so
-/// the mapping is pure, deterministic, and reproducible (determinism rule) —
-/// no runtime ML, no locale dependence.
+/// Strips a small, fixed set of English suffixes so that morphological
+/// variants collapse onto the base form used by the routing lexicon (e.g.
+/// `reasoning` → `reason`, `databases` → `database`). Two tiers, both pure and
+/// deterministic:
+/// * inflectional — `-ing`/`-ed`/`-s`/`-ness`/`-ly` etc. (T53);
+/// * derivational (T-NEW-4) — `-ence`/`-ency` → `-ent` (`resilience` →
+///   `resilient`, `efficiency` → `efficient`), `-ility` → `-le`
+///   (`durability` → `durable`), `-ivity` → `-ive` (`productivity` →
+///   `productive`), `-ance` → `-ant` (`resistance` → `resistant`),
+///   `-tion` → `-tive` (`production` → `productive`) — so adjective/noun
+///   pairs share one lexicon entry instead of silently routing apart.
+///
+/// This is intentionally *not* a full Porter stemmer: it is a static suffix
+/// table with conservative length guards, so the mapping is pure,
+/// deterministic, and reproducible (determinism rule) — no runtime ML, no
+/// locale dependence.
 ///
 /// Guarantees:
 /// - Pure: output depends only on `token`.
@@ -220,6 +229,20 @@ pub fn stem_token(token: &str) -> String {
         ("ness", 5, ""),
         ("ment", 5, ""),
         ("ly", 5, ""),
+        // ── derivational (T-NEW-4) ──────────────────────────────────────────
+        // -ivity -> -ive (productivity->productive, activity->active)
+        ("ivity", 6, "ive"),
+        // -ility -> -le (durability->durable, reliability->reliable,
+        // scalability->scalable, flexibility->flexible)
+        ("ility", 5, "le"),
+        // -ance -> -ant (resistance->resistant)
+        ("ance", 5, "ant"),
+        // -ence / -ency -> -ent (resilience->resilient, dependence->dependent,
+        // efficiency->efficient, dependency->dependent)
+        ("ence", 5, "ent"),
+        ("ency", 5, "ent"),
+        // -tion -> -tive (production->productive)
+        ("tion", 5, "tive"),
     ];
 
     // Words ending in a doubled sibilant (class, process, address) are not

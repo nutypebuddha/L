@@ -50,11 +50,13 @@ pub struct LexiconEntry {
 ///   [`Lexicon::lookup_phrase`].
 ///
 /// Deliberately the simplest possible structure (exact match, no regex, no
-/// stemming) — extending it to reuse `stem_token` is a natural T-ticket
-/// follow-up, but the MVP mirrors `domain_for_keyword`'s core guarantee: a
-/// keyword/phrase never matches as a bare substring fragment, because there is
-/// no substring matching here at all, only exact map lookup (whole-word, or a
-/// whole multi-word span).
+/// stemming) — `nlp::stem_token` already collapses inflected and derivational
+/// variants (`resilience`→`resilient`, `durability`→`durable`) before the
+/// keyword table is consulted, and a `Lexicon` entry is only looked up when
+/// that whole chain missed. The MVP mirrors `domain_for_keyword`'s core
+/// guarantee: a keyword/phrase never matches as a bare substring fragment,
+/// because there is no substring matching here at all, only exact map lookup
+/// (whole-word, or a whole multi-word span).
 #[derive(Debug, Clone, Default)]
 pub struct Lexicon {
     entries: HashMap<String, LexiconEntry>,
