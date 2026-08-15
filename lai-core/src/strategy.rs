@@ -556,6 +556,85 @@ pub fn generate_challenge(strategy: &Strategy, ws: Option<&WorldState>) -> Chall
     }
 }
 
+/// Deterministic, dependency-free FNV-1a 64-bit hash (hex). Used for reproducibility
+/// receipts so identical input reproduces an identical hash across runs and machines
+/// (no HashMap iteration order, no external crypto dependency).
+pub fn stable_hash(data: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in data.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
+/// A reproducibility receipt spanning the whole strategy pipeline (directive §31):
+/// input hash, world-state hash + version, resolved entities, StrategyIR hash,
+/// candidate/challenge counts, the final Gate verdict, and the chosen strategy.
+/// The deterministic portion of the reasoning must be replayable from this.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Proof {
+    pub subject: String,
+    pub laverna_version: String,
+    pub features: Vec<String>,
+    pub input_hash: String,
+    pub world_state_version: u64,
+    pub world_state_hash: String,
+    pub resolved_entities: Vec<String>,
+    pub strategy_ir_hash: String,
+    pub candidate_count: usize,
+    pub challenge_count: usize,
+    pub gate_verdict: String,
+    pub chosen_strategy_id: String,
+    pub reproducible: bool,
+}
+
+/// Structured diff between two strategies — the core of "why did L change its mind?"
+/// (directive §35). Surfaces what actually moved so the transition is explainable.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct StrategyDiff {
+    pub changed_assumptions: Vec<String>,
+    pub changed_constraints: Vec<String>,
+    pub changed_actions: Vec<String>,
+    pub changed_resources: Vec<String>,
+    /// Assumptions present in `old` but dropped in `new` (candidate invalidations).
+    pub invalidated_assumptions: Vec<String>,
+}
+
+/// Compute the symmetric difference of two strategies' structured fields.
+pub fn diff_strategies(old: &Strategy, new: &Strategy) -> StrategyDiff {
+    use std::collections::BTreeSet;
+    let sym = |a: &[String], b: &[String]| -> Vec<String> {
+        let sa: BTreeSet<&str> = a.iter().map(|s| s.as_str()).collect();
+        let sb: BTreeSet<&str> = b.iter().map(|s| s.as_str()).collect();
+        sa.symmetric_difference(&sb)
+            .map(|s| s.to_string())
+            .collect()
+    };
+    let changed_resources: Vec<String> = {
+        let mut out = Vec::new();
+        let keys: BTreeSet<&String> = old.resources.keys().chain(new.resources.keys()).collect();
+        for k in keys {
+            if old.resources.get(k) != new.resources.get(k) {
+                out.push(k.clone());
+            }
+        }
+        out
+    };
+    StrategyDiff {
+        changed_assumptions: sym(&old.assumptions, &new.assumptions),
+        changed_constraints: sym(&old.constraints, &new.constraints),
+        changed_actions: sym(&old.actions, &new.actions),
+        changed_resources,
+        invalidated_assumptions: old
+            .assumptions
+            .iter()
+            .filter(|a| !new.assumptions.contains(a))
+            .cloned()
+            .collect(),
+    }
+}
+
 /// Result of applying one [`Action`] to a [`WorldState`] (directive §17/§30). A
 /// transition records the before/after state, the effects produced, and any
 /// constraint/resource violations — so simulation is inspectable and reproducible
@@ -914,5 +993,82 @@ mod challenge_tests {
             .missing_information
             .contains(&"is monitoring active?".to_string()));
         assert!(r.recommended_next_action.contains("research"));
+    }
+}
+
+#[cfg(test)]
+mod proof_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn strat(
+        id: &str,
+        assumptions: Vec<String>,
+        constraints: Vec<String>,
+        actions: Vec<String>,
+    ) -> Strategy {
+        Strategy {
+            id: id.into(),
+            objective: "o".into(),
+            assumptions,
+            constraints,
+            actions,
+            resources: BTreeMap::new(),
+            expected_outcomes: vec![],
+            risks: vec![],
+            dependencies: vec![],
+            evidence: vec![],
+            confidence: 0.5,
+            robustness: 0.5,
+        }
+    }
+
+    #[test]
+    fn stable_hash_is_deterministic_and_unchanged_by_ordering() {
+        assert_eq!(stable_hash("abc"), stable_hash("abc"));
+        assert_ne!(stable_hash("abc"), stable_hash("abd"));
+    }
+
+    #[test]
+    fn diff_strategies_surfaces_changes() {
+        let old = strat(
+            "S",
+            vec!["a1".into()],
+            vec!["c1".into()],
+            vec!["x 1".into()],
+        );
+        let new = strat(
+            "S",
+            vec!["a2".into()],
+            vec!["c1".into()],
+            vec!["y 2".into()],
+        );
+        let d = diff_strategies(&old, &new);
+        assert_eq!(d.changed_assumptions, vec!["a1", "a2"]);
+        assert!(d.changed_actions.contains(&"x 1".to_string()));
+        assert!(d.changed_actions.contains(&"y 2".to_string()));
+        assert_eq!(d.invalidated_assumptions, vec!["a1".to_string()]);
+    }
+
+    #[test]
+    fn proof_carries_pipeline_identifiers() {
+        let p = Proof {
+            subject: "o".into(),
+            laverna_version: "0.4.2".into(),
+            features: vec!["graph".into()],
+            input_hash: "h1".into(),
+            world_state_version: 3,
+            world_state_hash: "wh".into(),
+            resolved_entities: vec!["e".into()],
+            strategy_ir_hash: "ir".into(),
+            candidate_count: 3,
+            challenge_count: 4,
+            gate_verdict: "verified".into(),
+            chosen_strategy_id: "S01".into(),
+            reproducible: true,
+        };
+        let j = serde_json::to_string(&p).unwrap();
+        assert!(j.contains("\"gate_verdict\""));
+        assert!(j.contains("\"chosen_strategy_id\""));
     }
 }

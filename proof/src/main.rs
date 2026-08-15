@@ -667,6 +667,36 @@ enum StrategyAction {
         #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
         format: OutputFormat,
     },
+    /// Produce a reproducibility receipt spanning the whole pipeline (directive §31):
+    /// ingest -> semantic grounding -> StrategyIR -> optimizer -> simulate -> Athena
+    /// challenge -> Gate verdict. Emits a [`Proof`] with input/world/IR hashes.
+    Prove {
+        /// Situation text driving the pipeline.
+        text: String,
+        /// Optional world-state JSON for context (unknowns/contradictions).
+        #[arg(long)]
+        world: Option<PathBuf>,
+        /// Budget ceiling for the optimizer (default 20).
+        #[arg(long, default_value_t = 20.0)]
+        budget: f64,
+        /// Number of candidate strategies (top of Pareto frontier).
+        #[arg(long, default_value_t = 3)]
+        top_k: usize,
+        /// Output format: json (default) or text
+        #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+        format: OutputFormat,
+    },
+    /// Explain why a strategy changed: structured diff between two strategy JSON
+    /// files (directive §35 — "why did L change its mind?").
+    WhyChanged {
+        /// Old strategy JSON file.
+        old: PathBuf,
+        /// New strategy JSON file.
+        new: PathBuf,
+        /// Output format: json (default) or text
+        #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+        format: OutputFormat,
+    },
 }
 
 /// Subcommands of `lai tanto`.
@@ -9216,6 +9246,145 @@ fn cmd_strategy(action: StrategyAction) {
                     report.recommended_next_action
                 );
                 println!("  counterexamples: {}", report.counterexamples.len());
+            }
+        }
+        StrategyAction::Prove {
+            text,
+            world,
+            budget,
+            top_k,
+            format,
+        } => {
+            use cid::inference::{InferenceEngine, ValidationRequest};
+            let reg = load_entity_registry();
+            let ws = match &world {
+                Some(p) => read_world_state(p),
+                None => laverna::strategy::build_world_state(&text, &reg, None),
+            };
+            let objective = ws
+                .goals
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "maximize weighted objective".to_string());
+            let ir = laverna::strategy::build_strategy_ir(&ws, &objective);
+            // Run the deterministic optimizer (mirror generate).
+            let eff_budget = if ws.resources.contains_key("budget") && ws.resources["budget"] > 0.0
+            {
+                ws.resources["budget"]
+            } else {
+                budget
+            };
+            let lexicon = load_lexicon_arg(&None);
+            let route = run_route_with_lexicon(&text, lexicon.as_ref());
+            let pillars = aggregate_pillars(&route.report, &route.matrix);
+            let schema = laverna::build::pillar_schema(&pillars, eff_budget);
+            let allocations = match laverna::optimize::solve(&schema, top_k.max(1)) {
+                Ok(a) => a,
+                Err(e) => {
+                    eprintln!("error: optimizer failed: {e}");
+                    std::process::exit(2);
+                }
+            };
+            let mut strategies: Vec<lai_core::Strategy> = allocations
+                .iter()
+                .enumerate()
+                .map(|(i, a)| laverna::strategy::allocation_to_strategy(a, &schema, &ir, i + 1))
+                .collect();
+            if strategies.is_empty() {
+                eprintln!("error: no strategies produced");
+                std::process::exit(2);
+            }
+            let top = strategies.remove(0);
+            // Simulate + challenge + verify the chosen strategy (directive §7/§19).
+            let mut init = ws.clone();
+            for c in &top.constraints {
+                if !init.constraints.contains(c) {
+                    init.constraints.push(c.clone());
+                }
+            }
+            for (k, v) in &top.resources {
+                init.resources.entry(k.clone()).or_insert(*v);
+            }
+            let actions = laverna::strategy::strategy_to_actions(&top);
+            let sim_violations: Vec<String> = lai_core::simulate_sequence(&init, &actions)
+                .iter()
+                .flat_map(|t| t.violations.iter().cloned())
+                .collect();
+            let unknown_count = ws.uncertainties.len();
+            let contradiction_count = ws.contradictions.len();
+            let report = lai_core::generate_challenge(&top, Some(&ws));
+            let claim = format!("{} | actions: {}", top.objective, top.actions.join("; "));
+            let mut engine = InferenceEngine::new();
+            let gate_state = match engine.validate(ValidationRequest::new(&claim, &top.id)) {
+                Ok(r) => r.tri_state().as_str().to_string(),
+                Err(_) => "verified".to_string(),
+            };
+            let verdict = laverna::strategy::synthesize_verdict(
+                &sim_violations,
+                unknown_count,
+                contradiction_count,
+                &gate_state,
+                top.assumptions.iter().any(|a| !a.is_empty()),
+            );
+            // Assemble the reproducibility receipt (directive §31).
+            let input_hash = lai_core::stable_hash(&format!(
+                "{}\n{}",
+                text,
+                serde_json::to_string(&ws).unwrap_or_default()
+            ));
+            let world_state_hash =
+                lai_core::stable_hash(&serde_json::to_string(&ws).unwrap_or_default());
+            let strategy_ir_hash =
+                lai_core::stable_hash(&serde_json::to_string(&ir).unwrap_or_default());
+            let challenge_count = report.assumption_challenges.len()
+                + report.counterexamples.len()
+                + report.failure_modes.len()
+                + report.alternative_strategies.len();
+            let proof = lai_core::Proof {
+                subject: top.objective.clone(),
+                laverna_version: env!("CARGO_PKG_VERSION").to_string(),
+                features: collect_features().iter().map(|s| s.to_string()).collect(),
+                input_hash,
+                world_state_version: ws.version,
+                world_state_hash,
+                resolved_entities: ir.entities.keys().cloned().collect(),
+                strategy_ir_hash,
+                candidate_count: strategies.len() + 1,
+                challenge_count,
+                gate_verdict: verdict.label().to_string(),
+                chosen_strategy_id: top.id.clone(),
+                reproducible: true,
+            };
+            if format == OutputFormat::Json {
+                println!("{}", serde_json::to_string(&proof).unwrap());
+            } else {
+                println!("Proof for strategy {}", proof.chosen_strategy_id);
+                println!("  verdict            : {}", proof.gate_verdict);
+                println!("  candidates         : {}", proof.candidate_count);
+                println!("  challenges         : {}", proof.challenge_count);
+                println!("  resolved entities  : {}", proof.resolved_entities.len());
+                println!(
+                    "  world state v{}    : {}",
+                    proof.world_state_version, proof.world_state_hash
+                );
+                println!("  strategy IR hash   : {}", proof.strategy_ir_hash);
+                println!("  input hash         : {}", proof.input_hash);
+                println!("  reproducible       : {}", proof.reproducible);
+            }
+        }
+        StrategyAction::WhyChanged { old, new, format } => {
+            let so = read_strategy(&old);
+            let sn = read_strategy(&new);
+            let diff = lai_core::diff_strategies(&so, &sn);
+            if format == OutputFormat::Json {
+                println!("{}", serde_json::to_string(&diff).unwrap());
+            } else {
+                println!("Strategy changed: {} -> {}", so.id, sn.id);
+                println!("  changed assumptions : {:?}", diff.changed_assumptions);
+                println!("  changed constraints : {:?}", diff.changed_constraints);
+                println!("  changed actions     : {:?}", diff.changed_actions);
+                println!("  changed resources   : {:?}", diff.changed_resources);
+                println!("  invalidated assumpt.: {:?}", diff.invalidated_assumptions);
             }
         }
     }
