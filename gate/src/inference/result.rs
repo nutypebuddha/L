@@ -157,11 +157,27 @@ impl ValidationResult {
     /// PCN tri-state summary derived from the stable [`ValidationVerdict`].
     /// `verdict` stays the machine contract; `tri_state` is the renderer-facing
     /// `verified` / `cant_check` / `flagged` view.
+    ///
+    /// Calibration (low_confidence gap): a passed claim is only genuinely
+    /// *verified* when a PCN policy comparison (`policy`) or a corpus claim
+    /// match (`claim_id`) backs it. A bare passthrough — the gate returned
+    /// `ok` on operator/domain validity alone, with no actual verification —
+    /// must not be reported as `verified`; it is `cant_check` (L abstains
+    /// rather than over-claim confidence). This is what makes the SSI
+    /// benchmark distinct: a true-but-uncorpused number reads as `cant_check`,
+    /// not `verified`.
     pub fn tri_state(&self) -> TriState {
         match self.verdict() {
-            ValidationVerdict::Ok | ValidationVerdict::Corrected => TriState::Verified,
             ValidationVerdict::Failed => TriState::Flagged,
             ValidationVerdict::Unevaluable => TriState::CantCheck,
+            ValidationVerdict::Corrected => TriState::Verified,
+            ValidationVerdict::Ok => {
+                if self.policy.is_some() || self.claim_id.is_some() {
+                    TriState::Verified
+                } else {
+                    TriState::CantCheck
+                }
+            }
         }
     }
 
@@ -375,13 +391,24 @@ mod tests {
 
     #[test]
     fn tri_state_maps_verdict() {
-        // The tri-state is a renderer-facing view of the stable verdict.
-        // ok / corrected -> verified; failed -> flagged; unevaluable -> cant_check.
+        // The tri-state is a renderer-facing view of the stable verdict, with
+        // calibration: a passed claim is `verified` only when a PCN policy or a
+        // corpus claim backs it; a bare passthrough is `cant_check`.
         assert_eq!(ValidationResult::new("x").tri_state(), TriState::CantCheck);
+        // Passed but no verification signal -> cant_check (L abstains).
         assert_eq!(
             with_gate().with_passed(true).tri_state(),
+            TriState::CantCheck
+        );
+        // Passed with a PCN policy -> verified.
+        assert_eq!(
+            with_gate()
+                .with_passed(true)
+                .with_policy(Some(Policy::Exact))
+                .tri_state(),
             TriState::Verified
         );
+        // L silently corrected the claim -> verified (with correction).
         let corrected = with_gate().with_passed(true).with_fixes(vec![TokenFix::new(
             "2+2=5",
             "2+2=4",
@@ -389,6 +416,7 @@ mod tests {
             0.9,
         )]);
         assert_eq!(corrected.tri_state(), TriState::Verified);
+        // Judged and rejected -> flagged.
         assert_eq!(
             with_gate().with_passed(false).tri_state(),
             TriState::Flagged
