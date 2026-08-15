@@ -1,0 +1,28 @@
+# Tri-state gate evaluation benchmark (Positioning doc, Stage 2).
+#
+# Columns: claim <TAB> tool <TAB> expected_tri_state
+# The runner (eval_tristate.sh) asserts each claim's `lai gate validate`
+# `--format json` `tri_state` matches `expected`. This locks in the Stage 1
+# success criterion: L produces DISTINCT verdicts —
+#   verified   — claim L can actually compute / verify (e.g. arithmetic it handles)
+#   cant_check — a true-but-uncorpused number; L abstains honestly instead of
+#                silently confirming a fact it has no corpus basis for
+#   flagged    — a claim contradicted by corpus
+#
+# KNOWN GAP (not asserted here, tracked separately): the math gate does not yet
+# evaluate arithmetic errors (e.g. "2 + 2 = 5" currently returns verified). Once
+# it does, add cases here expecting `flagged`/`corrected`. The harness must stay
+# green on committed behavior so a regression in the calibration fails loudly.
+
+# — verified: the gate can actually compute these —
+2 + 2 = 4	math	verified
+
+# — cant_check: true-but-uncorpused numbers; L must abstain, not confirm —
+The SSI resource limit is 2000 dollars	math	cant_check
+The SSI backpay was 17453 dollars	math	cant_check
+My income was 50000 last year	math	cant_check
+Water boils at 100 degrees celsius	math	cant_check
+No number is mentioned anywhere in this sentence	math	cant_check
+
+# — flagged: claims contradicted by corpus —
+The earth is flat	math	flagged
