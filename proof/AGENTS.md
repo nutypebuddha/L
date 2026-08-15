@@ -16,9 +16,29 @@ cargo test -p laverna --lib --features llm
 # single test
 cargo test -p laverna --lib optimize::tests::branch_and_bound_handles_large_budget
 
+# chart-matrix regression sweep (T-NEW-5): runs `chart` + `build` across the
+# fixture matrix (tests/fixtures/chart_matrix.tsv) — invariants must hold or
+# the command fails loud. Included in `cargo test --workspace` (CI step 4).
+cargo test -p laverna --test chart_matrix
+
 # full-features build (native)
 cargo build --release -p laverna --features "mcp websearch budget llm milp graph"
 ```
+
+## Chart / sign-mapping subsystem sign-off (T-NEW-5)
+
+**Single-chart manual testing is no longer sufficient sign-off** for changes
+that touch `proof/src/chart/`, `proof/src/astrology/`, `proof/src/ephemeris/`,
+the sidereal reduction, or the pillar-weight path. The standing bar is the
+chart-matrix sweep (`cargo test -p laverna --test chart_matrix`), which drives
+`lai chart` and `lai build` over the fixed fixture matrix and asserts that
+rashi == `RASHIS[floor(sidereal/30) % 12]` for every graha, `sidereal ∈ [0,360)`,
+`lagna` is valid, pillar/objective weights sum to 1.0 with no negative/NaN,
+and outputs are byte-identical across 3 runs. Rows are `strict` or `loose`
+(known-hard boundary: DST transitions, sign cusps, polar latitudes,
+pre-Gregorian dates) — a loose row may fail loud but must never emit
+silently-corrupted data. Add new edge cases to `chart_matrix.tsv` as they are
+found; do not extend one-off ad hoc fixture lists by hand.
 
 ## Architecture
 

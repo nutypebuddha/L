@@ -1351,7 +1351,6 @@ mod foundation_tests {
 mod slice3_tests {
     use super::*;
     use lai_core::{Observation, StrategyIR, Unknown, WorldState};
-    use std::collections::BTreeMap;
 
     #[test]
     fn build_strategy_ir_carries_world_model() {

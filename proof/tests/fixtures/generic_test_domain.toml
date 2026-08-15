@@ -1,0 +1,121 @@
+# Fixed test domain profile for the chart-matrix regression sweep (T-NEW-5).
+# Identity graha -> pillar split: each graha weight flows to its own pillar,
+# so build::compute_objective_weights returns the chart's pillar weights
+# unchanged as objective weights. 7 pillars, 7 objectives.
+# This is the "generic_test_domain.toml" the T-NEW-5 harness feeds to
+# `lai build --domain`; it must stay a fixed, committed fixture.
+
+[meta]
+domain = "generic_test_domain"
+description = "Fixed generic 7-pillar test domain for the chart-matrix regression sweep"
+
+[[graha_map]]
+graha = "surya"
+splits = { score_spear = 1.0 }
+note = "Sun -> Spear"
+
+[[graha_map]]
+graha = "chandra"
+splits = { score_olive = 1.0 }
+note = "Moon -> Olive"
+
+[[graha_map]]
+graha = "mangala"
+splits = { score_forge = 1.0 }
+note = "Mars -> Forge"
+
+[[graha_map]]
+graha = "budha"
+splits = { score_owl = 1.0 }
+note = "Mercury -> Owl"
+
+[[graha_map]]
+graha = "brihaspati"
+splits = { score_council = 1.0 }
+note = "Jupiter -> Council"
+
+[[graha_map]]
+graha = "shukra"
+splits = { score_loom = 1.0 }
+note = "Venus -> Loom"
+
+[[graha_map]]
+graha = "shani"
+splits = { score_stone = 1.0 }
+note = "Saturn -> Stone"
+
+[budget]
+unit = 7
+
+[[items]]
+id = "spear"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_spear = 1.0 }
+
+[[items]]
+id = "olive"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_olive = 1.0 }
+
+[[items]]
+id = "forge"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_forge = 1.0 }
+
+[[items]]
+id = "owl"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_owl = 1.0 }
+
+[[items]]
+id = "council"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_council = 1.0 }
+
+[[items]]
+id = "loom"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_loom = 1.0 }
+
+[[items]]
+id = "stone"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 20
+effects = { score_stone = 1.0 }
+
+[objective]
+maximize = ["score_spear", "score_olive", "score_forge", "score_owl", "score_council", "score_loom", "score_stone"]
+
+[scoring.score_spear]
+terms = { score_spear = 1.0 }
+
+[scoring.score_olive]
+terms = { score_olive = 1.0 }
+
+[scoring.score_forge]
+terms = { score_forge = 1.0 }
+
+[scoring.score_owl]
+terms = { score_owl = 1.0 }
+
+[scoring.score_council]
+terms = { score_council = 1.0 }
+
+[scoring.score_loom]
+terms = { score_loom = 1.0 }
+
+[scoring.score_stone]
+terms = { score_stone = 1.0 }

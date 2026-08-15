@@ -1,0 +1,33 @@
+# Chart-matrix regression fixture (T-NEW-5).
+#
+# One row per case, pipe-delimited:
+#   datetime|tz|latitude|longitude|label|mode
+#
+# mode:
+#   strict — every invariant below MUST hold for this row.
+#   loose  — known-hard boundary case: invariants must hold, OR the command
+#            must fail loud with a clear error. It must never silently emit
+#            corrupted-but-well-formed-looking data.
+#
+# Invariants (chart --format json): rashi == RASHIS[floor(sidereal/30)%12],
+# sidereal in [0,360), lagna a valid rashi, 3x byte-identical, and the
+# full-precision personality pillar weights sum to 1.0 (±1e-6).
+# Invariants (build --domain generic_test_domain.toml --proof-out): pillar and
+# objective weights sum to 1.0 (±1e-5, canon_f64 6-decimal display floor),
+# none negative or NaN, proof-out byte-identical across 3 runs.
+datetime|tz|latitude|longitude|label|mode
+2000-01-01 00:00|America/New_York|40.7|-74.0|NYC midnight Y2K|strict
+1969-07-20 20:17|UTC|0.0|30.0|Moon landing UTC, equator/PM|strict
+2024-02-29 12:00|Asia/Tokyo|35.7|139.7|leap day, Tokyo|strict
+1985-06-15 06:30|Australia/Sydney|-33.9|151.2|southern hemisphere|strict
+1950-12-31 23:59|Pacific/Auckland|-36.8|174.8|near-dateline year boundary|strict
+2030-03-20 00:00|UTC|51.5|0.0|future date, equinox, prime meridian|strict
+1900-01-01 12:00|Europe/London|51.5|-0.1|far past, London|strict
+2022-06-21 18:00|America/Anchorage|61.2|-149.9|high latitude, solstice|strict
+2024-03-10 02:30|America/New_York|40.7|-74.0|DST spring-forward gap|loose
+2024-11-03 01:30|America/New_York|40.7|-74.0|DST fall-back repeat hour|loose
+2024-08-17 12:00|UTC|0.0|30.0|sidereal cusp-adjacent (Chandra 270deg-6e-6)|loose
+1500-06-15 12:00|UTC|40.0|-3.0|pre-Gregorian|loose
+2022-06-21 18:00|UTC|66.5|15.0|polar circle|loose
+2022-06-21 18:00|UTC|90.0|15.0|north pole|loose
+2022-06-21 18:00|UTC|-90.0|15.0|south pole|loose
