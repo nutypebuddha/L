@@ -1,0 +1,143 @@
+# Personal-finance surplus allocation (deterministic, chart-driven)
+#
+# Maps the 7 Vedic pillar weights (derived from a birth chart) onto seven
+# personal-finance workstreams, then solves the optimal split of a monthly
+# surplus (budget = 100 percentage points) across them.
+#
+# Usage:
+#   laverna build --domain personal_finance \
+#     --datetime "1994-04-15 01:09" --tz "America/Chicago" \
+#     --latitude 45.41 --longitude -92.64 --explain
+#   # or, for a strategy without a chart:
+#   laverna strategize --query "how should I allocate my monthly surplus?" \
+#     --domain personal_finance --budget 100 --explain
+
+[meta]
+domain = "personal_finance"
+description = "Allocate a monthly surplus across earning, buffer, debt/build, literacy, investing, tax-optimization, and protection"
+
+# Pillar mapping: surya→Spear, chandra→Olive, mangala→Forge, budha→Owl,
+# brihaspati→Council, shukra→Loom, shani→Stone.
+# Non-identity split: Mars (Forge) feeds both debt/build and protection
+# (insurance), since aggressive wealth-building without a floor is fragile.
+
+[[graha_map]]
+graha = "surya"
+splits = { score_earn = 1.0 }
+note = "Sun → earning capacity / income"
+
+[[graha_map]]
+graha = "chandra"
+splits = { score_buffer = 1.0 }
+note = "Moon → emergency fund / cash buffer"
+
+[[graha_map]]
+graha = "mangala"
+splits = { score_build = 0.7, score_protect = 0.3 }
+note = "Mars → debt payoff + wealth building, with an insurance floor"
+
+[[graha_map]]
+graha = "budha"
+splits = { score_learn = 1.0 }
+note = "Mercury → financial literacy / research"
+
+[[graha_map]]
+graha = "brihaspati"
+splits = { score_grow = 1.0 }
+note = "Jupiter → long-term investing / growth"
+
+[[graha_map]]
+graha = "shukra"
+splits = { score_optimize = 1.0 }
+note = "Venus → tax optimization / synergy"
+
+[[graha_map]]
+graha = "shani"
+splits = { score_protect = 1.0 }
+note = "Saturn → insurance / risk mitigation"
+
+[budget]
+unit = 100
+
+[[items]]
+id = "earn"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { earn_points = 1.0 }
+
+[[items]]
+id = "buffer"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { buffer_points = 1.0 }
+
+[[items]]
+id = "build"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { build_points = 1.0 }
+
+[[items]]
+id = "learn"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { learn_points = 1.0 }
+
+[[items]]
+id = "grow"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { grow_points = 1.0 }
+
+[[items]]
+id = "optimize"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { optimize_points = 1.0 }
+
+[[items]]
+id = "protect"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { protect_points = 1.0 }
+
+[objective]
+maximize = ["score_earn", "score_buffer", "score_build", "score_learn", "score_grow", "score_optimize", "score_protect"]
+
+[scoring.score_earn]
+terms = { earn_points = 1.0 }
+
+[scoring.score_buffer]
+terms = { buffer_points = 1.0 }
+
+[scoring.score_build]
+terms = { build_points = 1.0 }
+
+[scoring.score_learn]
+terms = { learn_points = 1.0 }
+
+[scoring.score_grow]
+terms = { grow_points = 1.0 }
+
+[scoring.score_optimize]
+terms = { optimize_points = 1.0 }
+
+[scoring.score_protect]
+terms = { protect_points = 1.0 }
+
+[[caveats]]
+applies_to = "score_protect"
+note = "Insurance (term life / disability / health) should be sized to dependents and income, not to this allocation percentage alone; consult a licensed advisor"
+source = "CFP Board consumer guidance"
+
+[[caveats]]
+applies_to = "score_grow"
+note = "Long-term investing assumes an already-funded emergency buffer (score_buffer); do not route surplus to markets before the buffer exists"
+source = "Bogleheads investing philosophy"

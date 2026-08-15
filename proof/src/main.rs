@@ -253,9 +253,16 @@ enum Commands {
     },
     /// Build: chart → graha weight mapping → optimize in one command
     Build {
-        /// Path to the TOML domain profile
+        /// Path or short name of a TOML domain profile. A bare name is resolved
+        /// against the built-in library (`lai build --list-profiles`): first as
+        /// a path, then `<name>.toml`, then `domains/<name>.toml` (CWD and the
+        /// crate's `domains/` dir), then `~/.laverna/domains/<name>.toml`.
+        /// Required unless `--list-profiles` is given.
         #[arg(short, long)]
-        domain: String,
+        domain: Option<String>,
+        /// List the built-in domain-profile library and exit (no build)
+        #[arg(long)]
+        list_profiles: bool,
         /// Local datetime: YYYY-MM-DD HH:MM[:SS] — REQUIRES --tz (IANA timezone).
         #[arg(short = 't', long)]
         datetime: Option<String>,
@@ -1140,8 +1147,9 @@ fn main() {
             top_k,
             explain,
             proof_out,
+            list_profiles,
         } => cmd_build(
-            &domain,
+            domain.as_deref(),
             datetime.as_deref(),
             datetime_utc.as_deref(),
             tz.as_deref(),
@@ -1151,6 +1159,7 @@ fn main() {
             top_k,
             explain,
             proof_out.as_deref(),
+            list_profiles,
         ),
         Commands::Strategize {
             query,
@@ -5887,8 +5896,91 @@ fn cmd_optimize(schema_path: &str, top_k: usize, explain: bool, format: &OutputF
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Resolve a `--domain` argument (path or short name) to a loadable TOML path.
+///
+/// Discovery order: as-given path → `<arg>.toml` → `domains/<arg>.toml` (CWD)
+/// → `<crate domains dir>/<arg>.toml` → `~/.laverna/domains/<arg>.toml`.
+/// Falls back to the original argument so the existing "cannot read" error
+/// fires if nothing resolves.
+fn resolve_domain_profile_path(arg: &str) -> String {
+    if std::path::Path::new(arg).exists() {
+        return arg.to_string();
+    }
+    let name = if arg.ends_with(".toml") {
+        arg.to_string()
+    } else {
+        format!("{arg}.toml")
+    };
+    let mut candidates: Vec<String> = vec![name.clone(), format!("domains/{name}")];
+    candidates.push(format!(
+        "{}/domains/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    ));
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(format!("{home}/.laverna/domains/{name}"));
+    }
+    for c in &candidates {
+        if std::path::Path::new(c).exists() {
+            return c.clone();
+        }
+    }
+    arg.to_string()
+}
+
+/// Print the built-in domain-profile library (name + description) and exit.
+/// Deterministic: profile dirs are scanned in a fixed order and names are
+/// sorted before printing so output is stable across runs.
+fn list_domain_profiles() {
+    let mut dirs: Vec<String> = Vec::new();
+    dirs.push(format!("{}/domains", env!("CARGO_MANIFEST_DIR")));
+    dirs.push("domains".to_string());
+    if let Ok(home) = std::env::var("HOME") {
+        dirs.push(format!("{home}/.laverna/domains"));
+    }
+
+    // Collect (name, description, source) entries, de-duplicating by name
+    // (earlier dirs win) and keeping insertion order for determinism.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut entries: Vec<(String, String, String)> = Vec::new();
+    for dir in &dirs {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(profile) = laverna::build::parse_domain_profile(&content) else {
+                continue;
+            };
+            let name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string();
+            if seen.insert(name.clone()) {
+                entries.push((name, profile.meta.description.clone(), dir.clone()));
+            }
+        }
+    }
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    println!("Built-in domain-profile library (use `lai build --domain <name>`):\n");
+    if entries.is_empty() {
+        println!("  (no profiles found)");
+    }
+    for (name, desc, _dir) in entries {
+        println!("  {name}\n    {desc}");
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn cmd_build(
-    domain_path: &str,
+    domain_path: Option<&str>,
     datetime: Option<&str>,
     datetime_utc: Option<&str>,
     tz: Option<&str>,
@@ -5898,8 +5990,20 @@ fn cmd_build(
     top_k: usize,
     explain: bool,
     proof_out: Option<&str>,
+    list_profiles: bool,
 ) {
-    let content = match std::fs::read_to_string(domain_path) {
+    if list_profiles {
+        list_domain_profiles();
+        return;
+    }
+    let domain_path = match domain_path {
+        Some(d) => resolve_domain_profile_path(d),
+        None => {
+            eprintln!("error: --domain <name|path> is required (or use --list-profiles)");
+            std::process::exit(2);
+        }
+    };
+    let content = match std::fs::read_to_string(&domain_path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("error: cannot read domain profile '{domain_path}': {e}");

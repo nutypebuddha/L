@@ -1,0 +1,137 @@
+# Project-management effort allocation (deterministic, chart-driven)
+#
+# Maps the 7 Vedic pillar weights onto seven engineering/PM workstreams and
+# solves the optimal split of a team's effort budget (default 100 points)
+# across them.
+#
+# Usage:
+#   laverna build --domain project_management \
+#     --datetime "1994-04-15 01:09" --tz "America/Chicago" \
+#     --latitude 45.41 --longitude -92.64 --explain
+#   laverna strategize --query "how should we staff the Q3 roadmap?" \
+#     --domain project_management --budget 100 --explain
+
+[meta]
+domain = "project_management"
+description = "Allocate team effort across delivery, operations, build, QA/research, planning, coordination, and risk"
+
+[[graha_map]]
+graha = "surya"
+splits = { score_deliver = 1.0 }
+note = "Sun → delivery / leadership"
+
+[[graha_map]]
+graha = "chandra"
+splits = { score_sustain = 1.0 }
+note = "Moon → operations / CI / sustain"
+
+[[graha_map]]
+graha = "mangala"
+splits = { score_build = 1.0 }
+note = "Mars → build / dev"
+
+[[graha_map]]
+graha = "budha"
+splits = { score_quality = 1.0 }
+note = "Mercury → QA / research / information"
+
+[[graha_map]]
+graha = "brihaspati"
+splits = { score_plan = 1.0 }
+note = "Jupiter → planning / roadmap"
+
+[[graha_map]]
+graha = "shukra"
+splits = { score_coord = 1.0 }
+note = "Venus → coordination / communication"
+
+[[graha_map]]
+graha = "shani"
+splits = { score_risk = 1.0 }
+note = "Saturn → risk / security / durability"
+
+[budget]
+unit = 100
+
+[[items]]
+id = "deliver"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { deliver_points = 1.0 }
+
+[[items]]
+id = "sustain"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { sustain_points = 1.0 }
+
+[[items]]
+id = "build"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { build_points = 1.0 }
+
+[[items]]
+id = "quality"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { quality_points = 1.0 }
+
+[[items]]
+id = "plan"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { plan_points = 1.0 }
+
+[[items]]
+id = "coord"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { coord_points = 1.0 }
+
+[[items]]
+id = "risk"
+type = "attribute"
+cost = { unit = 1 }
+max_level = 100
+effects = { risk_points = 1.0 }
+
+[objective]
+maximize = ["score_deliver", "score_sustain", "score_build", "score_quality", "score_plan", "score_coord", "score_risk"]
+
+[scoring.score_deliver]
+terms = { deliver_points = 1.0 }
+
+[scoring.score_sustain]
+terms = { sustain_points = 1.0 }
+
+[scoring.score_build]
+terms = { build_points = 1.0 }
+
+[scoring.score_quality]
+terms = { quality_points = 1.0 }
+
+[scoring.score_plan]
+terms = { plan_points = 1.0 }
+
+[scoring.score_coord]
+terms = { coord_points = 1.0 }
+
+[scoring.score_risk]
+terms = { risk_points = 1.0 }
+
+[[caveats]]
+applies_to = "score_risk"
+note = "Security/risk effort is frequently under-weighted under deadline pressure; treat the allocation as a floor, not a ceiling"
+source = "OWASP / Google SRE risk posture"
+
+[[caveats]]
+applies_to = "score_coord"
+note = "Coordination cost grows super-linearly with team size; cap this axis before scaling headcount"
+source = "Brooks's Law (The Mythical Man-Month)"
