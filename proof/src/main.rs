@@ -697,6 +697,19 @@ enum StrategyAction {
         #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
         format: OutputFormat,
     },
+    /// Information-gain planning: rank open unknowns/contradictions by decision
+    /// value and recommend the next information-gathering action (directive §24).
+    Research {
+        /// Optional world-state JSON supplying open unknowns/contradictions.
+        #[arg(long)]
+        world: Option<PathBuf>,
+        /// Optional strategy JSON for context (affected strategies).
+        #[arg(long)]
+        strategy: Option<PathBuf>,
+        /// Output format: json (default) or text
+        #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+        format: OutputFormat,
+    },
 }
 
 /// Subcommands of `lai tanto`.
@@ -9385,6 +9398,38 @@ fn cmd_strategy(action: StrategyAction) {
                 println!("  changed actions     : {:?}", diff.changed_actions);
                 println!("  changed resources   : {:?}", diff.changed_resources);
                 println!("  invalidated assumpt.: {:?}", diff.invalidated_assumptions);
+            }
+        }
+        StrategyAction::Research {
+            world,
+            strategy,
+            format,
+        } => {
+            let ws = match &world {
+                Some(p) => read_world_state(p),
+                None => lai_core::WorldState::new(),
+            };
+            let strategies = match &strategy {
+                Some(p) => vec![read_strategy(p)],
+                None => vec![],
+            };
+            let plan = lai_core::research_plan(&ws, &strategies);
+            if format == OutputFormat::Json {
+                println!("{}", serde_json::to_string(&plan).unwrap());
+            } else {
+                println!(
+                    "Research plan — recommended next action: {}",
+                    plan.recommended_next_action
+                );
+                for (i, t) in plan.tasks.iter().enumerate() {
+                    println!(
+                        "  {}. [gain {:.2} x sens {:.2}] {}",
+                        i + 1,
+                        t.expected_information_gain,
+                        t.decision_sensitivity,
+                        t.question
+                    );
+                }
             }
         }
     }

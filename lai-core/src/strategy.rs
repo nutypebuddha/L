@@ -635,6 +635,96 @@ pub fn diff_strategies(old: &Strategy, new: &Strategy) -> StrategyDiff {
     }
 }
 
+/// An actionable open question with an estimated payoff (directive §24). Unknowns
+/// must become tasks, not dead ends: "what should I learn before acting?"
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ResearchTask {
+    pub question: String,
+    /// Expected information gain in [0, 1].
+    pub expected_information_gain: f64,
+    /// Estimated cost of resolving in [0, 1] (effort / resources).
+    pub cost: f64,
+    pub urgency: String,
+    pub affected_strategies: usize,
+    /// How much a change here would flip the chosen strategy, in [0, 1].
+    pub decision_sensitivity: f64,
+}
+
+/// A ranked research plan: the open unknowns/contradictions, ordered by value, plus
+/// the recommended next action (directive §24 — DO-NOT-ACT-YET is valid).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ResearchPlan {
+    pub tasks: Vec<ResearchTask>,
+    pub recommended_next_action: String,
+}
+
+fn gain_score(label: &str) -> f64 {
+    match label.to_lowercase().as_str() {
+        "high" => 1.0,
+        "medium" => 0.6,
+        "low" => 0.3,
+        _ => 0.5,
+    }
+}
+
+/// Build a deterministic research plan from a world's open unknowns and unresolved
+/// contradictions. Tasks are ranked by `information_gain * (1 + decision_sensitivity)`
+/// so the highest-leverage learning comes first; an empty plan recommends acting.
+pub fn research_plan(ws: &WorldState, _strategies: &[Strategy]) -> ResearchPlan {
+    let mut tasks: Vec<ResearchTask> = ws
+        .uncertainties
+        .iter()
+        .map(|u| {
+            let gain = gain_score(&u.information_gain);
+            let impact = gain_score(&u.impact);
+            ResearchTask {
+                question: u.question.clone(),
+                expected_information_gain: gain,
+                cost: 0.5,
+                urgency: u.urgency.clone(),
+                affected_strategies: u.strategies_affected,
+                decision_sensitivity: impact,
+            }
+        })
+        .collect();
+    for c in &ws.contradictions {
+        if c.resolution_status == ContradictionStatus::Unresolved {
+            let sev = match c.severity.to_lowercase().as_str() {
+                "critical" => 1.0,
+                "major" => 0.7,
+                "minor" => 0.4,
+                _ => 0.5,
+            };
+            tasks.push(ResearchTask {
+                question: format!("resolve contradiction {} ({})", c.id, c.severity),
+                expected_information_gain: 0.8,
+                cost: 0.6,
+                urgency: if c.severity.to_lowercase() == "critical" {
+                    "high".into()
+                } else {
+                    "medium".into()
+                },
+                affected_strategies: 1,
+                decision_sensitivity: sev,
+            });
+        }
+    }
+    tasks.sort_by(|a, b| {
+        let sa = a.expected_information_gain * (1.0 + a.decision_sensitivity);
+        let sb = b.expected_information_gain * (1.0 + b.decision_sensitivity);
+        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let recommended_next_action = if tasks.is_empty() {
+        "act — no open unknowns; proceed with monitoring".to_string()
+    } else {
+        "research / ask — resolve open unknowns before acting".to_string()
+    };
+    ResearchPlan {
+        tasks,
+        recommended_next_action,
+    }
+}
+
 /// Result of applying one [`Action`] to a [`WorldState`] (directive §17/§30). A
 /// transition records the before/after state, the effects produced, and any
 /// constraint/resource violations — so simulation is inspectable and reproducible
@@ -1070,5 +1160,53 @@ mod proof_tests {
         let j = serde_json::to_string(&p).unwrap();
         assert!(j.contains("\"gate_verdict\""));
         assert!(j.contains("\"chosen_strategy_id\""));
+    }
+}
+
+#[cfg(test)]
+mod research_tests {
+    use super::*;
+
+    #[test]
+    fn research_plan_ranks_high_gain_first_and_recommends() {
+        let mut ws = WorldState::new();
+        ws.uncertainties.push(Unknown {
+            question: "low-value unknown".into(),
+            impact: "low".into(),
+            urgency: "low".into(),
+            strategies_affected: 1,
+            information_gain: "low".into(),
+        });
+        ws.uncertainties.push(Unknown {
+            question: "high-value unknown".into(),
+            impact: "high".into(),
+            urgency: "high".into(),
+            strategies_affected: 2,
+            information_gain: "high".into(),
+        });
+        ws.contradictions.push(Contradiction {
+            id: "C1".into(),
+            claim_ids: vec!["A".into()],
+            evidence: vec![],
+            context: None,
+            severity: "critical".into(),
+            resolution_status: ContradictionStatus::Unresolved,
+        });
+        let plan = research_plan(&ws, &[]);
+        assert!(!plan.tasks.is_empty());
+        // Highest score (high gain * high sensitivity, or critical contradiction) first.
+        assert!(
+            plan.tasks[0].expected_information_gain
+                >= plan.tasks.last().unwrap().expected_information_gain
+        );
+        assert!(plan.recommended_next_action.contains("research"));
+    }
+
+    #[test]
+    fn research_plan_with_no_unknowns_recommends_acting() {
+        let ws = WorldState::new();
+        let plan = research_plan(&ws, &[]);
+        assert!(plan.tasks.is_empty());
+        assert!(plan.recommended_next_action.contains("act"));
     }
 }

@@ -16,8 +16,9 @@ pub use primitive::{
     xor, ExprNode, NandDag, NandExprError, NandExpression, NandNode,
 };
 pub use strategy::{
-    diff_strategies, generate_challenge, simulate_sequence, stable_hash, Action, ChallengeReport,
-    Claim, Contradiction, ContradictionStatus, Counterexample, DeterministicSimulator,
-    EntityResolution, EpistemicStatus, Evidence, Observation, Proof, Simulator, StateDelta,
-    Strategy, StrategyDiff, StrategyIR, StrategyVerdict, Transition, Unknown, WorldState,
+    diff_strategies, generate_challenge, research_plan, simulate_sequence, stable_hash, Action,
+    ChallengeReport, Claim, Contradiction, ContradictionStatus, Counterexample,
+    DeterministicSimulator, EntityResolution, EpistemicStatus, Evidence, Observation, Proof,
+    ResearchPlan, ResearchTask, Simulator, StateDelta, Strategy, StrategyDiff, StrategyIR,
+    StrategyVerdict, Transition, Unknown, WorldState,
 };
