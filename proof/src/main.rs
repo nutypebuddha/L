@@ -8960,20 +8960,25 @@ fn cmd_strategy(action: StrategyAction) {
             // Compiler-IR stage: natural language -> semantic grounding -> StrategyIR.
             let ir = laverna::strategy::build_strategy_ir(&ws, &objective);
 
+            // Semantic grounding health (T-NEW-3): every resolution below the
+            // confidence bar and every unresolved multi-word concept is an
+            // uncertainty that must be surfaced, never silently swallowed.
+            let weak: Vec<String> = resolutions
+                .iter()
+                .filter(|r| r.confidence < 0.5)
+                .map(|r| r.mention.clone())
+                .collect();
+            let speculative = !weak.is_empty() || !ws.concepts.is_empty();
+
             // --strict: refuse low-confidence semantic routing / unresolved critical concepts.
             if strict {
-                let weak: Vec<&str> = resolutions
-                    .iter()
-                    .filter(|r| r.confidence < 0.5)
-                    .map(|r| r.mention.as_str())
-                    .collect();
                 if !weak.is_empty() {
                     let value = serde_json::json!({
                         "status": "blocked_by_unknowns",
                         "execution": "success",
                         "verified": false,
                         "strategy_available": false,
-                        "weak_concepts": weak,
+                        "weak_concepts": weak.clone(),
                     });
                     if format == OutputFormat::Json {
                         println!("{}", serde_json::to_string(&value).unwrap());
@@ -8990,7 +8995,7 @@ fn cmd_strategy(action: StrategyAction) {
                         "execution": "success",
                         "verified": false,
                         "strategy_available": false,
-                        "unresolved_concepts": ws.concepts,
+                        "unresolved_concepts": ws.concepts.clone(),
                     });
                     if format == OutputFormat::Json {
                         println!("{}", serde_json::to_string(&value).unwrap());
@@ -9028,12 +9033,29 @@ fn cmd_strategy(action: StrategyAction) {
                 .enumerate()
                 .map(|(i, a)| laverna::strategy::allocation_to_strategy(a, &schema, &ir, i + 1))
                 .collect();
+            // T-NEW-3: default (non-strict) mode must not claim full verification
+            // on thin semantic grounding. Mirror `strategize`: a `speculative`
+            // bool + `warning` string (plus the offending items) so downstream
+            // consumers can detect degraded confidence without --strict.
+            let warning = if speculative {
+                Some(format!(
+                    "strategy is speculative: {} unresolved concept(s) and {} weak semantic resolution(s); pass --strict to block on unknowns instead",
+                    ws.concepts.len(),
+                    weak.len(),
+                ))
+            } else {
+                None
+            };
             if format == OutputFormat::Json {
                 let value = serde_json::json!({
                     "status": "verified",
                     "execution": "success",
                     "verified": true,
                     "strategy_available": true,
+                    "speculative": speculative,
+                    "warning": warning,
+                    "unresolved_concepts": ws.concepts,
+                    "weak_concepts": weak,
                     "objective": objective,
                     "world_state_version": ws.version,
                     "strategy_ir": ir,
@@ -9041,6 +9063,11 @@ fn cmd_strategy(action: StrategyAction) {
                 });
                 println!("{}", serde_json::to_string(&value).unwrap());
             } else {
+                if speculative {
+                    println!(
+                        "⚠ unresolved concepts / weak semantic resolutions present — allocation is SPECULATIVE (low confidence); pass --strict to block on unknowns"
+                    );
+                }
                 for s in &strategies {
                     print!("{}", s.explain());
                 }

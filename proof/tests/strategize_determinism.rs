@@ -137,3 +137,115 @@ fn strategize_fractional_budget_never_exceeds() {
         );
     }
 }
+
+fn generate_json(text: &str, budget: &str, strict: bool) -> Value {
+    let mut args = vec![
+        "strategy", "generate", text, "--budget", budget, "--top-k", "3", "--format", "json",
+    ];
+    if strict {
+        args.push("--strict");
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_lai"))
+        .args(&args)
+        .output()
+        .expect("spawn laverna");
+    let stdout = String::from_utf8(out.stdout).expect("stdout is utf-8");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "generate failed (status={:?}) stdout={stdout:?} stderr={stderr}",
+        out.status.code()
+    );
+    serde_json::from_str(&stdout).expect("generate output is JSON")
+}
+
+#[test]
+fn generate_unresolved_input_is_flagged_speculative() {
+    // T-NEW-3: default mode on an input with no real corpus match must clearly
+    // flag degraded confidence (speculative + warning), never silently emit a
+    // bare "verified". This is the audit repro input.
+    let v = generate_json(
+        "A competitor just launched a cheaper product. Morale is low due to recent layoffs.",
+        "20",
+        false,
+    );
+    assert_eq!(
+        v["speculative"],
+        Value::Bool(true),
+        "unresolved input must be flagged speculative"
+    );
+    assert!(
+        v["warning"].is_string() && !v["warning"].as_str().unwrap().is_empty(),
+        "speculative output must carry a non-null warning, got {:?}",
+        v["warning"]
+    );
+    assert!(
+        !v["unresolved_concepts"].as_array().unwrap().is_empty(),
+        "unresolved concepts must be enumerated"
+    );
+    // T-NEW-2 gate: no phantom "due to" entity anywhere in the strategy IR or
+    // evidence of a "verified" output.
+    let ir = &v["strategy_ir"];
+    assert_eq!(
+        ir["entities"].as_object().map(|m| m.len()).unwrap_or(0),
+        0,
+        "strategy_ir.entities must be empty for this input, got {:?}",
+        ir["entities"]
+    );
+    for s in v["strategies"].as_array().unwrap() {
+        for ev in s["evidence"].as_array().unwrap() {
+            assert!(
+                !ev.as_str().unwrap().contains("disability_insurance"),
+                "no spurious disability_insurance in evidence, got {ev:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn generate_strict_still_blocks_on_unresolved() {
+    // T-NEW-3: --strict must still refuse on the same input (blocked_by_unknowns).
+    let args = vec![
+        "strategy",
+        "generate",
+        "A competitor just launched a cheaper product. Morale is low due to recent layoffs.",
+        "--budget",
+        "20",
+        "--top-k",
+        "3",
+        "--format",
+        "json",
+        "--strict",
+    ];
+    let out = Command::new(env!("CARGO_BIN_EXE_lai"))
+        .args(&args)
+        .output()
+        .expect("spawn laverna");
+    assert!(out.status.success(), "strict refusal must still exit 0");
+    let v: Value = serde_json::from_slice(&out.stdout).expect("strict output is JSON");
+    assert_eq!(
+        v["status"],
+        Value::String("blocked_by_unknowns".to_string()),
+        "--strict must block on unresolved concepts, got {:?}",
+        v
+    );
+    assert_eq!(v["verified"], Value::Bool(false));
+}
+
+#[test]
+fn generate_fully_grounded_is_not_speculative() {
+    // A fully-grounded input (no unresolved n-grams, no weak resolutions) must
+    // be clean: speculative:false, warning:null.
+    let v = generate_json("budget", "10", false);
+    assert_eq!(
+        v["speculative"],
+        Value::Bool(false),
+        "fully-grounded input must not be speculative, got {:?}",
+        v
+    );
+    assert!(
+        v["warning"].is_null(),
+        "clean output must carry warning: null, got {:?}",
+        v["warning"]
+    );
+}
