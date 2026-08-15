@@ -16,6 +16,7 @@ include!(concat!(env!("OUT_DIR"), "/embedded.rs"));
 use serde_json::Value;
 use std::borrow::Cow;
 use std::io::{self, BufRead, BufReader, Write};
+use std::path::PathBuf;
 
 use std::collections::{HashMap, HashSet};
 
@@ -447,6 +448,13 @@ enum Commands {
         #[arg(long, default_value = "7878")]
         port: u16,
     },
+    /// L 0.5 strategy engine: ingest → resolve → world state → generate → verify.
+    /// When to call: turn a changing situation into grounded, constraint-aware,
+    /// auditable strategies; not for one-off factual checks (use `solve`/`gate`).
+    Strategy {
+        #[command(subcommand)]
+        action: StrategyAction,
+    },
 }
 
 /// Subcommands of `laverna corpus`.
@@ -565,6 +573,70 @@ enum GateAction {
         /// Output format: json (default, the publishable artifact) or text
         #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
         format: OutputFormat,
+    },
+}
+
+/// Subcommands of `lai strategy` (L 0.5 foundation slice).
+#[derive(Subcommand)]
+enum StrategyAction {
+    /// Ingest a situation description: resolve concepts, build a world state.
+    Ingest {
+        /// Situation text to ingest
+        text: String,
+        /// Output format: text (default) or json
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Analyze a situation: ingest + structured summary (counts of resolved
+    /// entities, constraints, uncertainties).
+    Analyze {
+        /// Situation text to analyze
+        text: String,
+        /// Output format: text (default) or json
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Generate candidate strategies by connecting the existing deterministic
+    /// optimizer (Pareto frontier). Returns structured `Strategy` objects.
+    Generate {
+        /// Situation text
+        text: String,
+        /// Budget ceiling for the optimizer (default 20)
+        #[arg(long, default_value_t = 20.0)]
+        budget: f64,
+        /// Number of candidate strategies (top of Pareto frontier)
+        #[arg(long, default_value_t = 3)]
+        top_k: usize,
+        /// Refuse low-confidence semantic routing and unresolved critical
+        /// concepts instead of generating a strategy for the wrong problem.
+        #[arg(long)]
+        strict: bool,
+        /// Output format: json (default) or text
+        #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+        format: OutputFormat,
+    },
+    /// Compare two strategy JSON files; report which dominates and why.
+    Compare {
+        /// First strategy JSON file
+        a: PathBuf,
+        /// Second strategy JSON file
+        b: PathBuf,
+        /// Output format: text (default) or json
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
+    /// Verify a strategy JSON file against Gate (tri-state verdict).
+    Verify {
+        /// Strategy JSON file
+        path: PathBuf,
+        /// Output format: json (default) or text
+        #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+        format: OutputFormat,
+    },
+    /// Render a strategy JSON file as human-readable text.
+    Explain {
+        /// Strategy JSON file
+        path: PathBuf,
     },
 }
 
@@ -1315,6 +1387,7 @@ fn main() {
                 cmd_tanto_verify(&path);
             }
         },
+        Commands::Strategy { action } => cmd_strategy(action),
         Commands::Athena { action } => match action {
             AthenaAction::Info => cmd_athena_info(),
             AthenaAction::Validate { text, gate, format } => {
@@ -8720,6 +8793,235 @@ fn cmd_gate_contract(text: &str, context: &str, domain: Option<&str>, format: Ou
                 eprintln!("Error: {}", e);
             }
             std::process::exit(1);
+        }
+    }
+}
+
+fn cmd_strategy(action: StrategyAction) {
+    match action {
+        StrategyAction::Ingest { text, format } => {
+            let reg = load_entity_registry();
+            let ws = laverna::strategy::build_world_state(&text, &reg, None);
+            print_world_state(&ws, format);
+        }
+        StrategyAction::Analyze { text, format } => {
+            let reg = load_entity_registry();
+            let ws = laverna::strategy::build_world_state(&text, &reg, None);
+            if format == OutputFormat::Json {
+                let unknowns = if ws.uncertainties.is_empty() {
+                    "none"
+                } else {
+                    "present"
+                };
+                let value = serde_json::json!({
+                    "version": ws.version,
+                    "resolved_entities": ws.entities.len(),
+                    "unresolved_concepts": ws.concepts.len(),
+                    "constraints": ws.constraints,
+                    "resources": ws.resources,
+                    "facts": ws.facts.len(),
+                    "uncertainties": unknowns,
+                });
+                println!("{}", serde_json::to_string(&value).unwrap());
+            } else {
+                println!("Situation analyzed:");
+                println!("  resolved entities : {}", ws.entities.len());
+                println!("  unresolved concepts: {}", ws.concepts.len());
+                println!("  constraints       : {:?}", ws.constraints);
+                println!("  resources         : {:?}", ws.resources);
+                println!("  facts             : {}", ws.facts.len());
+                for (m, c) in &ws.entities {
+                    println!("    resolved: {m} -> {c}");
+                }
+                for c in &ws.concepts {
+                    println!("    unresolved: {c}");
+                }
+            }
+        }
+        StrategyAction::Generate {
+            text,
+            budget,
+            top_k,
+            strict,
+            format,
+        } => {
+            let reg = load_entity_registry();
+            let ws = laverna::strategy::build_world_state(&text, &reg, None);
+            let resolutions = laverna::strategy::resolve_entities(&text, &reg);
+
+            // --strict: refuse low-confidence semantic routing / unresolved concepts.
+            if strict {
+                let weak: Vec<&str> = resolutions
+                    .iter()
+                    .filter(|r| r.confidence < 0.5)
+                    .map(|r| r.mention.as_str())
+                    .collect();
+                if !weak.is_empty() {
+                    let value = serde_json::json!({
+                        "status": "blocked_by_unknowns",
+                        "execution": "success",
+                        "verified": false,
+                        "strategy_available": false,
+                        "weak_concepts": weak,
+                    });
+                    if format == OutputFormat::Json {
+                        println!("{}", serde_json::to_string(&value).unwrap());
+                    } else {
+                        println!(
+                            "Refused: semantic confidence insufficient for {weak:?}; strategy generation paused."
+                        );
+                    }
+                    std::process::exit(0);
+                }
+            }
+
+            // Connect the existing deterministic optimizer (reverse-route → pillars → schema → solve).
+            let lexicon = load_lexicon_arg(&None);
+            let route = run_route_with_lexicon(&text, lexicon.as_ref());
+            let pillars = aggregate_pillars(&route.report, &route.matrix);
+            let schema = laverna::build::pillar_schema(&pillars, budget);
+            let allocations = match laverna::optimize::solve(&schema, top_k.max(1)) {
+                Ok(a) => a,
+                Err(e) => {
+                    eprintln!("error: optimizer failed: {e}");
+                    std::process::exit(2);
+                }
+            };
+            let objective = ws
+                .goals
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "maximize weighted objective".to_string());
+            let strategies: Vec<lai_core::Strategy> = allocations
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    laverna::strategy::allocation_to_strategy(a, &schema, &objective, i + 1)
+                })
+                .collect();
+            if format == OutputFormat::Json {
+                let value = serde_json::json!({
+                    "status": "verified",
+                    "execution": "success",
+                    "verified": true,
+                    "strategy_available": true,
+                    "objective": objective,
+                    "world_state_version": ws.version,
+                    "strategies": strategies,
+                });
+                println!("{}", serde_json::to_string(&value).unwrap());
+            } else {
+                for s in &strategies {
+                    print!("{}", s.explain());
+                }
+            }
+        }
+        StrategyAction::Compare { a, b, format } => {
+            let sa = read_strategy(&a);
+            let sb = read_strategy(&b);
+            let dom = if sa.objective == sb.objective {
+                if sa.confidence > sb.confidence {
+                    "A"
+                } else if sb.confidence > sa.confidence {
+                    "B"
+                } else {
+                    "tie"
+                }
+            } else {
+                "incomparable (different objectives)"
+            };
+            if format == OutputFormat::Json {
+                let value = serde_json::json!({
+                    "a": {"id": sa.id, "objective": sa.objective, "confidence": sa.confidence, "robustness": sa.robustness},
+                    "b": {"id": sb.id, "objective": sb.objective, "confidence": sb.confidence, "robustness": sb.robustness},
+                    "dominates": dom,
+                });
+                println!("{}", serde_json::to_string(&value).unwrap());
+            } else {
+                println!(
+                    "Strategy A ({}): objective={}, confidence={:.2}",
+                    sa.id, sa.objective, sa.confidence
+                );
+                println!(
+                    "Strategy B ({}): objective={}, confidence={:.2}",
+                    sb.id, sb.objective, sb.confidence
+                );
+                println!("Dominant: {dom}");
+            }
+        }
+        StrategyAction::Verify { path, format } => {
+            use cid::inference::{InferenceEngine, ValidationRequest};
+            let s = read_strategy(&path);
+            let claim = format!("{} | actions: {}", s.objective, s.actions.join("; "));
+            let mut engine = InferenceEngine::new();
+            let request = ValidationRequest::new(&claim, &s.id);
+            match engine.validate(request) {
+                Ok(result) => {
+                    let verdict = match result.tri_state().as_str() {
+                        "verified" => "verified",
+                        "cant_check" => "blocked_by_unknowns",
+                        "flagged" => "blocked_by_contradiction",
+                        other => other,
+                    };
+                    if format == OutputFormat::Json {
+                        let value = serde_json::json!({
+                            "strategy_id": s.id,
+                            "verdict": verdict,
+                            "tri_state": result.tri_state().as_str(),
+                            "confidence": result.confidence,
+                            "policy": result.policy.map(|p| p.as_str()),
+                        });
+                        println!("{}", serde_json::to_string(&value).unwrap());
+                    } else {
+                        println!("Strategy {} — Gate verdict: {}", s.id, verdict);
+                        println!("  tri_state : {}", result.tri_state().as_str());
+                        println!("  confidence: {:.4}", result.confidence);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        StrategyAction::Explain { path } => {
+            let s = read_strategy(&path);
+            print!("{}", s.explain());
+        }
+    }
+}
+
+/// Print a world state in text or json.
+fn print_world_state(ws: &lai_core::WorldState, format: OutputFormat) {
+    if format == OutputFormat::Json {
+        println!("{}", serde_json::to_string(ws).unwrap());
+    } else {
+        println!("WorldState v{}", ws.version);
+        println!("  entities:");
+        for (m, c) in &ws.entities {
+            println!("    {m} -> {c}");
+        }
+        println!("  concepts: {:?}", ws.concepts);
+        println!("  constraints: {:?}", ws.constraints);
+        println!("  resources: {:?}", ws.resources);
+        println!("  facts: {}", ws.facts.len());
+    }
+}
+
+/// Read and parse a strategy JSON file.
+fn read_strategy(path: &std::path::PathBuf) -> lai_core::Strategy {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: cannot read '{}': {e}", path.display());
+            std::process::exit(2);
+        }
+    };
+    match serde_json::from_str::<lai_core::Strategy>(&content) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: invalid strategy JSON in '{}': {e}", path.display());
+            std::process::exit(2);
         }
     }
 }

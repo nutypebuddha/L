@@ -524,6 +524,220 @@ pub fn reweight_pillars_with_sensor_forces(
     }
 }
 
+// ── L 0.5 strategy-engine foundation (L Elevation Directive) ──────────────────
+//
+// These helpers build the explicit world/state/strategy models and wire the
+// existing deterministic optimizer into the strategy pipeline. They are kept
+// small and independently testable; the full pipeline (§2) is assembled in the
+// `lai strategy` CLI command.
+
+use crate::entity::EntityRegistry;
+use crate::optimize::{Allocation, Schema};
+use lai_core::{EntityResolution, EpistemicStatus, Fact, Strategy, WorldState};
+
+/// Resolve the surface mentions in `text` against the embedded corpus entity
+/// registry. Builds n-grams (1..=3 words) so multi-word concepts like
+/// "distributed systems" are treated as one concept rather than blind tokens.
+///
+/// Precision rules (the directive's highest-priority semantic fix):
+/// - single words match only an exact entity `id`/`name` (not free-text
+///   descriptions, which would silently resolve stopwords to facts);
+/// - multi-word phrases may match a description substring (a real concept);
+/// - stopwords and bare numbers never resolve.
+///
+/// Low-confidence or unresolved mentions are surfaced as concepts, never
+/// silently upgraded to authoritative facts.
+pub fn resolve_entities(text: &str, reg: &EntityRegistry) -> Vec<EntityResolution> {
+    let words: Vec<String> = text
+        .split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_lowercase())
+        .collect();
+    let mut consumed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<EntityResolution> = Vec::new();
+    // Longest n-grams first so "distributed systems" wins over "systems".
+    for n in (1..=3).rev() {
+        for window in words.windows(n) {
+            let phrase = window.join(" ");
+            if consumed.contains(&phrase) {
+                continue;
+            }
+            if n == 1 {
+                if crate::nlp::is_stopword(&phrase) {
+                    continue;
+                }
+                if phrase.chars().all(|c| c.is_ascii_digit()) {
+                    continue;
+                }
+            }
+            // Exact id/name match first (high precision). Corpus ids are
+            // snake_case while surface text has spaces, so normalize both sides.
+            let phrase_norm = phrase.replace('_', " ");
+            let mut hits: Vec<&crate::entity::SeedEntity> = reg
+                .seeds()
+                .filter(|s| {
+                    s.id.replace('_', " ").to_lowercase() == phrase_norm
+                        || s.name.replace('_', " ").to_lowercase() == phrase_norm
+                })
+                .collect();
+            // Multi-word concepts may match a description substring.
+            if hits.is_empty() && n >= 2 {
+                hits = reg
+                    .seeds()
+                    .filter(|s| s.description.to_lowercase().contains(&phrase))
+                    .collect();
+            }
+            if hits.is_empty() {
+                continue;
+            }
+            consumed.insert(phrase.clone());
+            let best = hits[0];
+            let exact = best.id.replace('_', " ").to_lowercase() == phrase_norm
+                || best.name.replace('_', " ").to_lowercase() == phrase_norm;
+            let confidence = if exact { 0.95 } else { 0.8 };
+            let alternatives: Vec<String> =
+                hits.iter().skip(1).take(3).map(|h| h.id.clone()).collect();
+            out.push(EntityResolution {
+                mention: phrase.clone(),
+                canonical_name: best.id.clone(),
+                entity_type: "seed_entity".into(),
+                domain: best.dominant_graha().map(|g| format!("{g:?}")),
+                confidence,
+                evidence: format!("matched '{phrase}' in corpus ({} hit(s))", hits.len()),
+                alternatives,
+            });
+        }
+    }
+    out
+}
+
+/// Extract resource constraints and a numeric budget from free text.
+/// Recognizes `budget <= N`, `budget < N`, and `time <= N days` style phrases.
+pub fn parse_resource_constraints(text: &str) -> (f64, Vec<String>) {
+    let lower = text.to_lowercase();
+    let mut budget = 0.0f64;
+    let mut constraints = Vec::new();
+
+    // budget (<= or <) — spaced forms only, to avoid double-matching.
+    for (pat, le) in [("budget <= ", true), ("budget < ", false)] {
+        if let Some(pos) = lower.find(pat) {
+            let rest = &lower[pos + pat.len()..];
+            if let Some(num) = rest.split_whitespace().next().and_then(|t| {
+                t.trim_matches(|c: char| !c.is_ascii_digit() && c != '.')
+                    .parse::<f64>()
+                    .ok()
+            }) {
+                budget = num;
+                constraints.push(format!("budget {} {num}", if le { "<=" } else { "<" }));
+            }
+        }
+    }
+    // time constraint
+    if let Some(pos) = lower.find("time <=") {
+        let rest = &lower[pos + "time <=".len()..];
+        if let Some(num) = rest.split_whitespace().next().and_then(|t| {
+            t.trim_matches(|c: char| !c.is_ascii_digit() && c != '.')
+                .parse::<f64>()
+                .ok()
+        }) {
+            constraints.push(format!("time <= {num} days"));
+        }
+    }
+    (budget, constraints)
+}
+
+/// Build a [`WorldState`] from a free-text situation: resolve entities, record
+/// the observation as a fact (epistemic `Observed`), and capture any parsed
+/// resource constraints.
+pub fn build_world_state(text: &str, reg: &EntityRegistry, ts: Option<String>) -> WorldState {
+    let mut ws = WorldState::new();
+    let res = resolve_entities(text, reg);
+    let resolved_mentions: std::collections::HashSet<&str> =
+        res.iter().map(|r| r.mention.as_str()).collect();
+    for r in &res {
+        if r.confidence >= 0.5 {
+            ws.entities
+                .insert(r.mention.clone(), r.canonical_name.clone());
+        } else {
+            ws.concepts.push(r.mention.clone());
+        }
+    }
+    // Surface unresolved multi-word phrases as concepts (never silently dropped).
+    let words: Vec<String> = text
+        .split(|c: char| !(c.is_alphanumeric() || c == '\''))
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_lowercase())
+        .collect();
+    for n in 2..=3 {
+        for window in words.windows(n) {
+            let phrase = window.join(" ");
+            if resolved_mentions.contains(phrase.as_str()) {
+                continue;
+            }
+            if phrase.split_whitespace().all(crate::nlp::is_stopword) {
+                continue;
+            }
+            if !ws.concepts.contains(&phrase) {
+                ws.concepts.push(phrase);
+            }
+        }
+    }
+    ws.observations.push(text.to_string());
+    ws.facts.push(Fact {
+        id: "obs_1".into(),
+        statement: text.to_string(),
+        status: EpistemicStatus::Observed,
+        evidence_refs: res.iter().map(|r| r.canonical_name.clone()).collect(),
+    });
+    let (budget, constraints) = parse_resource_constraints(text);
+    if budget > 0.0 {
+        ws.resources.insert("budget".into(), budget);
+    }
+    ws.constraints.extend(constraints);
+    ws.timestamp = ts;
+    ws.provenance.push("lai strategy ingest".into());
+    ws
+}
+
+/// Convert a deterministic optimizer [`Allocation`] into a structured
+/// [`Strategy`]. The objective comes from the caller (e.g. the ingested goal);
+/// the allocation's chosen item levels become the actions.
+pub fn allocation_to_strategy(
+    alloc: &Allocation,
+    schema: &Schema,
+    objective: &str,
+    idx: usize,
+) -> Strategy {
+    let actions: Vec<String> = alloc
+        .levels
+        .iter()
+        .map(|(id, lvl)| format!("{id} x {lvl}"))
+        .collect();
+    let confidence = if alloc.objective > 0.0 {
+        (alloc.objective / (alloc.objective + 1.0)).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    Strategy {
+        id: format!("S{idx:02}"),
+        objective: objective.to_string(),
+        assumptions: vec!["world model derived from ingested text".into()],
+        constraints: schema
+            .budget
+            .iter()
+            .map(|(k, v)| format!("{k} <= {v}"))
+            .collect(),
+        actions,
+        resources: schema.budget.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+        expected_outcomes: vec![format!("objective value {:.3}", alloc.objective)],
+        risks: vec!["depends on correctness of the ingested world model".into()],
+        dependencies: Vec::new(),
+        evidence: vec!["deterministic optimizer (Pareto frontier)".into()],
+        confidence,
+        robustness: 0.5,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -773,5 +987,92 @@ mod tests {
         for w in &pillars {
             assert_eq!(*w, 1.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod foundation_tests {
+    use super::*;
+    use crate::entity::{EntityRegistry, SeedEntity};
+    use std::collections::HashMap;
+
+    fn seed(id: &str, desc: &str) -> SeedEntity {
+        SeedEntity {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: desc.to_string(),
+            classification: None,
+            properties: HashMap::new(),
+            constants: HashMap::new(),
+            tags: vec![],
+            formula: None,
+            birth_time: None,
+            bija: None,
+            mantra: None,
+            day: None,
+            ruled_nakshatras: vec![],
+        }
+    }
+
+    #[test]
+    fn resolve_exact_id_high_confidence() {
+        let mut reg = EntityRegistry::new();
+        reg.register_seed(seed(
+            "surveillance_capitalism",
+            "theory of surveillance capitalism and distributed systems",
+        ));
+        let res = resolve_entities("limit surveillance capitalism now", &reg);
+        assert!(
+            res.iter()
+                .any(|r| r.canonical_name == "surveillance_capitalism" && r.confidence >= 0.95),
+            "expected exact id resolution"
+        );
+    }
+
+    #[test]
+    fn resolve_skips_stopwords_and_bare_numbers() {
+        let mut reg = EntityRegistry::new();
+        reg.register_seed(seed("budget", "financial budget concept"));
+        let res = resolve_entities("we must secure 100 systems", &reg);
+        // "we"/"must"/"100"/"systems" are stopword/number/non-exact -> not resolved
+        assert!(
+            !res.iter().any(|r| r.canonical_name == "budget"),
+            "stopwords/numbers must not resolve"
+        );
+    }
+
+    #[test]
+    fn multiword_unresolved_surfaces_as_concept() {
+        let reg = EntityRegistry::new();
+        let ws = build_world_state("manage the distributed systems risk", &reg, None);
+        assert!(
+            ws.concepts
+                .iter()
+                .any(|c| c.contains("distributed systems")),
+            "unresolved multi-word phrase should surface as a concept"
+        );
+    }
+
+    #[test]
+    fn parse_budget_once_no_duplicate() {
+        let (b, c) = parse_resource_constraints("spend with budget <= 100 please");
+        assert_eq!(b, 100.0);
+        assert_eq!(c, vec!["budget <= 100".to_string()]);
+    }
+
+    #[test]
+    fn world_state_captures_budget_resource() {
+        let mut reg = EntityRegistry::new();
+        reg.register_seed(seed(
+            "surveillance_capitalism",
+            "surveillance capitalism theory",
+        ));
+        let ws = build_world_state(
+            "limit surveillance capitalism with budget <= 50",
+            &reg,
+            None,
+        );
+        assert_eq!(ws.resources.get("budget"), Some(&50.0));
+        assert!(ws.entities.contains_key("surveillance capitalism"));
     }
 }
