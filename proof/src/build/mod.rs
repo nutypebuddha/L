@@ -274,7 +274,12 @@ pub fn build_with(
 /// is one unit-cost attribute item; the solver distributes `budget` points
 /// across them per the pillar-weight vector.
 pub fn pillar_schema(pillars: &[f64; 7], budget: f64) -> optimize::Schema {
-    let total: u32 = (budget.max(1.0)).round().clamp(0.0, u32::MAX as f64) as u32;
+    // Floor (never round) and clamp, with no `.max(1.0)` floor: a budget of 0
+    // (or sub-unit, e.g. 0.01) must not fabricate a 1-unit spend, and the
+    // integer allocation must never exceed the stated budget (`--budget 20.5`
+    // may spend at most 20 units). Negative budgets clamp to 0 here; the CLI
+    // rejects them outright before this point.
+    let total: u32 = budget.floor().clamp(0.0, u32::MAX as f64) as u32;
     // Anti-monopoly cap: no single pillar may absorb the whole budget. Capping
     // at ceil(total/2) guarantees at least two pillars are funded, so a
     // multi-pillar query spreads proportionally instead of dumping everything
@@ -829,6 +834,28 @@ terms = { cool_points = 1.0 }
                 spear > 0 && forge > 0,
                 "co-dominant pillars must both be funded (got spear={spear}, forge={forge})"
             );
+        }
+    }
+
+    /// T-NEW-1: a 0 / negative / sub-unit budget must never fabricate a spend,
+    /// and no allocation's level-sum may ever exceed the stated budget. Covers
+    /// the {-5, -0.01, 0, 0.01} acceptance set plus a fractional positive case.
+    #[test]
+    fn pillar_schema_respects_budget_bound_t_new_1() {
+        let pillars = [0.2, 0.1, 0.15, 0.05, 0.3, 0.1, 0.1];
+        for budget in [-5.0, -0.01, 0.0, 0.01, 20.5, 7.0] {
+            let schema = pillar_schema(&pillars, budget);
+            let expected = budget.floor().clamp(0.0, u32::MAX as f64) as u32 as f64;
+            let total = *schema.budget.get("unit").unwrap();
+            assert_eq!(total, expected, "budget {budget} maps to total {total}");
+            let sols = crate::optimize::solve(&schema, 3).unwrap();
+            for a in &sols {
+                let spent: u32 = a.levels.values().sum();
+                assert!(
+                    spent as f64 <= budget.max(0.0) + 1e-9,
+                    "budget {budget}: an allocation spent {spent}, exceeding the bound"
+                );
+            }
         }
     }
 }

@@ -72,3 +72,68 @@ fn strategize_low_confidence_is_speculative() {
         "low-confidence routing must be flagged speculative"
     );
 }
+
+#[test]
+fn strategize_zero_budget_returns_no_allocations() {
+    // T-NEW-1: a 0 / sub-unit budget must yield an empty allocation list,
+    // never a fabricated 1-unit spend.
+    for budget in ["0.0", "0.01"] {
+        let v = strategize_json("how do I build a resilient distributed system?", budget);
+        assert!(
+            v["allocations"].as_array().unwrap().is_empty(),
+            "--budget {budget} must yield an empty allocation list"
+        );
+    }
+}
+
+#[test]
+fn strategize_negative_budget_is_rejected() {
+    // T-NEW-1: negative budgets are a clean CLI error (non-zero exit, no JSON
+    // stdout), not a silent clamp.
+    for budget in ["-5", "-0.01"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_lai"))
+            .args([
+                "strategize",
+                "--query",
+                "how do I build a resilient distributed system?",
+                &format!("--budget={budget}"),
+                "--format",
+                "json",
+            ])
+            .output()
+            .expect("spawn laverna");
+        assert!(
+            !out.status.success(),
+            "--budget {budget} must be rejected, not accepted"
+        );
+        assert!(
+            out.stdout.is_empty(),
+            "--budget {budget} must not print JSON stdout"
+        );
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("--budget must be >= 0"),
+            "stderr must name the budget constraint, got: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn strategize_fractional_budget_never_exceeds() {
+    // T-NEW-1: the integer allocation must never exceed the stated budget
+    // (20.5 units may spend at most 20).
+    let v = strategize_json(
+        "how do I build a resilient distributed system with strong guarantees?",
+        "20.5",
+    );
+    let allocs = v["allocations"].as_array().unwrap();
+    assert!(!allocs.is_empty(), "positive budget must still allocate");
+    for a in allocs {
+        let levels = a["levels"].as_object().unwrap();
+        let spent: u32 = levels.values().map(|l| l.as_u64().unwrap() as u32).sum();
+        assert!(
+            spent as f64 <= 20.5,
+            "allocation spent {spent} > budget 20.5"
+        );
+    }
+}

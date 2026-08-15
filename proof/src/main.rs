@@ -6377,6 +6377,15 @@ fn cmd_strategize(
         }
     };
 
+    // T-NEW-1: negative budgets are a CLI validation error, not a silent clamp.
+    if budget < 0.0 {
+        eprintln!("error: --budget must be >= 0 (got {budget})");
+        std::process::exit(2);
+    }
+    // A budget that floors to 0 units (0.0, 0.01, ...) yields no spend at all:
+    // an empty allocation, never a fabricated 1-unit allocation.
+    let total_budget: u32 = budget.floor().clamp(0.0, u32::MAX as f64) as u32;
+
     // 1. Reverse-route the query → graha forces → strategy report (deterministic).
     let lexicon = load_lexicon_arg(&lexicon_path);
     let route = run_route_with_lexicon(&query, lexicon.as_ref());
@@ -6437,7 +6446,10 @@ fn cmd_strategize(
                 Ok(weights) => match laverna::build::profile_to_schema(&profile, &weights) {
                     Ok(s) => {
                         // Respect --budget even for a concrete domain profile.
-                        let total = (budget.max(1.0)).round().clamp(0.0, u32::MAX as f64) as u32;
+                        // Floor (never round, no `.max(1.0)` floor) so a budget of
+                        // 0 / sub-unit never fabricates a spend and the integer
+                        // allocation never exceeds the stated budget.
+                        let total = budget.floor().clamp(0.0, u32::MAX as f64) as u32;
                         let mut b = std::collections::HashMap::new();
                         b.insert("unit".to_string(), total as f64);
                         let mut s = s;
@@ -6462,11 +6474,17 @@ fn cmd_strategize(
     };
 
     // 3. Solve deterministically (shared optimizer; Pareto frontier is byte-stable).
-    let allocations = match laverna::optimize::solve(&schema, top_k) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("error: {e}");
-            std::process::exit(2);
+    //    A zero-unit budget short-circuits to an empty allocation list: there is
+    //    nothing to spend, so no allocation is invented.
+    let allocations: Vec<laverna::optimize::Allocation> = if total_budget == 0 {
+        Vec::new()
+    } else {
+        match laverna::optimize::solve(&schema, top_k) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(2);
+            }
         }
     };
 
@@ -8927,6 +8945,10 @@ fn cmd_strategy(action: StrategyAction) {
             strict,
             format,
         } => {
+            if budget < 0.0 {
+                eprintln!("error: --budget must be >= 0 (got {budget})");
+                std::process::exit(2);
+            }
             let reg = load_entity_registry();
             let ws = laverna::strategy::build_world_state(&text, &reg, None);
             let resolutions = laverna::strategy::resolve_entities(&text, &reg);
@@ -9278,6 +9300,10 @@ fn cmd_strategy(action: StrategyAction) {
             top_k,
             format,
         } => {
+            if budget < 0.0 {
+                eprintln!("error: --budget must be >= 0 (got {budget})");
+                std::process::exit(2);
+            }
             use cid::inference::{InferenceEngine, ValidationRequest};
             let reg = load_entity_registry();
             let ws = match &world {
