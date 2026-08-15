@@ -223,6 +223,9 @@ enum Commands {
         /// Filter by domain keyword
         #[arg(short, long)]
         domain: Option<String>,
+        /// Filter by verifiability tier: hard | soft | corpus | unverifiable
+        #[arg(long)]
+        verifiability: Option<String>,
         /// Max results
         #[arg(short, long, default_value = "20")]
         limit: usize,
@@ -1145,9 +1148,10 @@ fn main() {
         Commands::Validate { expression, format } => cmd_validate(&expression, format),
         Commands::Formulas {
             domain,
+            verifiability,
             limit,
             format,
-        } => cmd_formulas(domain.as_deref(), limit, format),
+        } => cmd_formulas(domain.as_deref(), verifiability.as_deref(), limit, format),
         Commands::Entities {
             filter,
             domain,
@@ -5682,14 +5686,24 @@ fn cmd_validate(expression: &str, format: OutputFormat) {
 
 // ─── formulas Command ───────────────────────────────────────────────────────
 
-fn cmd_formulas(domain: Option<&str>, limit: usize, format: OutputFormat) {
+fn cmd_formulas(
+    domain: Option<&str>,
+    verifiability: Option<&str>,
+    limit: usize,
+    format: OutputFormat,
+) {
     let formula_reg = load_formula_registry();
 
-    let formulas: Vec<_> = if let Some(dom) = domain {
+    let mut formulas: Vec<_> = if let Some(dom) = domain {
         formula_reg.search(dom)
     } else {
         formula_reg.all()
     };
+
+    // Stage 3: filter by verifiability tier (hard | soft | corpus | unverifiable).
+    if let Some(v) = verifiability {
+        formulas.retain(|f| f.verifiability.to_string() == v.to_lowercase());
+    }
 
     if format == OutputFormat::Json {
         let value = serde_json::json!(formulas
@@ -5701,6 +5715,7 @@ fn cmd_formulas(domain: Option<&str>, limit: usize, format: OutputFormat) {
                 "output": f.output,
                 "expression": f.expression,
                 "domain": f.domain.name(),
+                "verifiability": f.verifiability,
                 "description": f.description
             }))
             .collect::<Vec<_>>());
@@ -5720,8 +5735,8 @@ fn cmd_formulas(domain: Option<&str>, limit: usize, format: OutputFormat) {
             format!("{} → ", f.inputs.join(", "))
         };
         println!(
-            "  {} [{4:?}]: {}{} = {}",
-            f.id, inputs, f.output, f.expression, f.domain
+            "  {} [{4:?}, {5}]: {}{} = {}",
+            f.id, inputs, f.output, f.expression, f.domain, f.verifiability
         );
     }
 }

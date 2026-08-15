@@ -28,4 +28,4 @@ pub use glyph::{
 };
 pub use registry::FormulaRegistry;
 
-pub use lai_core::formula::{Formula, FormulaError, FormulaType};
+pub use lai_core::formula::{Formula, FormulaError, FormulaType, Verifiability};

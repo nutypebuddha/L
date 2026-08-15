@@ -268,6 +268,10 @@ struct FormulaEntry {
     /// Optional evidence/provenance for this formula.
     #[serde(default)]
     evidence: Option<String>,
+    /// Verifiability density (Stage 3). Defaults to `corpus`; the registry
+    /// auto-promotes to `hard` when golden test vectors are present.
+    #[serde(default)]
+    verifiability: lai_core::formula::Verifiability,
     /// Tags/zodiac keywords for domain classification and search indexing.
     /// TOML files may use `tags` (legacy) or `zodiac` (new) — both are accepted.
     #[serde(default, alias = "tags")]
@@ -793,6 +797,20 @@ impl FormulaRegistry {
         formula.zodiac = entry.zodiac;
         formula.input_aliases = entry.input_aliases;
         formula.input_types = entry.input_types;
+
+        // Stage 3 verifiability density: a formula that ships golden test
+        // vectors is independently re-checkable, so promote it to `hard`
+        // unless the author explicitly set a different tier. Compute this
+        // before `entry.golden` is moved below.
+        let verifiability = if entry.verifiability == lai_core::formula::Verifiability::Corpus
+            && !entry.golden.is_empty()
+        {
+            lai_core::formula::Verifiability::Hard
+        } else {
+            entry.verifiability
+        };
+        formula.verifiability = verifiability;
+
         formula.golden = entry.golden;
         formula.evidence = entry.evidence;
         formula.from_domain = from_domain;
@@ -971,6 +989,67 @@ mod tests {
         let f = r.get("estimate_reading_minutes").unwrap();
         assert_eq!(f.formula_type, crate::formula::FormulaType::Llm);
         assert_eq!(f.domain, Domain::Budha);
+    }
+
+    #[test]
+    fn test_verifiability_explicit_tiers() {
+        let mut r = FormulaRegistry::new();
+        r.load_from_toml_str(
+            r#"
+            [[formula]]
+            id = "heuristic_guess"
+            domain = "budha"
+            inputs = []
+            output = "out"
+            expression = "0"
+            description = "an opinion, not independently checkable"
+            verifiability = "unverifiable"
+
+            [[formula]]
+            id = "tool_lookup"
+            domain = "budha"
+            inputs = ["x"]
+            output = "out"
+            expression = "x"
+            description = "only checkable with an external tool"
+            verifiability = "soft"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            r.get("heuristic_guess").unwrap().verifiability,
+            lai_core::formula::Verifiability::Unverifiable
+        );
+        assert_eq!(
+            r.get("tool_lookup").unwrap().verifiability,
+            lai_core::formula::Verifiability::Soft
+        );
+    }
+
+    #[test]
+    fn test_verifiability_auto_promotes_golden_to_hard() {
+        // No explicit tier, but golden vectors present -> auto-promoted to Hard.
+        let mut r = FormulaRegistry::new();
+        r.load_from_toml_str(
+            r#"
+            [[formula]]
+            id = "checked_gate"
+            domain = "mangala"
+            inputs = ["a", "b"]
+            output = "out"
+            expression = "1 - a*b"
+            description = "NAND with a golden vector"
+
+            [[formula.golden]]
+            inputs = { a = 0, b = 0 }
+            output = 1.0
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            r.get("checked_gate").unwrap().verifiability,
+            lai_core::formula::Verifiability::Hard
+        );
     }
 
     #[test]

@@ -82,6 +82,7 @@ pub mod prelude {
     };
     pub use crate::formula::{
         extract_formula_domain, validate_formula_id, Formula, FormulaRegistry, FormulaType,
+        Verifiability,
     };
     pub use crate::nlp::{extract_keywords, normalize_query_text, NlpContext};
     pub use crate::optimize::{explain, parse_schema, solve, Allocation, Schema};

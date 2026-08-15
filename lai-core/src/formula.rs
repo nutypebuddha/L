@@ -52,6 +52,40 @@ impl FormulaType {
     }
 }
 
+/// How independently checkable a corpus fact is — the axis Stage 3 organizes
+/// the corpus along. Drives whether a claim backed by a formula should be
+/// routed to a hard gate (`verified`/`corrected`) or admitted as `cant_check`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Verifiability {
+    /// Independently checkable by L: arithmetic/logic with golden vectors
+    /// (truth tables, unit conversions). The registry auto-promotes any
+    /// formula that ships golden cases to `hard`. Route to a hard gate.
+    Hard,
+    /// Checkable only with an external tool/lookup L doesn't own; L can cite
+    /// but not independently re-derive. Prefer a tool call over a guess.
+    Soft,
+    /// Asserted by the corpus (evidence present) but not re-derivable by L
+    /// alone. Citable; if used as a factual claim, surface as `cant_check`
+    /// unless a hard gate confirms it.
+    #[default]
+    Corpus,
+    /// Opinion / heuristic / not independently checkable. L must abstain.
+    Unverifiable,
+}
+
+impl std::fmt::Display for Verifiability {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Verifiability::Hard => "hard",
+            Verifiability::Soft => "soft",
+            Verifiability::Corpus => "corpus",
+            Verifiability::Unverifiable => "unverifiable",
+        };
+        f.write_str(s)
+    }
+}
+
 /// A single primitive formula definition.
 ///
 /// Every formula is a pure primitive operation with typed inputs,
@@ -133,6 +167,13 @@ pub struct Formula {
     /// Optional evidence or source for this formula's provability.
     pub evidence: Option<String>,
 
+    /// Verifiability density (Stage 3): how independently checkable this fact
+    /// is. Defaults to `Corpus`; the registry auto-promotes formulas that ship
+    /// golden test vectors to `Hard`. Serialized so `lai formulas -f json`
+    /// exposes it and `lai formulas --verifiability` can filter.
+    #[serde(default)]
+    pub verifiability: Verifiability,
+
     /// Additional domains this formula is also registered under.
     #[serde(default)]
     pub also_domains: Vec<Domain>,
@@ -196,6 +237,7 @@ impl Formula {
             description: description.to_string(),
             zodiac: Vec::new(),
             evidence: None,
+            verifiability: Verifiability::Corpus,
             also_domains: Vec::new(),
             from_domain: None,
             to_domain: None,
