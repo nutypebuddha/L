@@ -650,6 +650,19 @@ enum StrategyAction {
         #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
         format: OutputFormat,
     },
+    /// Challenge a strategy with the adversarial (Athena) analysis layer
+    /// (directive §19/§25): assumption challenges, counterexamples, contradictory
+    /// evidence, failure modes, alternatives, and a recommended next action.
+    Challenge {
+        /// Strategy JSON file to challenge.
+        strategy: PathBuf,
+        /// Optional world-state JSON providing unknowns/contradictions context.
+        #[arg(long)]
+        world: Option<PathBuf>,
+        /// Output format: json (default) or text
+        #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+        format: OutputFormat,
+    },
 }
 
 /// Subcommands of `lai tanto`.
@@ -9087,6 +9100,53 @@ fn cmd_strategy(action: StrategyAction) {
                     }
                 }
                 println!("Final world v{final_version}; {applied} action(s) applied.");
+            }
+        }
+        StrategyAction::Challenge {
+            strategy,
+            world,
+            format,
+        } => {
+            let s = read_strategy(&strategy);
+            let ws = world.as_ref().map(read_world_state);
+            let report = lai_core::generate_challenge(&s, ws.as_ref());
+            if format == OutputFormat::Json {
+                println!("{}", serde_json::to_string(&report).unwrap());
+            } else {
+                println!("Challenge of strategy {}", report.strategy_id);
+                println!("  critical assumptions:");
+                for a in &report.critical_assumptions {
+                    println!("    - {a}");
+                }
+                println!("  assumption challenges:");
+                for c in &report.assumption_challenges {
+                    println!("    - {c}");
+                }
+                println!("  contradictory evidence:");
+                for e in &report.contradictory_evidence {
+                    println!("    - {e}");
+                }
+                println!("  failure modes:");
+                for f in &report.failure_modes {
+                    println!("    - {f}");
+                }
+                println!("  sensitivity points:");
+                for p in &report.sensitivity_points {
+                    println!("    - {p}");
+                }
+                println!("  missing information:");
+                for m in &report.missing_information {
+                    println!("    - {m}");
+                }
+                println!("  alternative strategies:");
+                for a in &report.alternative_strategies {
+                    println!("    - {a}");
+                }
+                println!(
+                    "  recommended next action: {}",
+                    report.recommended_next_action
+                );
+                println!("  counterexamples: {}", report.counterexamples.len());
             }
         }
     }

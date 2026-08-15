@@ -452,6 +452,110 @@ impl StrategyIR {
     }
 }
 
+/// A structured counterexample (directive §20). More valuable than "try harder":
+/// it names the violated condition, the triggering state, and concrete repairs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Counterexample {
+    pub violated_constraint: String,
+    pub triggering_state: String,
+    pub action: String,
+    pub expected_effect: String,
+    pub actual_result: String,
+    pub repair_candidates: Vec<String>,
+}
+
+/// Machine-readable adversarial analysis of a strategy (directive §19/§25). Athena
+/// produces this, not prose: assumption challenges, counterexamples, contradictory
+/// evidence, failure modes, alternative strategies, sensitivity points, missing
+/// information, and a recommended next action. Deterministic and auditable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChallengeReport {
+    pub strategy_id: String,
+    pub critical_assumptions: Vec<String>,
+    pub assumption_challenges: Vec<String>,
+    pub counterexamples: Vec<Counterexample>,
+    pub contradictory_evidence: Vec<String>,
+    pub failure_modes: Vec<String>,
+    pub alternative_strategies: Vec<String>,
+    pub sensitivity_points: Vec<String>,
+    pub missing_information: Vec<String>,
+    pub recommended_next_action: String,
+}
+
+/// Generate a deterministic challenge report for a strategy against an optional
+/// world state. No LLM: the analysis is derived structurally from the strategy's
+/// assumptions, constraints, risks, resources, and the world's open unknowns /
+/// contradictions (directive §24: DO-NOT-ACT-YET is a valid machine decision).
+pub fn generate_challenge(strategy: &Strategy, ws: Option<&WorldState>) -> ChallengeReport {
+    let assumption_challenges = strategy
+        .assumptions
+        .iter()
+        .map(|a| format!("what if \"{a}\" is false or only partially true?"))
+        .collect::<Vec<_>>();
+    let mut contradictory_evidence = Vec::new();
+    let mut missing_information = Vec::new();
+    if let Some(w) = ws {
+        for u in &w.uncertainties {
+            missing_information.push(u.question.clone());
+        }
+        for c in &w.contradictions {
+            contradictory_evidence.push(format!(
+                "contradiction {} (severity {}) unresolved",
+                c.id, c.severity
+            ));
+        }
+    }
+    let mut failure_modes = strategy.risks.clone();
+    for (k, v) in &strategy.resources {
+        failure_modes.push(format!("resource {k} drops below required {v}"));
+    }
+    for a in &strategy.assumptions {
+        failure_modes.push(format!("assumption fails: {a}"));
+    }
+    let sensitivity_points = strategy
+        .constraints
+        .iter()
+        .map(|c| format!("sensitive to violation of: {c}"))
+        .collect::<Vec<_>>();
+    let alternative_strategies = vec![
+        "defer and gather information (Ask/Research) before committing".to_string(),
+        "minimal-footprint variant: same objective at lower resource cost".to_string(),
+        "hedged allocation: diversify across pillars to reduce single-point failure".to_string(),
+    ];
+    let recommended_next_action = if !missing_information.is_empty() {
+        "research / ask — resolve open unknowns before acting".to_string()
+    } else {
+        "act — no blocking unknowns; proceed with monitoring".to_string()
+    };
+    let counterexamples = strategy
+        .constraints
+        .iter()
+        .map(|c| Counterexample {
+            violated_constraint: c.clone(),
+            triggering_state: "constraint not enforced at execution".into(),
+            action: strategy.actions.first().cloned().unwrap_or_default(),
+            expected_effect: "constraint satisfied".into(),
+            actual_result: format!("constraint violated: {c}"),
+            repair_candidates: vec![
+                "tighten Gate pre-condition check".into(),
+                "add pre-execution validation".into(),
+            ],
+        })
+        .collect();
+    ChallengeReport {
+        strategy_id: strategy.id.clone(),
+        critical_assumptions: strategy.assumptions.clone(),
+        assumption_challenges,
+        counterexamples,
+        contradictory_evidence,
+        failure_modes,
+        alternative_strategies,
+        sensitivity_points,
+        missing_information,
+        recommended_next_action,
+    }
+}
+
 /// Result of applying one [`Action`] to a [`WorldState`] (directive §17/§30). A
 /// transition records the before/after state, the effects produced, and any
 /// constraint/resource violations — so simulation is inspectable and reproducible
@@ -706,7 +810,10 @@ mod sim_tests {
             m.insert("unit".into(), 5.0);
             m
         });
-        let t = { let sim = DeterministicSimulator; sim.step(&ws, &a) };
+        let t = {
+            let sim = DeterministicSimulator;
+            sim.step(&ws, &a)
+        };
         assert!(
             t.violations.is_empty(),
             "got violations: {:?}",
@@ -724,7 +831,10 @@ mod sim_tests {
             m.insert("unit".into(), 5.0);
             m
         });
-        let t = { let sim = DeterministicSimulator; sim.step(&ws, &a) };
+        let t = {
+            let sim = DeterministicSimulator;
+            sim.step(&ws, &a)
+        };
         assert!(!t.violations.is_empty());
         assert!(t
             .violations
@@ -747,5 +857,62 @@ mod sim_tests {
         let ts = simulate_sequence(&ws, &[a.clone(), a]);
         assert_eq!(ts.len(), 2);
         assert_eq!(ts[1].after.version, 3);
+    }
+}
+
+#[cfg(test)]
+mod challenge_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn sample_strategy() -> Strategy {
+        Strategy {
+            id: "S01".into(),
+            objective: "demo".into(),
+            assumptions: vec!["network stays up".into()],
+            constraints: vec!["budget <= 100".into()],
+            actions: vec!["loom x 10".into()],
+            resources: {
+                let mut m = BTreeMap::new();
+                m.insert("unit".into(), 20.0);
+                m
+            },
+            expected_outcomes: vec![],
+            risks: vec!["single point of failure".into()],
+            dependencies: vec![],
+            evidence: vec!["optimizer".into()],
+            confidence: 0.7,
+            robustness: 0.5,
+        }
+    }
+
+    #[test]
+    fn challenge_reports_assumptions_and_counterexamples() {
+        let s = sample_strategy();
+        let r = generate_challenge(&s, None);
+        assert_eq!(r.strategy_id, "S01");
+        assert_eq!(r.critical_assumptions, s.assumptions);
+        assert_eq!(r.assumption_challenges.len(), s.assumptions.len());
+        assert_eq!(r.counterexamples.len(), s.constraints.len());
+        assert!(r.recommended_next_action.contains("act"));
+        assert!(r.alternative_strategies.len() >= 3);
+    }
+
+    #[test]
+    fn challenge_flags_missing_information_from_world() {
+        let s = sample_strategy();
+        let mut ws = WorldState::new();
+        ws.uncertainties.push(Unknown {
+            question: "is monitoring active?".into(),
+            impact: "high".into(),
+            urgency: "high".into(),
+            strategies_affected: 1,
+            information_gain: "high".into(),
+        });
+        let r = generate_challenge(&s, Some(&ws));
+        assert!(r
+            .missing_information
+            .contains(&"is monitoring active?".to_string()));
+        assert!(r.recommended_next_action.contains("research"));
     }
 }
