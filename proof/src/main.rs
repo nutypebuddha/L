@@ -105,7 +105,9 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    /// Full reasoning pipeline: descent → formula → Tanto evaluation
+    /// Full reasoning pipeline: descent → formula → Tanto evaluation.
+    /// When to call: open-ended "how/why" questions needing a sourced answer
+    /// with provenance; for yes/no factual checks use `validate`/`gate` instead.
     Solve {
         /// Natural-language or structured query (omit with --batch to read stdin)
         #[arg(short, long)]
@@ -136,7 +138,9 @@ enum Commands {
         #[arg(long, value_enum, default_missing_value = "text", num_args = 0..=1)]
         explain_binding: Option<ExplainBindingMode>,
     },
-    /// Reverse-route a query to a strategy via the 9-graha wheel
+    /// Reverse-route a query to a strategy via the 9-graha wheel.
+    /// When to call: classify a topic and pick the right reasoning domain/tool
+    /// before solving; pair with a runtime lexicon for new/"alien" topics.
     Route {
         /// Natural-language query to turn into a strategy
         #[arg(short, long)]
@@ -169,7 +173,9 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    /// Cast a Vedic birth chart (lagna + 12 bhavas) for a datetime + location
+    /// Cast a Vedic birth chart (lagna + 12 bhavas) for a datetime + location.
+    /// When to call: you need chart-derived pillar weights as input to `build`
+    /// or `strategize` (which can also cast internally).
     Chart {
         /// Local datetime: YYYY-MM-DD HH:MM[:SS] — REQUIRES --tz (IANA timezone).
         /// Never accepted alone (silent UTC assumption corrupts sidereal math).
@@ -202,7 +208,9 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    /// Verify a Tanto formula expression
+    /// Verify a Tanto formula expression (e.g. "2 + 3 = 5").
+    /// When to call: confirm a single claim/equation is arithmetically or
+    /// logically true before trusting or repeating it.
     Validate {
         /// Expression to validate (e.g., "2 + 3 = 5")
         expression: String,
@@ -237,7 +245,9 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    /// Solve a domain-agnostic stat/point-allocation optimization from a schema
+    /// Solve a domain-agnostic stat/point-allocation optimization from a schema.
+    /// When to call: you already have a structured allocation problem (budget +
+    /// items + objective); for text goals use `strategize` instead.
     Optimize {
         /// Path to the TOML optimization schema
         #[arg(short, long)]
@@ -252,7 +262,9 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    /// Build: chart → graha weight mapping → optimize in one command
+    /// Build: chart → graha weight mapping → optimize in one command.
+    /// When to call: turn a birth chart + a domain profile into a concrete
+    /// allocation; needs `--domain` (see `build --list-profiles`).
     Build {
         /// Path or short name of a TOML domain profile. A bare name is resolved
         /// against the built-in library (`lai build --list-profiles`): first as
@@ -295,7 +307,9 @@ enum Commands {
         proof_out: Option<String>,
     },
     /// Strategize: reverse-route a query → 7-pillar weights → deterministic
-    /// Pareto-optimal resource allocation (the "ultimate strategy engine")
+    /// Pareto-optimal resource allocation (the "ultimate strategy engine").
+    /// When to call: allocate effort/budget across competing priorities from a
+    /// natural-language goal; prefer over `optimize` when you start from text.
     Strategize {
         /// Natural-language query to turn into a strategy + allocation
         #[arg(short, long)]
@@ -344,7 +358,9 @@ enum Commands {
         /// Search query
         query: String,
     },
-    /// Verify a proof object emitted by `solve --proof-out`
+    /// Verify a proof object emitted by `solve --proof-out`.
+    /// When to call: re-check a previously emitted proof for tampering / replay
+    /// safety; not for validating fresh claims (use `gate`).
     Verify {
         /// Path to the proof object JSON file
         path: String,
@@ -352,19 +368,25 @@ enum Commands {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
-    /// Corpus tooling: export / validate / diff / graph the embedded knowledge base
+    /// Corpus tooling: export / validate / diff / graph the embedded knowledge base.
+    /// When to call: inspect or CI-check the embedded formulas/entities; not part
+    /// of the runtime reasoning path.
     Corpus {
         #[command(subcommand)]
         action: CorpusAction,
     },
-    /// L.ai · Gate: deterministic per-token validation
+    /// L.ai · Gate: deterministic per-token validation (tri-state verdict).
+    /// When to call: validate a response/claim before acting on it; emits
+    /// verified / cant_check / flagged so an agent can abstain or escalate.
     Gate {
         #[command(subcommand)]
         action: GateAction,
     },
     /// Start an interactive REPL for Gate (Ctrl-D exits)
     GateRepl,
-    /// Tanto compute engine: formula evaluation, conversion, rational arithmetic
+    /// Tanto compute engine: formula evaluation, conversion, rational arithmetic.
+    /// When to call: pure computation primitives used by `solve`/`validate`;
+    /// call directly for math/logic, not for reasoning.
     Tanto {
         #[command(subcommand)]
         action: TantoAction,
