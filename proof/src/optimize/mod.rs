@@ -503,17 +503,14 @@ fn objective_upper_bound(
         return current + perk_bonus;
     }
 
-    // Best marginal value per unit cost among remaining items.
+    // Best marginal value per unit cost among remaining costed items, plus the
+    // guaranteed contribution of any zero-cost (free) items.
     let mut best_marginal_per_unit = 0.0f64;
+    let mut free_bonus = 0.0f64;
     for item in remaining_attrs {
         let current_level = *levels.get(&item.id).unwrap_or(&0);
         let cap = item.level_cap();
         if current_level >= cap {
-            continue;
-        }
-        // Cost per level for the bottleneck resource.
-        let cost_per_level = item.cost.values().copied().fold(f64::INFINITY, f64::min);
-        if cost_per_level <= 0.0 {
             continue;
         }
         // Weighted effect per level. MUST use the same weight-defaulting as
@@ -536,13 +533,28 @@ fn objective_upper_bound(
                 weighted_effect += weight * eff;
             }
         }
+        // Cost per level for the bottleneck resource.
+        let cost_per_level = item.cost.values().copied().fold(f64::INFINITY, f64::min);
+        if cost_per_level <= 0.0 {
+            // Free item: it consumes no budget, so it can always be raised to
+            // its cap. Its full contribution is a valid upper bound — an
+            // over-approximation, because we ignore any `requires` gating that
+            // might suppress the effect at lower levels (which can only raise
+            // the bound, never lower it). Skipping free items entirely (the old
+            // behaviour) under-estimated the bound and let branch-and-bound
+            // prune the subtree holding the true optimum whenever a free item
+            // carried positive weight — the core T-LC01 correctness bug that
+            // survived the earlier weight-defaulting fix.
+            free_bonus += weighted_effect * (cap - current_level) as f64;
+            continue;
+        }
         let marginal = weighted_effect / cost_per_level;
         if marginal > best_marginal_per_unit {
             best_marginal_per_unit = marginal;
         }
     }
 
-    current + min_remaining * best_marginal_per_unit + perk_bonus
+    current + min_remaining * best_marginal_per_unit + perk_bonus + free_bonus
 }
 
 /// State-space guard: maximum number of nodes the brute-force enumerator may
@@ -1253,79 +1265,83 @@ mod fuzz_tlc01 {
         best
     }
 
-fn rand_schema(seed: u64) -> Schema {
-    let mut rng = seed;
-    let rnd = |r: &mut u64| {
-        *r ^= *r << 13;
-        *r ^= *r >> 7;
-        *r ^= *r << 17;
-        *r
-    };
-    let n = 2 + (rnd(&mut rng) % 4) as usize; // 2..5 items
-    // Multiple budget pools with differing headroom
-    let budget_a = 5.0 + (rnd(&mut rng) % 10) as f64; // small pool
-    let budget_b = 15.0 + (rnd(&mut rng) % 20) as f64; // large pool
-    let budget_a_name: String = "points_a".into();
-    let budget_b_name: String = "pts".into();
-    let mut s = Schema {
-        meta: Meta {
-            domain: "fuzz".into(),
-            schema_version: 1,
-            shape: None,
-        },
-        budget: HashMap::new(),
-        items: Vec::new(),
-        objective: Objective {
-            maximize: Vec::new(),
-            weights: HashMap::new(),
-        },
-        scoring: HashMap::new(),
-    };
-    s.budget.insert(budget_a_name.clone(), budget_a);
-    s.budget.insert(budget_b_name.clone(), budget_b);
-    let score_names: Vec<String> = (0..n).map(|i| format!("s{i}")).collect();
-    for (i, name) in score_names.iter().enumerate() {
-        let w = ((rnd(&mut rng) % 100) as f64) / 100.0 + 0.01;
-        s.objective.maximize.push(name.clone());
-        s.objective.weights.insert(name.clone(), w);
-        // 50% chance of zero-cost perk, 50% costed
-        let zero_cost = (rnd(&mut rng) % 2) == 0;
-        let mut t = HashMap::new();
-        t.insert(name.clone(), 1.0);
-        s.scoring.insert(name.clone(), ScoreTerm { terms: t });
-        // determines whether a perk is reachable within budget
-        let reachable = (rnd(&mut rng) % 2) == 0;
-        // determines whether perk has a requires threshold
-        let has_requires = (rnd(&mut rng) % 3) != 0; // ~66% chance
-        let mut requires = None;
-        if has_requires {
-            // attribute threshold gating: r >= some_value
-            let threshold = 5 + (rnd(&mut rng) % 15) as u32;
-            requires = Some(vec![format!("r>={}", threshold)]);
-        }
-        // cost: 0.0 for zero-cost, 1.0+ for costed
-        let cost_val = if zero_cost { 0.0 } else { 1.0 + (rnd(&mut rng) % 4) as f64 };
-        let mut effects = HashMap::new();
-        effects.insert(name.clone(), 1.0);
-        // if reachable, also add a secondary effect
-        if reachable {
-            effects.insert(format!("s{}_reach", i), 1.0);
-        }
-        s.items.push(Item {
-            id: format!("i{i}"),
-            kind: ItemKind::Attribute,
-            requires,
-            cost: {
-                let mut c = HashMap::new();
-                c.insert(budget_a_name.clone(), cost_val);
-                c.insert(budget_b_name.clone(), cost_val);
-                c
+    fn rand_schema(seed: u64) -> Schema {
+        let mut rng = seed;
+        let rnd = |r: &mut u64| {
+            *r ^= *r << 13;
+            *r ^= *r >> 7;
+            *r ^= *r << 17;
+            *r
+        };
+        let n = 2 + (rnd(&mut rng) % 4) as usize; // 2..5 items
+                                                  // Multiple budget pools with differing headroom
+        let budget_a = 5.0 + (rnd(&mut rng) % 10) as f64; // small pool
+        let budget_b = 15.0 + (rnd(&mut rng) % 20) as f64; // large pool
+        let budget_a_name: String = "points_a".into();
+        let budget_b_name: String = "pts".into();
+        let mut s = Schema {
+            meta: Meta {
+                domain: "fuzz".into(),
+                schema_version: 1,
+                shape: None,
             },
-            max_level: Some(1 + (rnd(&mut rng) % 8) as u32),
-            effects,
-        });
-    }
-    s
+            budget: HashMap::new(),
+            items: Vec::new(),
+            objective: Objective {
+                maximize: Vec::new(),
+                weights: HashMap::new(),
+            },
+            scoring: HashMap::new(),
+        };
+        s.budget.insert(budget_a_name.clone(), budget_a);
+        s.budget.insert(budget_b_name.clone(), budget_b);
+        let score_names: Vec<String> = (0..n).map(|i| format!("s{i}")).collect();
+        for (i, name) in score_names.iter().enumerate() {
+            let w = ((rnd(&mut rng) % 100) as f64) / 100.0 + 0.01;
+            s.objective.maximize.push(name.clone());
+            s.objective.weights.insert(name.clone(), w);
+            // 50% chance of zero-cost perk, 50% costed
+            let zero_cost = (rnd(&mut rng) % 2) == 0;
+            let mut t = HashMap::new();
+            t.insert(name.clone(), 1.0);
+            s.scoring.insert(name.clone(), ScoreTerm { terms: t });
+            // determines whether a perk is reachable within budget
+            let reachable = (rnd(&mut rng) % 2) == 0;
+            // determines whether perk has a requires threshold
+            let has_requires = (rnd(&mut rng) % 3) != 0; // ~66% chance
+            let mut requires = None;
+            if has_requires {
+                // attribute threshold gating: r >= some_value
+                let threshold = 5 + (rnd(&mut rng) % 15) as u32;
+                requires = Some(vec![format!("r>={}", threshold)]);
+            }
+            // cost: 0.0 for zero-cost, 1.0+ for costed
+            let cost_val = if zero_cost {
+                0.0
+            } else {
+                1.0 + (rnd(&mut rng) % 4) as f64
+            };
+            let mut effects = HashMap::new();
+            effects.insert(name.clone(), 1.0);
+            // if reachable, also add a secondary effect
+            if reachable {
+                effects.insert(format!("s{}_reach", i), 1.0);
+            }
+            s.items.push(Item {
+                id: format!("i{i}"),
+                kind: ItemKind::Attribute,
+                requires,
+                cost: {
+                    let mut c = HashMap::new();
+                    c.insert(budget_a_name.clone(), cost_val);
+                    c.insert(budget_b_name.clone(), cost_val);
+                    c
+                },
+                max_level: Some(1 + (rnd(&mut rng) % 8) as u32),
+                effects,
+            });
+        }
+        s
     }
 
     #[test]
