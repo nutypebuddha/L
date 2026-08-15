@@ -139,6 +139,32 @@ impl Lexicon {
     }
 }
 
+/// Self-describing TOML template printed by `lai schema lexicon`. Mirrors the
+/// exact format `load_toml` accepts, with the validation rules called out so a
+/// user can author a runtime lexicon without reading the source.
+pub const LEXICON_SCHEMA_TEMPLATE: &str = r#"# Runtime keyword -> domain lexicon for `lai route --lexicon <file>` / `lai strategize --lexicon <file>`.
+#
+# Teaches the router new vocabulary at runtime (no recompile). The built-in
+# DOMAIN_KEYWORDS table and the dynamic-entity path are tried first and always
+# win; a lexicon entry is consulted ONLY when nothing else resolved the token.
+# Every hit is whole-word, case-insensitive, and weighted below the curated
+# table, so the lexicon is a strictly additive, clearly-labeled extension.
+
+[[keyword]]
+word = "ssi"            # single whole word, lowercased; no spaces (phrases unsupported)
+domain = "budha"        # any Domain name/symbol/alias (surya, mangala, 2, etc.)
+weight = 0.6            # optional, in (0.0, 1.0]; defaults to 0.6
+
+[[keyword]]
+word = "able_account"
+domain = "budha"
+
+[[keyword]]
+word = "personal_finance"
+domain = "budha"
+weight = 0.75
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -323,7 +323,7 @@ enum Commands {
     },
     /// Print the canonical TOML template for a subcommand's input (self-describing)
     Schema {
-        /// Schema name: optimize or domain
+        /// Schema name: optimize, domain, or lexicon
         name: String,
     },
     /// Start MCP JSON-RPC server on stdin/stdout
@@ -5811,8 +5811,9 @@ fn cmd_schema(name: &str) {
     match name {
         "optimize" => print!("{OPTIMIZE_SCHEMA_TEMPLATE}"),
         "domain" => print!("{}", laverna::build::DOMAIN_PROFILE_TEMPLATE),
+        "lexicon" => print!("{}", laverna::descent::lexicon::LEXICON_SCHEMA_TEMPLATE),
         other => {
-            eprintln!("error: unknown schema '{other}' (known: optimize, domain)");
+            eprintln!("error: unknown schema '{other}' (known: optimize, domain, lexicon)");
             std::process::exit(2);
         }
     }
