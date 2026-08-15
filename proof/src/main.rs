@@ -549,6 +549,23 @@ enum GateAction {
         #[arg(long)]
         key: String,
     },
+    /// Render a claim as a publishable, verifiable contract (PCN renderer).
+    /// Runs the same tri-state gate as `validate` but emits a stable,
+    /// versioned contract artifact (Stage 4/5): the claim, its verdict, the
+    /// policy that verified it, provenance, and a determinism receipt — so a
+    /// verified claim becomes a shareable proof others can re-check.
+    Contract {
+        /// Claim text to render as a publishable contract
+        text: String,
+        /// Context (original prompt/query)
+        context: String,
+        /// Domain for fact-checking (e.g., "math", "astronomy")
+        #[arg(short, long)]
+        domain: Option<String>,
+        /// Output format: json (default, the publishable artifact) or text
+        #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+        format: OutputFormat,
+    },
 }
 
 /// Subcommands of `lai tanto`.
@@ -1252,6 +1269,12 @@ fn main() {
             GateAction::Proxy { port, llm, key } => {
                 cmd_gate_proxy(port, &llm, &key);
             }
+            GateAction::Contract {
+                text,
+                context,
+                domain,
+                format,
+            } => cmd_gate_contract(&text, &context, domain.as_deref(), format),
         },
         Commands::GateRepl => cmd_gate_repl(),
         Commands::Tanto { action } => match action {
@@ -8593,6 +8616,100 @@ fn cmd_gate_validate(text: &str, context: &str, domain: Option<&str>, format: Ou
                 println!("Fixes: {}", result.fix_count());
                 println!("State: {:?}", result.state);
                 println!("Cost: ${:.6}", result.cost_usd);
+            }
+        }
+        Err(e) => {
+            if format == OutputFormat::Json {
+                let value = serde_json::json!({ "error": e.to_string() });
+                eprintln!("{}", serde_json::to_string(&value).unwrap());
+            } else {
+                eprintln!("Error: {}", e);
+            }
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Render a claim as a publishable, verifiable contract (Stage 4/5 PCN
+/// renderer). Mirrors `cmd_gate_validate`'s tri-state gate call, then wraps
+/// the result in a stable, versioned artifact: the claim, its verdict, the
+/// policy that verified it, provenance, and a determinism receipt. The
+/// `contract` one-liner is the publishable statement an agent or human can
+/// paste/quote; the JSON is the re-checkable artifact.
+fn cmd_gate_contract(text: &str, context: &str, domain: Option<&str>, format: OutputFormat) {
+    use cid::inference::{InferenceEngine, ValidationRequest};
+    let mut engine = InferenceEngine::new();
+    let mut request = ValidationRequest::new(text, context);
+    if let Some(d) = domain {
+        request = request.with_domain(d);
+    }
+    match engine.validate(request) {
+        Ok(result) => {
+            let verdict = result.verdict().as_str();
+            let tri = result.tri_state().as_str();
+            let policy = result.policy.map(|p| p.as_str());
+            let contract_line = match tri {
+                "verified" => {
+                    let mut s = format!(
+                        "VERIFIED — \"{}\" holds under policy {} (confidence {:.3})",
+                        result.original_text,
+                        policy.unwrap_or("none"),
+                        result.confidence,
+                    );
+                    if let Some(id) = &result.claim_id {
+                        s.push_str(&format!(". Claim id {id}"));
+                    }
+                    s.push('.');
+                    s
+                }
+                "cant_check" => format!(
+                    "CANNOT VERIFY — \"{}\" is not independently checkable by L; treat as unverified, not confirmed.",
+                    result.original_text
+                ),
+                "flagged" => format!(
+                    "CONTRADICTED — \"{}\" conflicts with corpus; do not publish as fact.",
+                    result.original_text
+                ),
+                other => format!("[{other}] \"{}\"", result.original_text),
+            };
+
+            if format == OutputFormat::Json {
+                let value = serde_json::json!({
+                    "schema": "laverna.gate.contract",
+                    "schema_version": "1.0",
+                    "claim": result.original_text,
+                    "verified_claim": result.validated_text,
+                    "verdict": verdict,
+                    "tri_state": tri,
+                    "policy": policy,
+                    "claim_id": result.claim_id,
+                    "corrected_value": result.corrected_value,
+                    "confidence": result.confidence,
+                    "domain": domain,
+                    "evidence": format!(
+                        "validated by L gate (domain {:?}) under policy {}",
+                        domain,
+                        policy.unwrap_or("none")
+                    ),
+                    "receipt": determinism_receipt(text),
+                    "contract": contract_line,
+                });
+                println!("{}", serde_json::to_string(&value).unwrap());
+            } else {
+                println!("CONTRACT ({tri}):");
+                println!("  claim : {}", result.original_text);
+                println!("  verdict: {}", verdict);
+                if let Some(p) = policy {
+                    println!("  policy: {}", p);
+                }
+                if let Some(id) = &result.claim_id {
+                    println!("  claim_id: {}", id);
+                }
+                if let Some(c) = &result.corrected_value {
+                    println!("  corrected: {}", c);
+                }
+                println!("  confidence: {:.4}", result.confidence);
+                println!("  publishable: {}", contract_line);
             }
         }
         Err(e) => {
