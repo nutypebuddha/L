@@ -13,6 +13,7 @@ use crate::chart::personality::Pillar;
 use crate::descent::SettledToken;
 use crate::domain_graph::Domain;
 use crate::nlp::is_stopword;
+use std::collections::BTreeMap;
 
 /// Strategic principle carried by each graha (archetypal force). This is the
 /// "upward" leg of reverse routing: force → recommended action framework.
@@ -534,7 +535,7 @@ pub fn reweight_pillars_with_sensor_forces(
 use crate::entity::EntityRegistry;
 use crate::optimize::{Allocation, Schema};
 use lai_core::{
-    Claim, EntityResolution, EpistemicStatus, Observation, Strategy, StrategyIR, WorldState,
+    Action, Claim, EntityResolution, EpistemicStatus, Observation, Strategy, StrategyIR, WorldState,
 };
 
 /// Resolve the surface mentions in `text` against the embedded corpus entity
@@ -800,6 +801,44 @@ pub fn build_strategy_ir(ws: &WorldState, objective: &str) -> StrategyIR {
         ));
     }
     ir
+}
+
+/// Convert a structured [`Strategy`]'s string `actions` (e.g. "council x 10") into
+/// first-class [`Action`] objects so the simulator can step them. Preconditions are
+/// the strategy's hard constraints; effects record the application; cost/resource
+/// demand is parsed from the "name x N" amount.
+pub fn strategy_to_actions(s: &Strategy) -> Vec<Action> {
+    let mut out = Vec::new();
+    for (i, a) in s.actions.iter().enumerate() {
+        let parts: Vec<&str> = a.split_whitespace().collect();
+        let (name, amount) = if parts.len() >= 3 && parts[parts.len() - 2] == "x" {
+            let amt = parts
+                .last()
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            (parts[..parts.len() - 2].join(" "), amt)
+        } else {
+            (a.clone(), 0.0)
+        };
+        let mut resources = BTreeMap::new();
+        if amount > 0.0 {
+            resources.insert("unit".into(), amount);
+        }
+        out.push(Action {
+            id: format!("A{}", i + 1),
+            name,
+            preconditions: s.constraints.clone(),
+            effects: vec![format!("applied {a}")],
+            cost: amount,
+            resources,
+            duration: None,
+            risks: s.risks.clone(),
+            dependencies: s.dependencies.clone(),
+            reversibility: None,
+            evidence: s.evidence.clone(),
+        });
+    }
+    out
 }
 
 #[cfg(test)]

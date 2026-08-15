@@ -638,6 +638,18 @@ enum StrategyAction {
         /// Strategy JSON file
         path: PathBuf,
     },
+    /// Deterministically simulate a strategy's actions as state transitions
+    /// (directive §17/§30). Returns before/after world states and any violations.
+    Simulate {
+        /// Strategy JSON file to simulate.
+        strategy: PathBuf,
+        /// Optional initial world-state JSON (defaults to a fresh world).
+        #[arg(long)]
+        world: Option<PathBuf>,
+        /// Output format: json (default) or text
+        #[arg(long, value_enum, default_value_t = OutputFormat::Json)]
+        format: OutputFormat,
+    },
 }
 
 /// Subcommands of `lai tanto`.
@@ -9014,6 +9026,69 @@ fn cmd_strategy(action: StrategyAction) {
             let s = read_strategy(&path);
             print!("{}", s.explain());
         }
+        StrategyAction::Simulate {
+            strategy,
+            world,
+            format,
+        } => {
+            let s = read_strategy(&strategy);
+            let init = match &world {
+                Some(p) => read_world_state(p),
+                None => {
+                    // Seed the operating envelope from the strategy itself so its
+                    // hard constraints are satisfied preconditions and its resources
+                    // are available; a supplied --world overrides this.
+                    let mut w = lai_core::WorldState::new();
+                    for c in &s.constraints {
+                        w.constraints.push(c.clone());
+                    }
+                    for (k, v) in &s.resources {
+                        w.resources.insert(k.clone(), *v);
+                    }
+                    w
+                }
+            };
+            let actions = laverna::strategy::strategy_to_actions(&s);
+            let transitions = lai_core::simulate_sequence(&init, &actions);
+            let final_version = transitions
+                .last()
+                .map(|t| t.after.version)
+                .unwrap_or(init.version);
+            let applied = transitions
+                .iter()
+                .filter(|t| t.violations.is_empty())
+                .count();
+            let violations: Vec<&str> = transitions
+                .iter()
+                .flat_map(|t| t.violations.iter().map(|v| v.as_str()))
+                .collect();
+            if format == OutputFormat::Json {
+                let value = serde_json::json!({
+                    "initial_version": init.version,
+                    "final_version": final_version,
+                    "applied": applied,
+                    "violations": violations,
+                    "transitions": transitions,
+                });
+                println!("{}", serde_json::to_string(&value).unwrap());
+            } else {
+                println!("Simulation from world v{}:", init.version);
+                for (i, t) in transitions.iter().enumerate() {
+                    println!(
+                        "  step {}: {} -> v{} ({} effects, {} violations)",
+                        i + 1,
+                        t.action.name,
+                        t.after.version,
+                        t.effects.len(),
+                        t.violations.len()
+                    );
+                    for v in &t.violations {
+                        println!("    ! {v}");
+                    }
+                }
+                println!("Final world v{final_version}; {applied} action(s) applied.");
+            }
+        }
     }
 }
 
@@ -9047,6 +9122,26 @@ fn read_strategy(path: &std::path::PathBuf) -> lai_core::Strategy {
         Ok(s) => s,
         Err(e) => {
             eprintln!("error: invalid strategy JSON in '{}': {e}", path.display());
+            std::process::exit(2);
+        }
+    }
+}
+
+fn read_world_state(path: &std::path::PathBuf) -> lai_core::WorldState {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: cannot read '{}': {e}", path.display());
+            std::process::exit(2);
+        }
+    };
+    match serde_json::from_str::<lai_core::WorldState>(&content) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "error: invalid world-state JSON in '{}': {e}",
+                path.display()
+            );
             std::process::exit(2);
         }
     }

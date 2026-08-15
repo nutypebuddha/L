@@ -452,6 +452,110 @@ impl StrategyIR {
     }
 }
 
+/// Result of applying one [`Action`] to a [`WorldState`] (directive §17/§30). A
+/// transition records the before/after state, the effects produced, and any
+/// constraint/resource violations — so simulation is inspectable and reproducible
+/// rather than a black box.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Transition {
+    pub before: WorldState,
+    pub action: Action,
+    pub after: WorldState,
+    pub effects: Vec<String>,
+    pub violations: Vec<String>,
+    pub evidence: Vec<String>,
+}
+
+/// A state-transition engine (directive §30). Plugs into the planner so a strategy
+/// becomes a sequence/graph of transitions instead of prose.
+pub trait Simulator {
+    /// Apply `action` to `state`, returning the resulting transition.
+    fn step(&self, state: &WorldState, action: &Action) -> Transition;
+}
+
+/// Deterministic simulator: applies an action's effects as claims and refuses the
+/// action when its preconditions or resource budget are not met by the current
+/// state. No probabilistic behavior — build this first (§17), stochastic later.
+pub struct DeterministicSimulator;
+
+impl Simulator for DeterministicSimulator {
+    fn step(&self, state: &WorldState, action: &Action) -> Transition {
+        let mut violations = Vec::new();
+        // Preconditions must be supported by some claim/assumption/constraint text.
+        for pre in &action.preconditions {
+            let p = pre.to_lowercase();
+            let satisfied = state
+                .claims
+                .iter()
+                .any(|c| c.statement.to_lowercase().contains(&p))
+                || state
+                    .assumptions
+                    .iter()
+                    .any(|a| a.to_lowercase().contains(&p))
+                || state
+                    .constraints
+                    .iter()
+                    .any(|c| c.to_lowercase().contains(&p));
+            if !satisfied {
+                violations.push(format!("unmet precondition: {pre}"));
+            }
+        }
+        // Resource budget: state must cover the action's resource demand.
+        for (k, v) in &action.resources {
+            let have = state.resources.get(k).copied().unwrap_or(0.0);
+            if have + 1e-9 < *v {
+                violations.push(format!("insufficient {k}: have {have}, need {v}"));
+            }
+        }
+        let after = if violations.is_empty() {
+            let mut claims = Vec::new();
+            for (i, eff) in action.effects.iter().enumerate() {
+                claims.push(Claim {
+                    id: format!("{}_eff_{}", action.id, i),
+                    statement: eff.clone(),
+                    status: EpistemicStatus::Inferred,
+                    evidence_refs: action.evidence.clone(),
+                    dependencies: vec![action.id.clone()],
+                    source: Some("simulation".into()),
+                    timestamp: None,
+                    confidence: 0.9,
+                });
+            }
+            state.apply(&StateDelta {
+                added_claims: claims,
+                ..Default::default()
+            })
+        } else {
+            state.clone()
+        };
+        Transition {
+            before: state.clone(),
+            action: action.clone(),
+            after,
+            effects: if violations.is_empty() {
+                action.effects.clone()
+            } else {
+                Vec::new()
+            },
+            violations,
+            evidence: action.evidence.clone(),
+        }
+    }
+}
+
+/// Deterministically apply a sequence of actions, threading the world state forward.
+pub fn simulate_sequence(state: &WorldState, actions: &[Action]) -> Vec<Transition> {
+    let sim = DeterministicSimulator;
+    let mut cur = state.clone();
+    let mut out = Vec::new();
+    for a in actions {
+        let t = sim.step(&cur, a);
+        cur = t.after.clone();
+        out.push(t);
+    }
+    out
+}
+
 /// Final status of a strategy after Gate (matches the directive's vocabulary).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -568,5 +672,80 @@ mod tests {
             robustness: 0.5,
         };
         assert!(s.explain().contains("S01"));
+    }
+}
+
+#[cfg(test)]
+mod sim_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn action(name: &str, pre: Vec<String>, res: BTreeMap<String, f64>) -> Action {
+        Action {
+            id: name.into(),
+            name: name.into(),
+            preconditions: pre,
+            effects: vec![format!("did {name}")],
+            cost: 1.0,
+            resources: res,
+            duration: None,
+            risks: vec![],
+            dependencies: vec![],
+            reversibility: Some("reversible".into()),
+            evidence: vec!["test".into()],
+        }
+    }
+
+    #[test]
+    fn simulator_applies_effects_when_preconditions_met() {
+        let mut ws = WorldState::new();
+        ws.constraints.push("budget <= 100".into());
+        ws.resources.insert("unit".into(), 20.0);
+        let a = action("step", vec!["budget <= 100".into()], {
+            let mut m = BTreeMap::new();
+            m.insert("unit".into(), 5.0);
+            m
+        });
+        let t = { let sim = DeterministicSimulator; sim.step(&ws, &a) };
+        assert!(
+            t.violations.is_empty(),
+            "got violations: {:?}",
+            t.violations
+        );
+        assert_eq!(t.after.version, 2);
+        assert!(t.after.claims.iter().any(|c| c.statement == "did step"));
+    }
+
+    #[test]
+    fn simulator_refuses_unmet_precondition_and_resource_shortfall() {
+        let ws = WorldState::new();
+        let a = action("step", vec!["must hold".into()], {
+            let mut m = BTreeMap::new();
+            m.insert("unit".into(), 5.0);
+            m
+        });
+        let t = { let sim = DeterministicSimulator; sim.step(&ws, &a) };
+        assert!(!t.violations.is_empty());
+        assert!(t
+            .violations
+            .iter()
+            .any(|v| v.contains("unmet precondition")));
+        assert!(t.violations.iter().any(|v| v.contains("insufficient unit")));
+        // State is unchanged when the action is refused.
+        assert_eq!(t.after, ws);
+    }
+
+    #[test]
+    fn simulate_sequence_threads_state() {
+        let mut ws = WorldState::new();
+        ws.resources.insert("unit".into(), 20.0);
+        let a = action("only", vec![], {
+            let mut m = BTreeMap::new();
+            m.insert("unit".into(), 1.0);
+            m
+        });
+        let ts = simulate_sequence(&ws, &[a.clone(), a]);
+        assert_eq!(ts.len(), 2);
+        assert_eq!(ts[1].after.version, 3);
     }
 }
