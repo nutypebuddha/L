@@ -1,3 +1,10 @@
+> [!IMPORTANT]
+> **Historical archive.**
+> L is no longer an active project.
+> Source, releases, tests, and history are preserved for reference.
+
+---
+
 <div align="center">
 
 # Ł L.ai
