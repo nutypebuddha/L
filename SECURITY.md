@@ -10,9 +10,18 @@ Please report security issues **privately**, not via public GitHub issues.
 - Email: security@laverna (PGP encouraged; key published on request)
 - Or open a private security advisory on the repository.
 
-Include: affected component (`proof` / `gate` / `athena` / `bridge` /
+Include: affected component (`proof` / `gate` / `athena` /
 `assistant`), reproduction steps, and the expected vs. actual behavior. We aim to
 acknowledge within 72 hours and propose a fix window with you.
+
+## Removed component: legacy Bridge
+
+The legacy CID Bridge service (`bridge/`, Node/TypeScript) was removed from
+the current tree. Historical Bridge revisions should not be deployed: the
+removed implementation had unsafe process-invocation and
+authentication-boundary problems. Git history is retained for archaeology.
+No claim is made about whether any live deployment exists or existed, and no
+CVE is claimed.
 
 ## Trust boundaries
 

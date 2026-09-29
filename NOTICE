@@ -15,5 +15,4 @@ specific language governing permissions and limitations under the License.
 Components (all Apache-2.0):
 - L.ai · Proof (proof/, crate "laverna")
 - L.ai · Gate (gate/, crate "lai-gate")
-- L.ai · Bridge (bridge/, Node/TypeScript)
 - L.ai · Athena (athena/, crate "athena")

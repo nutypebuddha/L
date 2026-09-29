@@ -91,9 +91,9 @@ L is presented as a platform, not a pile of repos:
 
 ```
 L
-├── Core        L.ai · Proof / Gate / Bridge / Compute  (verification substrate)
+├── Core        L.ai · Proof / Gate / Compute  (verification substrate)
 ├── Athena      relational reasoning engine  [archived reference]
-├── CLI         lai — one binary, four functions
+├── CLI         lai — one binary, three functions
 ├── SDK         lai-core — shared domain types + error hierarchy
 ├── Plugins     MCP tools, LLM adapters, validators
 └── Examples    WASM playground, Android daemon, demos

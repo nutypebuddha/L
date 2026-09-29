@@ -1,5 +1,5 @@
 # L.ai — CI Quality Gate
-# Builds the whole workspace (proof, gate, athena) + wasm crates + bridge (Node).
+# Builds the whole workspace (proof, gate, athena) + wasm crates.
 
 name: CI
 
@@ -91,21 +91,6 @@ jobs:
           wasm-bindgen target/wasm32-unknown-unknown/release/laverna_wasm.wasm --out-dir proof/laverna-wasm/www --target web
           wasm-bindgen target/wasm32-unknown-unknown/release/lai_gate_wasm.wasm --out-dir gate/cid-wasm/www --target web
 
-  bridge:
-    name: Bridge (Node) lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Install deps
-        working-directory: bridge
-        run: npm ci || npm install
-      - name: Syntax check (bridge)
-        working-directory: bridge
-        run: node --check src/cid.js && node -e "require('./src/adapters/grok.js')"
-
   android-assets:
     name: Android bundled-asset syntax gate
     runs-on: ubuntu-latest
@@ -142,7 +127,7 @@ jobs:
 
   release-assets:
     name: Release assets (x86_64-musl + llama bundle)
-    needs: [check, wasm-build, bridge]
+    needs: [check, wasm-build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -206,7 +191,7 @@ jobs:
 
   release-assets-aarch64:
     name: Release assets (aarch64-musl)
-    needs: [check, wasm-build, bridge]
+    needs: [check, wasm-build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:

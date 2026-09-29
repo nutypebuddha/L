@@ -19,14 +19,13 @@
 
 ## What is this?
 
-**L.ai** is a single binary that does four things — all deterministic, all
+**L.ai** is a single binary that does three things — all deterministic, all
 fail-loud, no network required at runtime:
 
 | | Component | What it does |
 |---|-----------|--------------|
 | 🔍 | **Proof** | Deterministic reasoning engine: NAND-to-verify cascade, embedded corpus, machine-checkable proof objects, local LLM assistant (MCP) |
 | 🛡️ | **Gate** | Per-token validation for LLM output — math, logic, fact, fallacy, bias. ~630KB pure Rust + WASM |
-| 🔗 | **Bridge** | Universal MCP bridge — any chatbot (Claude, GPT, Grok, Mistral) hooks into Gate validation through one endpoint |
 | 🌐 | **Athena** | Relational reasoning engine — cross-domain formula graph, 30+ subcommands |
 
 ## Why does it exist?
@@ -50,7 +49,6 @@ That is a more robust long-term direction than `LLM → Truth`.
 - **Per-token validation (Gate)** — 7 gates: math, logic, fact, fallacy, bias, confidence, structure.
 - **Embedded corpus** — 228 entities and 553 formulas (proof corpus), content-addressed, compiled in. Athena adds 350 more formulas across its wheel.
 - **Machine-checkable proofs** — every answer carries a proof object or a refusal.
-- **Universal bridge** — one MCP endpoint validates any chatbot's output.
 - **Offline-first** — zero network at runtime. No model? It answers from the verified corpus and tells you it did.
 - **Multi-platform** — Linux, Android (stdio MCP daemon), and WASM.
 
@@ -61,7 +59,6 @@ lai/
 ├── proof/      L.ai · Proof  → unified `lai` binary
 ├── gate/       L.ai · Gate   → per-token validation (Rust + WASM)
 ├── athena/     L.ai · Athena → relational reasoning (30 subcommands)
-├── bridge/     L.ai · Bridge → MCP bridge (Node.js/TypeScript)
 └── android-app/              → Android APK (stdio MCP daemon)
 ```
 
@@ -136,9 +133,9 @@ instead of probabilistic trust.**
 
 ```
 L
-├── Core        L.ai · Proof / Gate / Bridge / Compute  (verification substrate)
+├── Core        L.ai · Proof / Gate / Compute  (verification substrate)
 ├── Athena      relational reasoning engine  [archived reference]
-├── CLI         lai — one binary, four functions
+├── CLI         lai — one binary, three functions
 ├── SDK         lai-core — shared domain types + error hierarchy
 ├── Plugins     MCP tools, LLM adapters, validators
 └── Examples    WASM playground, Android daemon, demos

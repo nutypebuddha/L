@@ -13,7 +13,6 @@ Offline, deterministic, fail-loud verification umbrella for AI. One binary
 | `athena/` | `athena` | (lib) | Relational reasoning (30+ subcommands). Linked into `lai athena`. |
 | `proof/laverna-wasm/`, `gate/cid-wasm/` | wasm crates | — | `wasm32-unknown-unknown` targets. |
 | `assistant/` | `assistant` | — | Optional dep of `laverna`. Voice-first assistant. |
-| `bridge/` | — | — | Node/TypeScript. **Not** a Cargo member; built with `npm`. |
 | `thirdparty/` | — | — | Vendored ephemeris crates (`xalen-*`), now edition 2021; on the chart-critical path |
 | `android-app/` | — | — | Android-only binary; built with `termux` feature |
 
@@ -129,7 +128,6 @@ Overlay dirs `~/.laverna/corpus/` or `./corpus/` merge user TOML over seed.
 ```bash
 cargo build --workspace
 cargo build --release -p laverna
-cd bridge && npm ci || npm install        # bridge (Node) — separate from Cargo
 
 # WASM crates build with cargo; generating JS bindings needs wasm-bindgen-cli:
 cargo build --locked --release --target wasm32-unknown-unknown -p laverna-wasm

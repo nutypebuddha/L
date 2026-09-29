@@ -20,6 +20,11 @@ All notable changes to L.ai are documented in this file. The format is based on
   `bridge/LICENSE` were Unlicense and are now Apache-2.0; `NOTICE` provenance
   notes updated.
 
+### Removed
+- Legacy CID Bridge service (`bridge/`, Node/TypeScript) removed from the
+  current tree. Historical Bridge code remains in Git history and should not
+  be deployed.
+
 ### Fixed
 - Removed `ChartSnapshot::default()`, which called `SystemTime::now()` in an
   output-affecting path (a determinism breach of the AGENTS.md rule). Callers must

@@ -1,7 +1,6 @@
 /target
 **/target
 node_modules
-bridge/node_modules
 **/*.so
 bin/models/*.gguf
 .DS_Store

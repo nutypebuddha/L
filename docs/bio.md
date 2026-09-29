@@ -19,7 +19,7 @@ deterministic AI verification you can re-check — on an Android phone. Verify, 
 
 Ashley (NutypeBuddha, legal name Ryan Jason Phernetton) is a self-taught Rust developer
 from northern Wisconsin building **L.ai**: an offline-first verification stack for AI —
-deterministic proof engine, per-token output gate, universal MCP bridge, and relational
+deterministic proof engine, per-token output gate, and relational
 reasoning — written and shipped entirely from an Android phone. Apache 2.0, CI-gated,
 public bug ledger. Motto and method: *verify, don't trust.*
 
@@ -31,7 +31,7 @@ Ashley, known online as NutypeBuddha (legal name Ryan Jason Phernetton), is a se
 Rust developer building **L.ai**, an offline-first verification stack for AI. The premise:
 language models guess, and infrastructure shouldn't. L.ai answers only what it can prove —
 a deterministic reasoning engine (Proof), a per-token validation layer for LLM output
-(Gate), a universal MCP bridge so any chatbot can hook into that validation (Bridge), and
+(Gate), and
 a cross-domain formula graph (Athena) — one binary, no network required at runtime, built
 to refuse loudly rather than fabricate.
 
@@ -63,7 +63,7 @@ GitHub: https://github.com/nutypebuddha · Flagship: https://github.com/nutypebu
 ## First-person short (~70 words — grant forms that ask "about you")
 
 I'm Ashley (NutypeBuddha). I build L.ai, an offline-first verification stack for AI: a
-deterministic proof engine, a per-token gate for LLM output, an MCP bridge, and a relational
+deterministic proof engine, a per-token gate for LLM output, and a relational
 reasoning layer — one binary that answers only what it can prove. I develop the whole thing
 on an Android phone, license it Apache 2.0, and keep the bug ledger public. Verify, don't
 trust — including me.

@@ -20,7 +20,7 @@ hallucination, no network required at runtime.
 
 *Laverna* is the internal code name for **L.ai · Proof** (see
 [`docs/BRAND.md`](docs/BRAND.md)). The sibling L.ai functions are **L.ai · Gate**
-(CID, per-token validation) and **L.ai · Bridge** (CID-Bridge, chatbot fan-out).
+(CID, per-token validation).
 
 L.ai · Proof never guesses and fails loud: every result either carries a
 derivation back to primitive NAND gates or is explicitly marked unproven. The
@@ -141,8 +141,7 @@ seed corpus; a same-id entry **overrides** the seed. `info` reports
 `laverna verify proof.json` re-derives and checks it. The same surface is exposed
 over MCP (protocol `2025-11-25`) with 10 tools, including `route`, `build`, and
 `laverna_companion` (the plain-language assistant). This is the **L.ai · Proof**
-MCP surface; **L.ai · Gate** (CID) exposes 13 tools and **L.ai · Bridge** fans
-both out to chatbots. See [`docs/mcp-registry.md`](docs/mcp-registry.md) to list
+MCP surface; **L.ai · Gate** (CID) exposes 13 tools. See [`docs/mcp-registry.md`](docs/mcp-registry.md) to list
 L.ai in an MCP registry.
 
 ## Determinism

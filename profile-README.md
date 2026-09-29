@@ -35,9 +35,9 @@ L is not a single repo — it's a growing platform. One mark, one contract:
 
 ```
 L
-├── Core        L.ai · Proof / Gate / Bridge / Compute  (the verification substrate)
+├── Core        L.ai · Proof / Gate / Compute  (the verification substrate)
 ├── Athena      relational reasoning engine  [archived reference]
-├── CLI         lai — one binary, four functions
+├── CLI         lai — one binary, three functions
 ├── SDK         lai-core — shared domain types + error hierarchy
 ├── Plugins     MCP tools, LLM adapters, validators
 └── Examples    WASM playground, Android daemon, demos
@@ -67,7 +67,7 @@ L
 | 1 | **[L](https://github.com/nutypebuddha/L)** | Flagship — the whole ecosystem in one repo. |
 | 2 | **Athena** | The relational reasoning engine that started it. *(archived)* |
 | 3 | **best Rust library** | Demonstrates engineering quality (e.g. `lai-core`). |
-| 4 | **CLI / tooling** | `lai` — one binary, four functions. |
+| 4 | **CLI / tooling** | `lai` — one binary, three functions. |
 | 5 | **Experimental AI** | Cutting-edge local-first intelligence work. |
 | 6 | **Showcase / demo** | A runnable demo or WASM playground. |
 
